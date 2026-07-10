@@ -23,6 +23,7 @@ Asset Formats
 | [Text](formats/text.md)                         | Extracted `.dat`, `.lst`, `.txt`, and raw text record payloads.                  |
 | [CCINF `.NOS` files](formats/nos-ccinf-archives.md) | `NSmnData.NOS` and `NSpnData.NOS` GBFC indexes and wrapper.                    |
 | [Textures](formats/textures.md)                 | Texture header and pixel formats.                                                |
+| [Sprites](formats/sprites.md)           | Icons, player and other map object sprites found in `NSmpData`, `NSppData`, and `NSipData`.              |
 | [Videos](formats/videos.md)                     | `.ntm` and `.nam` intro/act video files.                                         |
 | [Audio](formats/audio.md)                       | `snd.pck`, `sndinfo.lst`, and loose `BGM*` audio files in `wave`.                |
 | TBD                                             | `NStgData` and `NStgeData` geometry cache payload families.                      |
@@ -30,4 +31,4 @@ Asset Formats
 | TBD                                             | `NStcData`, `NStuData`, and `NStkData` cache/resource metadata payload families. |
 | TBD                                             | `NStsData`, `NSmcData`, `NSpcData`, and `NSpmData` payload families.             |
 | [Map height grids](formats/map-height-grids.md) | `NSgrdData` optimized map height grid payloads.                                  |
-| TBD                                             | `NSmpData`, `NSppData`, `NSipData`, and `NS4BbData` payload families.            |
+| TBD                                             | `NS4BbData` free-size sprite payloads.                                            |

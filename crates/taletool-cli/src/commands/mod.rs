@@ -8,5 +8,7 @@ pub(crate) mod ccinf;
 pub(crate) mod patch;
 /// Directory scan command handler.
 pub(crate) mod scan;
+/// Sprite payload command handlers.
+pub(crate) mod sprite;
 /// Text payload command handler.
 pub(crate) mod text;

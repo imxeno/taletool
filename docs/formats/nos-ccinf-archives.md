@@ -92,6 +92,11 @@ struct Cell {
 unaligned dword load from `cell + 2`. Cell lists are binary-searched by
 `selector`, so each list is expected to be sorted by ascending selector.
 
+The nonnegative base and cell resource keys select individual
+[`NSmpData` or `NSppData` sprite payloads](sprites.md). Which archive
+family supplies a key depends on the texture cache attached to the rendered
+map object; the CCINF file does not encode that distinction.
+
 
 CLI and JSON Representation
 ---------------------------

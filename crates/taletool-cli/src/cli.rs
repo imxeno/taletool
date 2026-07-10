@@ -42,6 +42,11 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: CcinfCommand,
     },
+    /// Inspect, decode, or encode extracted sprite payloads.
+    Sprite {
+        #[command(subcommand)]
+        command: SpriteCommand,
+    },
     /// Inspect or apply original NosTale patch packages.
     #[command(visible_alias = "pak")]
     Patch {
@@ -124,6 +129,34 @@ pub(crate) enum CcinfCommand {
     /// Encode a versioned JSON document into a canonical raw CCINF file.
     Pack {
         input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+}
+
+/// Operations for multi-frame sprite payloads.
+#[derive(Debug, Subcommand)]
+pub(crate) enum SpriteCommand {
+    /// Print frame dimensions, source coordinates, and data offsets.
+    Inspect {
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        checksum: bool,
+    },
+    /// Decode a sprite payload into PNG frames and `sprite.json`.
+    Unpack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        /// Write a single-frame sprite directly to the output PNG without metadata.
+        #[arg(long)]
+        png_only: bool,
+    },
+    /// Encode a manifest-backed sprite directory into a payload file.
+    Pack {
+        dir: PathBuf,
         #[arg(long)]
         out: PathBuf,
     },
@@ -296,5 +329,54 @@ mod tests {
         ])
         .unwrap_err();
         assert!(error.to_string().contains("invalid value 'ccinf'"));
+    }
+
+    #[test]
+    fn parses_dedicated_sprite_commands() {
+        let inspect = Cli::try_parse_from([
+            "taletool",
+            "sprite",
+            "inspect",
+            "2662.bin",
+            "--json",
+            "--checksum",
+        ])
+        .unwrap();
+        assert!(matches!(
+            inspect.command,
+            Command::Sprite {
+                command: SpriteCommand::Inspect {
+                    json: true,
+                    checksum: true,
+                    ..
+                }
+            }
+        ));
+
+        let unpack = Cli::try_parse_from([
+            "taletool",
+            "sprite",
+            "unpack",
+            "2662.bin",
+            "--out",
+            "2662.png",
+            "--png-only",
+        ])
+        .unwrap();
+        assert!(matches!(
+            unpack.command,
+            Command::Sprite {
+                command: SpriteCommand::Unpack { png_only: true, .. }
+            }
+        ));
+
+        let pack = Cli::try_parse_from(["taletool", "sprite", "pack", "2662", "--out", "2662.bin"])
+            .unwrap();
+        assert!(matches!(
+            pack.command,
+            Command::Sprite {
+                command: SpriteCommand::Pack { .. }
+            }
+        ));
     }
 }
