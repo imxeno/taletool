@@ -1,5 +1,4 @@
-CCINF `.NOS` Files
-==================
+# CCINF `.NOS` Files
 
 `NSmnData.NOS` and `NSpnData.NOS` are structured map-object GBFC index assets.
 They use the `.NOS` extension, but they are not multi-entry containers or the
@@ -9,9 +8,7 @@ The client loads both files with `TGBFCIndexList.Create` rather than
 `TEWMultiFileStreamMemory`/`TEWMultiFileStreamSimple`. The file starts with a
 single-payload wrapper followed by a compact variable-length table.
 
-
-Top-Level Layout
-----------------
+## Top-Level Layout
 
 All integer fields are little-endian. The two size fields cover the body from
 the entry count at `0x19` through the final cell. Known files store this body
@@ -19,7 +16,7 @@ raw, so both sizes equal `file_size - 0x19` and the compression flag is zero.
 
 | Offset | Type     | Field                                        |
 | ------ | -------- | -------------------------------------------- |
-| `0x00` | `u8[16]` | Canonical CCINF header bytes.                 |
+| `0x00` | `u8[16]` | Canonical CCINF header bytes.                |
 | `0x10` | `u32`    | Unpacked body size.                          |
 | `0x14` | `u32`    | Stored body size.                            |
 | `0x18` | `u8`     | Compression flag.                            |
@@ -28,9 +25,9 @@ raw, so both sizes equal `file_size - 0x19` and the compression flag is zero.
 
 The canonical 16-byte header is:
 
-~~~~ text
+```text
 43 43 49 4E 46 20 56 31 2E 32 30 1A 14 11 04 20
-~~~~
+```
 
 The header layout is implied based on the binary NOS archive format. The client
 loader seeks directly to `0x19`, skipping all 25 wrapper bytes without
@@ -40,9 +37,7 @@ stored-size, and compression fields.
 
 Entries are read sequentially.
 
-
-Entry Layout
-------------
+## Entry Layout
 
 Each entry begins with four dwords and then stores seven counted cell lists.
 
@@ -58,9 +53,7 @@ The client binary-searches entries by `entry id` and does not sort after
 loading, so files are expected to store entries in ascending unsigned `entry id`
 order.
 
-
-Cell List Layout
-----------------
+## Cell List Layout
 
 Each of the seven lists has this layout:
 
@@ -71,42 +64,40 @@ Each of the seven lists has this layout:
 
 The raw client type is equivalent to:
 
-~~~~ text
+```text
 struct RawCell {
     i32 value;
     u16 tile;
 }
-~~~~
+```
 
 The consumers treat the same six bytes as:
 
-~~~~ text
+```text
 struct Cell {
     u16 selector;
     i32 texture_resource_key; // unaligned, starts at byte 2
 }
-~~~~
+```
 
 `selector` is the low word of `value`; `texture_resource_key` is read with an
 unaligned dword load from `cell + 2`. Cell lists are binary-searched by
 `selector`, so each list is expected to be sorted by ascending selector.
 
 The nonnegative base and cell resource keys select individual
-[`NSmpData` or `NSppData` sprite payloads](sprites.md). Which archive
-family supplies a key depends on the texture cache attached to the rendered
-map object; the CCINF file does not encode that distinction.
+[`NSmpData` or `NSppData` sprite payloads](sprites.md). Which archive family
+supplies a key depends on the texture cache attached to the rendered map object;
+the CCINF file does not encode that distinction.
 
-
-CLI and JSON Representation
----------------------------
+## CLI and JSON Representation
 
 CCINF is exposed as a structured asset rather than through archive unpacking:
 
-~~~~ text
+```text
 taletool ccinf inspect NSmnData.NOS
 taletool ccinf unpack NSmnData.NOS --out NSmnData.json
 taletool ccinf pack NSmnData.json --out NSmnData.NOS
-~~~~
+```
 
 The JSON document is strict and versioned. Its top-level fields are `format`,
 `version`, and `entries`; each entry contains the four typed dwords and exactly

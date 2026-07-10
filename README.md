@@ -1,12 +1,9 @@
-taletool
-========
+# taletool
 
-`taletool` is a CLI and a library for inspecting, unpacking, and packing
-NosTale client data formats.
+`taletool` is a CLI and a library for inspecting, unpacking, and packing NosTale
+client data formats.
 
-
-Support
--------
+## Support
 
 | Name                      | Contains                                           | Container support | Asset support |
 | ------------------------- | -------------------------------------------------- | ----------------- | ------------- |
@@ -52,16 +49,12 @@ locale+chunk filename patterns are listed in the format docs.
 
 See [the docs](docs/README.md) for file format notes
 
-
-Commands
---------
+## Commands
 
 The API is still evolving so this section is a TODO once more files are
 supported.
 
-
-License
--------
+## License
 
 Taletool is licensed under the GNU Affero General Public License version 3 or
 later (`AGPL-3.0-or-later`). See [LICENSE](LICENSE).

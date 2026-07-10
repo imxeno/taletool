@@ -1,11 +1,8 @@
-Binary `.NOS` Archives
-======================
+# Binary `.NOS` Archives
 
 Binary `.NOS` archives are the standard NosTale table/chunk container format.
 
-
-Known Families
---------------
+## Known Families
 
 Several unrelated NosTale containers use the `.NOS` extension. These are the
 observed binary archive families.
@@ -37,9 +34,7 @@ observed binary archive families.
 `*` means the archive family may appear as an older single archive name such as
 `NStgData.NOS` or as a chunked name such as `NStgData00.NOS`.
 
-
-Layout
-------
+## Layout
 
 All integer fields are little-endian.
 
@@ -65,22 +60,20 @@ Each `data_offset` points to a stored payload record:
 | `0x0C`                     | `u8 compression_flag` (`0` raw, `1` zlib) |
 | `0x0D`                     | Stored payload bytes                      |
 
-In known archives the `record_tag` is often a date-shaped hexadecimal value
-such as `0x20030415` or `0x20051104` but it should be treated as opaque
-per-record metadata, likely a tooling/exporter or data-format version tag
-rather than a record timestamp. Some archive families mix multiple `record_tag`
-values in the same container.
+In known archives the `record_tag` is often a date-shaped hexadecimal value such
+as `0x20030415` or `0x20051104` but it should be treated as opaque per-record
+metadata, likely a tooling/exporter or data-format version tag rather than a
+record timestamp. Some archive families mix multiple `record_tag` values in the
+same container.
 
 NosTale's generic multi-file stream helpers read this 13-byte header before
-seeking to payload bytes, but no client code is currently known to branch
-on `record_tag` itself. Format checks seen so far are payload-internal:
-for example, `NSgrdData` payloads contain the tag value inside and the game
-logic branches on it. Read [Map Height Grids docs](./map-height-grids.md)
-to learn more.
+seeking to payload bytes, but no client code is currently known to branch on
+`record_tag` itself. Format checks seen so far are payload-internal: for
+example, `NSgrdData` payloads contain the tag value inside and the game logic
+branches on it. Read [Map Height Grids docs](./map-height-grids.md) to learn
+more.
 
-
-Compression
------------
+## Compression
 
 Raw entries are stored unchanged with `stored_size` = `unpacked_size`.
 Compressed entries are zlib streams with `compression_flag = 1`. The archive
@@ -88,9 +81,7 @@ does not encode the compression level; it differs by archive family. Known
 compressed families use level 1 or level 9, as listed in the family table. The
 original Delphi 7 tooling used zlib 1.1.2.
 
-
-Split Archives
---------------
+## Split Archives
 
 Some archive families are split into several files. Low-byte split families
 route entries by the low byte of the table `file_id`; single-file families keep

@@ -1,5 +1,4 @@
-Textures
-========
+# Textures
 
 NosTale textures are proprietary format payloads stored inside texture archives.
 Each payload starts with a small header that describes the dimensions, pixel
@@ -13,9 +12,7 @@ block inside the payload itself.
 | `NStpeData*.NOS`                            | Textures for effects, keyed in the `0x4F...` range.                                                                                                          |
 | `NStpuData*.NOS`, `NStpuData_<locale>*.NOS` | UI/widget textures. These textures are keyed in the `0x5F...` range and are used by panels, forms, buttons, gauges, list views, and other interface widgets. |
 
-
-Layout
-------
+## Layout
 
 The texture header is 8 bytes:
 
@@ -28,20 +25,18 @@ The texture header is 8 bytes:
 | `0x06` | Unknown byte 06 | `u8`  | Unknown                                                             |
 | `0x07` | Mip level count | `u8`  | Number of mip levels stored in the payload.                         |
 
-Pixel data follows immediately. The base level is always present; additional
-mip levels follow when mip level count is greater than one.
+Pixel data follows immediately. The base level is always present; additional mip
+levels follow when mip level count is greater than one.
 
 The filter flag controls how the texture is sampled when it is drawn:
 
- -  `0` keeps pixels sharp when scaled
- -  `1` smooths the texture when scaled.
+- `0` keeps pixels sharp when scaled
+- `1` smooths the texture when scaled.
 
 The client treats any non-zero value like the smoothed mode, however no offical
 files ever had a value different than `0` or `1`.
 
-
-Pixel Formats
--------------
+## Pixel Formats
 
 | Format kind | Format     |
 | ----------- | ---------- |

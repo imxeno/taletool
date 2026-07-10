@@ -1,11 +1,8 @@
-Text `.NOS` Archives
-====================
+# Text `.NOS` Archives
 
 Text `.NOS` archives are used to store game data and localization strings.
 
-
-Known Families
---------------
+## Known Families
 
 Several unrelated NosTale containers use the `.NOS` extension. These are the
 observed text archive families. Text archives are not chunked.
@@ -18,9 +15,7 @@ observed text archive families. Text archives are not chunked.
 | `NScliData_<locale>.NOS`  | file name order | stored per record | `.dat` records use 1            | Localized const strings                 |
 | `NSetcData.NOS`           | file name order | stored per record | `.dat` records use 1            | Typewriter word list and `TabooStr.lst` |
 
-
-Layout
-------
+## Layout
 
 All integer fields are little-endian.
 
@@ -37,9 +32,7 @@ All integer fields are little-endian.
 Record IDs are part of each stored record. They should not be treated as a
 guaranteed unique archive key.
 
-
-Timestamp Trailer
------------------
+## Timestamp Trailer
 
 Observed text archives end with a 12-byte data-version trailer after the final
 record payload. The client uses the `NSgtdData` and `NSlangData` values for the
@@ -53,17 +46,17 @@ in the chat.
 
 The marker bytes at the end of the file are:
 
-~~~~ text
+```text
 EE 3E 32 01
-~~~~
+```
 
 Delphi `TDateTime` stores a floating-point day count from `1899-12-30`; the
 fractional part is the time of day. It does not encode a timezone. For Unix-time
 style conversion, treat it as:
 
-~~~~ text
+```text
 seconds = round((tdatetime - 25569.0) * 86400.0)
-~~~~
+```
 
 The client still handles a missing marker: when the trailer is absent, it uses
 `2004-12-11 12:00:00` as the fallback data-version date.

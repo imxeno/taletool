@@ -1,5 +1,4 @@
-Map Height Grids
-================
+# Map Height Grids
 
 `NSgrdData*.NOS` archives store optional optimized map height grids. Each
 payload is keyed by a root bulk/map id and is used to resolve the ground height
@@ -9,9 +8,7 @@ for an X/Z world position.
 | ---------------- | ------------------------------------------------- |
 | `NSgrdData*.NOS` | Height grid payloads keyed by root bulk / map id. |
 
-
-Layout
-------
+## Layout
 
 The binary archive payload starts with an extra grid id prefix:
 
@@ -28,12 +25,10 @@ The grid body has two compatible variants.
 | `0x0BF82312`    | Explicit version.                                                                 |
 | Any other value | No explicit version. This value is Map id; version is assumed to be `0x0BF82311`. |
 
-The only currently observed `NSgrdData06.NOS` entry uses the
-no-explicit-version form.
+The only currently observed `NSgrdData06.NOS` entry uses the no-explicit-version
+form.
 
-
-Grid Body Header
-----------------
+## Grid Body Header
 
 Offsets below are for the no-explicit-version body. Add `4` to each offset for
 the explicit-version body.
@@ -53,9 +48,7 @@ the explicit-version body.
 
 Vertices follow immediately after the header. Each vertex is `vec3<f32>`.
 
-
-Triangle Array
---------------
+## Triangle Array
 
 Triangle records follow the vertex array.
 
@@ -64,15 +57,13 @@ Triangle records follow the vertex array.
 | `0x0BF82311` or assumed | `u16 vertex_index[3]` | `i32 vertex_index[3]` |
 | `0x0BF82312`            | `i32 vertex_index[3]` | `i32 vertex_index[3]` |
 
-
-Cell Rows
----------
+## Cell Rows
 
 Cell rows follow the triangle array. Rows are stored in X/Z row-major order:
 
-~~~~ text
+```text
 cell_index = grid_width * z + x
-~~~~
+```
 
 Each row contains a list of triangle-array indices for that cell.
 
@@ -84,19 +75,17 @@ Each row contains a list of triangle-array indices for that cell.
 For version `0x0BF82311`, including the assumed form, cell indices are `u16`.
 For version `0x0BF82312`, cell indices are `i32`.
 
+## Runtime Use
 
-Runtime Use
------------
-
-When map bulk resources are refreshed, the client tries to load a grid whose
-id matches the root bulk sort key. If the grid exists, ground-height lookups use
+When map bulk resources are refreshed, the client tries to load a grid whose id
+matches the root bulk sort key. If the grid exists, ground-height lookups use
 the grid callbacks. If it does not exist, the client uses the default bulk
 geometry callbacks.
 
 The HKH lookup:
 
- -  subtracts the grid origin from the queried world position
- -  converts X/Z to a grid cell
- -  reads that cell's triangle-index list
- -  casts a ray downward from `Y = 1000`
- -  writes the hit height back to `position.Y`
+- subtracts the grid origin from the queried world position
+- converts X/Z to a grid cell
+- reads that cell's triangle-index list
+- casts a ray downward from `Y = 1000`
+- writes the hit height back to `position.Y`
