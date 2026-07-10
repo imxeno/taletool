@@ -16,7 +16,7 @@ raw, so both sizes equal `file_size - 0x19` and the compression flag is zero.
 
 | Offset | Type     | Field                                        |
 | ------ | -------- | -------------------------------------------- |
-| `0x00` | `u8[16]` | CCINF header bytes.                |
+| `0x00` | `u8[16]` | CCINF header bytes.                          |
 | `0x10` | `u32`    | Unpacked body size.                          |
 | `0x14` | `u32`    | Stored body size.                            |
 | `0x18` | `u8`     | Compression flag.                            |
