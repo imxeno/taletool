@@ -50,7 +50,7 @@ pub fn apply_binary_delta(base_bytes: &[u8], delta_bytes: &[u8]) -> Result<Vec<u
 fn rebuild_delta_chunk(source: &[u8], reader: &mut DeltaReader<'_>) -> Result<Vec<u8>> {
     let literal_len = reader.read_u32("delta literal section length")? as usize;
     let table_len = reader.read_u32("delta table section length")? as usize;
-    if table_len % DELTA_RECORD_LEN != 0 {
+    if !table_len.is_multiple_of(DELTA_RECORD_LEN) {
         bail!("binary delta table length {table_len} is not divisible by {DELTA_RECORD_LEN}");
     }
 

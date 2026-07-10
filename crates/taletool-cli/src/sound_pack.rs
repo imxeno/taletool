@@ -73,10 +73,10 @@ pub(crate) fn pack_sound_pack_dir(dir: &Path, out: &Path) -> anyhow::Result<DelD
         entries,
         &DelDxPackWriteOptions::new(header),
     )?;
-    if let Some(parent) = out.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)?;
-        }
+    if let Some(parent) = out.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)?;
     }
     archive.write_to(out)?;
     Ok(archive)

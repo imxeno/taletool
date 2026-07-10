@@ -14,7 +14,7 @@ resolver = "2"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/imxeno/taletool"
-rust-version = "1.85"
+rust-version = "1.97.0"
 
 [workspace.dependencies]
 anyhow = "1.0"

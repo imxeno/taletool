@@ -68,21 +68,21 @@ pub(crate) fn parse_binary_payload_filename(path: &Path) -> Option<BinaryPayload
         for token in rest.split("__") {
             let lower_token = token.to_ascii_lowercase();
             if duplicate_ordinal.is_none() && token.chars().all(|ch| ch.is_ascii_digit()) {
-                if let Ok(value) = token.parse::<usize>() {
-                    if value > 0 {
-                        duplicate_ordinal = Some(value);
-                    }
+                if let Ok(value) = token.parse::<usize>()
+                    && value > 0
+                {
+                    duplicate_ordinal = Some(value);
                 }
             } else if compression.is_none() && lower_token == "raw" {
                 compression = Some(BinaryCompression::Raw);
             } else if compression.is_none() && lower_token == "zlib" {
                 compression = Some(BinaryCompression::Zlib);
-            } else if explicit_index.is_none() {
-                if let Some(index) = token.strip_prefix("index") {
-                    if !index.is_empty() && index.chars().all(|ch| ch.is_ascii_digit()) {
-                        explicit_index = index.parse().ok();
-                    }
-                }
+            } else if explicit_index.is_none()
+                && let Some(index) = token.strip_prefix("index")
+                && !index.is_empty()
+                && index.chars().all(|ch| ch.is_ascii_digit())
+            {
+                explicit_index = index.parse().ok();
             }
         }
     }
