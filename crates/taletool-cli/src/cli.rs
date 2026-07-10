@@ -134,12 +134,14 @@ pub(crate) enum CcinfCommand {
     },
 }
 
-/// Operations for multi-frame sprite payloads.
+/// Operations for map-object and free-size sprite payloads.
 #[derive(Debug, Subcommand)]
 pub(crate) enum SpriteCommand {
-    /// Print frame dimensions, source coordinates, and data offsets.
+    /// Print sprite dimensions and format-specific metadata.
     Inspect {
         input: PathBuf,
+        #[arg(long, value_enum, default_value_t = SpriteKindArg::Auto)]
+        kind: SpriteKindArg,
         #[arg(long)]
         json: bool,
         #[arg(long)]
@@ -150,15 +152,19 @@ pub(crate) enum SpriteCommand {
         input: PathBuf,
         #[arg(long)]
         out: PathBuf,
+        #[arg(long, value_enum, default_value_t = SpriteKindArg::Auto)]
+        kind: SpriteKindArg,
         /// Write a single-frame sprite directly to the output PNG without metadata.
         #[arg(long)]
         png_only: bool,
     },
-    /// Encode a manifest-backed sprite directory into a payload file.
+    /// Encode a map-object sprite directory or free-size sprite PNG.
     Pack {
-        dir: PathBuf,
+        input: PathBuf,
         #[arg(long)]
         out: PathBuf,
+        #[arg(long, value_enum, default_value_t = SpriteKindArg::Auto)]
+        kind: SpriteKindArg,
     },
 }
 
@@ -223,6 +229,17 @@ pub(crate) enum ArchiveType {
     Text,
     /// Treat inputs as DelDX sound packs such as snd.pck.
     Sound,
+}
+
+/// Sprite payload format selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum SpriteKindArg {
+    /// Require exactly one supported sprite parser to match.
+    Auto,
+    /// Use the counted map-object descriptor and `A4R4G4B4` frame format.
+    MapObject,
+    /// Use the single-image, block-interlaced `A8R8G8B8` format.
+    FreeSize,
 }
 
 /// Compression override for binary archive packing.
@@ -338,6 +355,8 @@ mod tests {
             "sprite",
             "inspect",
             "2662.bin",
+            "--kind",
+            "map-object",
             "--json",
             "--checksum",
         ])
@@ -346,6 +365,7 @@ mod tests {
             inspect.command,
             Command::Sprite {
                 command: SpriteCommand::Inspect {
+                    kind: SpriteKindArg::MapObject,
                     json: true,
                     checksum: true,
                     ..
@@ -360,6 +380,8 @@ mod tests {
             "2662.bin",
             "--out",
             "2662.png",
+            "--kind",
+            "map-object",
             "--png-only",
         ])
         .unwrap();
@@ -370,12 +392,35 @@ mod tests {
             }
         ));
 
-        let pack = Cli::try_parse_from(["taletool", "sprite", "pack", "2662", "--out", "2662.bin"])
-            .unwrap();
+        let pack = Cli::try_parse_from([
+            "taletool",
+            "sprite",
+            "pack",
+            "background.png",
+            "--out",
+            "background.bin",
+            "--kind",
+            "free-size",
+        ])
+        .unwrap();
         assert!(matches!(
             pack.command,
             Command::Sprite {
-                command: SpriteCommand::Pack { .. }
+                command: SpriteCommand::Pack {
+                    kind: SpriteKindArg::FreeSize,
+                    ..
+                }
+            }
+        ));
+
+        let auto = Cli::try_parse_from(["taletool", "sprite", "inspect", "sprite.bin"]).unwrap();
+        assert!(matches!(
+            auto.command,
+            Command::Sprite {
+                command: SpriteCommand::Inspect {
+                    kind: SpriteKindArg::Auto,
+                    ..
+                }
             }
         ));
     }

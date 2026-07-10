@@ -1,6 +1,6 @@
 //! NosTale raster asset decoding.
 //!
-//! The crate supports header-based texture payloads and [`sprite`] payloads 
+//! The crate supports header-based texture payloads and [`sprite`] payloads
 //! while sharing their low-level pixel codecs internally.
 
 use image::{Rgba, RgbaImage};
@@ -156,10 +156,10 @@ fn decode_texture_level(
             ])),
             TextureFormat::A8R8G8B8 => {
                 let offset = index * 4;
-                Rgba([
-                    pixels[offset + 2],
-                    pixels[offset + 1],
+                decode_a8r8g8b8([
                     pixels[offset],
+                    pixels[offset + 1],
+                    pixels[offset + 2],
                     pixels[offset + 3],
                 ])
             }
@@ -192,6 +192,16 @@ pub(crate) fn decode_a4r4g4b4(value: u16) -> Rgba<u8> {
 pub(crate) fn encode_a4r4g4b4(pixel: Rgba<u8>) -> u16 {
     let [r, g, b, a] = pixel.0;
     (quantize_4(a) << 12) | (quantize_4(r) << 8) | (quantize_4(g) << 4) | quantize_4(b)
+}
+
+pub(crate) fn decode_a8r8g8b8(encoded: [u8; 4]) -> Rgba<u8> {
+    let [blue, green, red, alpha] = encoded;
+    Rgba([red, green, blue, alpha])
+}
+
+pub(crate) fn encode_a8r8g8b8(pixel: Rgba<u8>) -> [u8; 4] {
+    let [red, green, blue, alpha] = pixel.0;
+    [blue, green, red, alpha]
 }
 
 fn decode_a1r5g5b5(value: u16) -> Rgba<u8> {

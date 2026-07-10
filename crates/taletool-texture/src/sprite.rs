@@ -10,6 +10,8 @@ use thiserror::Error;
 
 use crate::{decode_a4r4g4b4, encode_a4r4g4b4};
 
+pub mod free_size;
+
 pub const SPRITE_FRAME_DESCRIPTOR_LEN: usize = 12;
 pub const SPRITE_MAX_DIMENSION: u32 = 512;
 
@@ -17,6 +19,8 @@ pub const SPRITE_MAX_DIMENSION: u32 = 512;
 pub enum SpriteError {
     #[error("sprite payload is too short: {len} bytes")]
     TooShort { len: usize },
+    #[error("zero-frame sprite sentinel has {trailing} trailing bytes")]
+    TrailingZeroFrameData { trailing: usize },
     #[error("sprite descriptor table is truncated: need {needed} bytes, got {actual}")]
     TruncatedDescriptorTable { needed: usize, actual: usize },
     #[error("sprite frame {frame} dimensions must be non-zero, got {width}x{height}")]
@@ -118,6 +122,11 @@ pub fn decode_sprite(data: &[u8]) -> SpriteResult<DecodedSprite> {
         return Err(SpriteError::TooShort { len: data.len() });
     };
     let frame_count = usize::from(frame_count);
+    if frame_count == 0 && data.len() != 1 {
+        return Err(SpriteError::TrailingZeroFrameData {
+            trailing: data.len() - 1,
+        });
+    }
     let table_end = 1 + frame_count * SPRITE_FRAME_DESCRIPTOR_LEN;
     if data.len() < table_end {
         return Err(SpriteError::TruncatedDescriptorTable {
@@ -300,6 +309,10 @@ mod tests {
         let decoded = decode_sprite(&[0]).unwrap();
         assert!(decoded.frames.is_empty());
         assert_eq!(write_sprite_bytes(&[]).unwrap(), [0]);
+        assert_eq!(
+            decode_sprite(&[0, 1]),
+            Err(SpriteError::TrailingZeroFrameData { trailing: 1 })
+        );
     }
 
     #[test]

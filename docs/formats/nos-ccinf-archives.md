@@ -32,12 +32,11 @@ The canonical 16-byte header is:
 43 43 49 4E 46 20 56 31 2E 32 30 1A 14 11 04 20
 ~~~~
 
-The header layout is implied based on the binary NOS archive format. ReTale's
-[`TGBFCIndexList.Create`](https://github.com/imxeno/ReTale/blob/240eb8715525653e671b1cd2c3a8b2a98a8d9edc/src/Unit280.pas#L495-L512)
-seeks directly to `0x19`, skipping all 25 wrapper bytes without interpreting
-them. Consequently, compressed CCINF bodies are incompatible with this client
-even though the wrapper retains the standard unpacked-size, stored-size, and
-compression fields.
+The header layout is implied based on the binary NOS archive format. The client
+loader seeks directly to `0x19`, skipping all 25 wrapper bytes without
+interpreting them. Consequently, compressed CCINF bodies are incompatible with
+the client even though the wrapper retains the standard unpacked-size,
+stored-size, and compression fields.
 
 Entries are read sequentially.
 

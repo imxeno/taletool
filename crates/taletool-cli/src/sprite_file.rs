@@ -7,6 +7,7 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, bail};
 use image::ImageFormat;
 use serde::{Deserialize, Serialize};
+use taletool_texture::sprite::free_size::{FreeSizeSprite, write_free_size_sprite_bytes};
 use taletool_texture::sprite::{DecodedSprite, SpriteFrame, write_sprite_bytes};
 
 pub(crate) const SPRITE_MANIFEST_FILE: &str = "sprite.json";
@@ -71,20 +72,25 @@ pub(crate) fn unpack_sprite_png(sprite: &DecodedSprite, out: &Path) -> anyhow::R
             sprite.frames.len()
         );
     }
-    if out
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_none_or(|extension| !extension.eq_ignore_ascii_case("png"))
-    {
-        bail!(
-            "PNG-only sprite output must use a .png extension: {}",
-            out.display()
-        );
-    }
+    ensure_png_path(out, "PNG-only sprite output")?;
 
     create_parent_dir(out)?;
     sprite.frames[0]
         .frame
+        .image
+        .save_with_format(out, ImageFormat::Png)
+        .with_context(|| format!("writing {}", out.display()))?;
+    Ok(())
+}
+
+/// Write a decoded free-size sprite directly to one PNG without a manifest.
+pub(crate) fn unpack_free_size_sprite_png(
+    sprite: &FreeSizeSprite,
+    out: &Path,
+) -> anyhow::Result<()> {
+    ensure_png_path(out, "free-size sprite output")?;
+    create_parent_dir(out)?;
+    sprite
         .image
         .save_with_format(out, ImageFormat::Png)
         .with_context(|| format!("writing {}", out.display()))?;
@@ -118,6 +124,20 @@ pub(crate) fn pack_sprite_dir(dir: &Path, out: &Path) -> anyhow::Result<usize> {
     create_parent_dir(out)?;
     fs::write(out, bytes).with_context(|| format!("writing {}", out.display()))?;
     Ok(frames.len())
+}
+
+/// Build and write a canonical free-size sprite payload from one PNG.
+pub(crate) fn pack_free_size_sprite_png(input: &Path, out: &Path) -> anyhow::Result<(u32, u32)> {
+    ensure_png_path(input, "free-size sprite input")?;
+    let png = fs::read(input).with_context(|| format!("reading {}", input.display()))?;
+    let image = image::load_from_memory_with_format(&png, ImageFormat::Png)
+        .with_context(|| format!("decoding {} as PNG", input.display()))?
+        .to_rgba8();
+    let dimensions = image.dimensions();
+    let bytes = write_free_size_sprite_bytes(&image)?;
+    create_parent_dir(out)?;
+    fs::write(out, bytes).with_context(|| format!("writing {}", out.display()))?;
+    Ok(dimensions)
 }
 
 fn validate_document_header(document: &SpriteDocument) -> anyhow::Result<()> {
@@ -177,12 +197,26 @@ fn create_parent_dir(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn ensure_png_path(path: &Path, label: &str) -> anyhow::Result<()> {
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_none_or(|extension| !extension.eq_ignore_ascii_case("png"))
+    {
+        bail!("{label} must use a .png extension: {}", path.display());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use image::{Rgba, RgbaImage};
     use serde_json::json;
+    use taletool_texture::sprite::free_size::{
+        decode_free_size_sprite, write_free_size_sprite_bytes,
+    };
     use taletool_texture::sprite::{SpriteFrame, decode_sprite, write_sprite_bytes};
 
     use super::*;
@@ -296,6 +330,50 @@ mod tests {
         )
         .unwrap();
         assert!(unpack_sprite_png(&single, Path::new("sprite.bin")).is_err());
+    }
+
+    #[test]
+    fn free_size_sprite_png_round_trips_without_manifest() {
+        let root = temp_dir("free-size-sprite-round-trip");
+        let input = root.join("nested").join("background.png");
+        let payload = root.join("background.bin");
+        let output = root.join("rebuilt.png");
+        fs::create_dir_all(input.parent().unwrap()).unwrap();
+
+        let mut image = RgbaImage::new(257, 2);
+        image.put_pixel(0, 0, Rgba([10, 20, 30, 40]));
+        image.put_pixel(256, 1, Rgba([50, 60, 70, 80]));
+        image.save_with_format(&input, ImageFormat::Png).unwrap();
+
+        assert_eq!(
+            pack_free_size_sprite_png(&input, &payload).unwrap(),
+            (257, 2)
+        );
+        let sprite = decode_free_size_sprite(&fs::read(&payload).unwrap()).unwrap();
+        assert_eq!(sprite.image, image);
+        unpack_free_size_sprite_png(&sprite, &output).unwrap();
+        assert_eq!(image::open(&output).unwrap().to_rgba8(), image);
+        assert!(!root.join(SPRITE_MANIFEST_FILE).exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn free_size_sprite_png_helpers_require_real_png_files() {
+        let root = temp_dir("free-size-sprite-invalid-png");
+        fs::create_dir_all(&root).unwrap();
+        let payload = root.join("output.bin");
+
+        fs::write(root.join("wrong.bin"), b"not a PNG").unwrap();
+        assert!(pack_free_size_sprite_png(&root.join("wrong.bin"), &payload).is_err());
+
+        fs::write(root.join("fake.png"), b"not a PNG").unwrap();
+        assert!(pack_free_size_sprite_png(&root.join("fake.png"), &payload).is_err());
+
+        let sprite =
+            decode_free_size_sprite(&write_free_size_sprite_bytes(&RgbaImage::new(1, 1)).unwrap())
+                .unwrap();
+        assert!(unpack_free_size_sprite_png(&sprite, &root.join("wrong.bin")).is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

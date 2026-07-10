@@ -10,7 +10,7 @@ Support
 
 | Name                      | Contains                                           | Container support | Asset support |
 | ------------------------- | -------------------------------------------------- | ----------------- | ------------- |
-| `NS4BbData*.NOS`          | Free-size sprite resources                         | ✅                | ❌            |
+| `NS4BbData*.NOS`          | Free-size screen-image sprites                     | ✅                | ✅            |
 | `NScliData.NOS`           | Client const strings                               | ✅                | ⚠️            |
 | `NScliData_<locale>.NOS`  | Localized client const strings                     | ✅                | ⚠️            |
 | `NSedData.NOS`            | Effect color animation keyframes                   | ✅                | ❌            |
