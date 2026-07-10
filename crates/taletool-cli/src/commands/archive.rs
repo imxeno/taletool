@@ -23,6 +23,7 @@ use crate::binary_preset::{
     binary_nos_archive_default_compression, format_chunk_pattern, output_pattern, parse_header_hex,
     resolve_binary_preset, resolve_zlib_profile,
 };
+use crate::ccinf_file::has_ccinf_header;
 use crate::cli::{ArchiveCommand, ArchiveType, ChunkingArg, CompressionArg};
 use crate::paths::{escape_archive_name, immediate_files, resolve_inputs, unescape_archive_name};
 use crate::sound_pack::{
@@ -41,6 +42,7 @@ pub(crate) fn run_archive(command: ArchiveCommand) -> anyhow::Result<()> {
             checksum,
         } => {
             let paths = resolve_inputs(&input)?;
+            reject_ccinf_inputs(&paths, "inspect")?;
             let detected = detect_archive_paths(&paths, archive_type)?;
             match detected {
                 DetectedArchive::Binary(archives) => {
@@ -56,6 +58,7 @@ pub(crate) fn run_archive(command: ArchiveCommand) -> anyhow::Result<()> {
             archive_type,
         } => {
             let paths = resolve_inputs(&input)?;
+            reject_ccinf_inputs(&paths, "unpack")?;
             let detected = detect_archive_paths(&paths, archive_type)?;
             match detected {
                 DetectedArchive::Binary(archives) => unpack_binary_archives(&archives, &out),
@@ -76,6 +79,7 @@ pub(crate) fn run_archive(command: ArchiveCommand) -> anyhow::Result<()> {
             chunk_count,
             chunk_format,
         } => {
+            reject_ccinf_pack(&dir, &out)?;
             let pack_type = infer_pack_type(&dir, &out, archive_type, &preset)?;
             match pack_type {
                 ArchiveType::Text => pack_text_archive_dir(&dir, Path::new(&out)),
@@ -96,6 +100,35 @@ pub(crate) fn run_archive(command: ArchiveCommand) -> anyhow::Result<()> {
             }
         }
     }
+}
+
+/// Redirect structured CCINF files away from archive container commands.
+fn reject_ccinf_inputs(paths: &[PathBuf], operation: &str) -> anyhow::Result<()> {
+    if let Some(path) = paths.iter().find(|path| has_ccinf_header(path)) {
+        let suggestion = match operation {
+            "inspect" => format!("taletool ccinf inspect \"{}\"", path.display()),
+            "unpack" => format!(
+                "taletool ccinf unpack \"{}\" --out <output.json>",
+                path.display()
+            ),
+            _ => unreachable!("archive CCINF redirect operation is known"),
+        };
+        anyhow::bail!(
+            "{} is a structured CCINF asset, not an archive container; use `{suggestion}`",
+            path.display(),
+        );
+    }
+    Ok(())
+}
+
+/// Redirect attempts to build a known CCINF target with `archive pack`.
+fn reject_ccinf_pack(dir: &Path, out: &str) -> anyhow::Result<()> {
+    if output_is_ccinf(out) || dir.join("ccinf.json").is_file() {
+        anyhow::bail!(
+            "CCINF .NOS files are structured assets, not archive containers; use `taletool ccinf pack <input.json> --out {out}`"
+        );
+    }
+    Ok(())
 }
 
 /// Print summary metadata for binary archive chunks.
@@ -565,6 +598,17 @@ fn output_is_sound(out: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Return whether an output path names a known CCINF file.
+fn output_is_ccinf(out: &str) -> bool {
+    Path::new(out)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(|name| {
+            name.eq_ignore_ascii_case("NSmnData.NOS") || name.eq_ignore_ascii_case("NSpnData.NOS")
+        })
+        .unwrap_or(false)
+}
+
 /// Return whether an output path names a known text archive family.
 fn output_is_text(out: &str) -> bool {
     Path::new(out)
@@ -575,4 +619,52 @@ fn output_is_text(out: &str) -> bool {
             lower.starts_with("nsgtddata") || lower.starts_with("nslangdata")
         })
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use taletool_archive::write_ccinf_nos_archive_bytes;
+
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("taletool-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn redirects_known_ccinf_pack_targets() {
+        let error = reject_ccinf_pack(Path::new("unused"), "NSpnData.NOS").unwrap_err();
+        assert!(error.to_string().contains("taletool ccinf pack"));
+
+        let root = temp_dir("ccinf-redirect");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("ccinf.json"), b"{}").unwrap();
+        let error = reject_ccinf_pack(&root, "renamed.NOS").unwrap_err();
+        assert!(error.to_string().contains("taletool ccinf pack"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn redirects_ccinf_inspect_and_unpack_inputs() {
+        let root = temp_dir("ccinf-input-redirect");
+        let path = root.join("NSmnData.NOS");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&path, write_ccinf_nos_archive_bytes(&[]).unwrap()).unwrap();
+
+        for operation in ["inspect", "unpack"] {
+            let error = reject_ccinf_inputs(std::slice::from_ref(&path), operation).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("taletool ccinf {operation}"))
+            );
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 }

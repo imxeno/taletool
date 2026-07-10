@@ -25,7 +25,7 @@ pub(crate) struct Cli {
 /// Top-level command groups.
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
-    /// Scan a NosTale data directory and classify supported archive files.
+    /// Scan a NosTale data directory and classify supported data files.
     Scan {
         #[arg(long)]
         data_dir: PathBuf,
@@ -36,6 +36,11 @@ pub(crate) enum Command {
     Archive {
         #[command(subcommand)]
         command: ArchiveCommand,
+    },
+    /// Inspect, decode, or encode CCINF GBFC index files.
+    Ccinf {
+        #[command(subcommand)]
+        command: CcinfCommand,
     },
     /// Inspect or apply original NosTale patch packages.
     #[command(visible_alias = "pak")]
@@ -96,6 +101,31 @@ pub(crate) enum ArchiveCommand {
         chunk_count: Option<usize>,
         #[arg(long)]
         chunk_format: Option<String>,
+    },
+}
+
+/// Operations for structured CCINF GBFC index files.
+#[derive(Debug, Subcommand)]
+pub(crate) enum CcinfCommand {
+    /// Print wrapper metadata and a typed entry summary.
+    Inspect {
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        checksum: bool,
+    },
+    /// Decode a CCINF file into a versioned JSON document.
+    Unpack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Encode a versioned JSON document into a canonical raw CCINF file.
+    Pack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
     },
 }
 
@@ -193,4 +223,78 @@ pub(crate) enum TextPayloadKindArg {
     List,
     /// Leave bytes unchanged.
     Raw,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_dedicated_ccinf_commands() {
+        let inspect = Cli::try_parse_from([
+            "taletool",
+            "ccinf",
+            "inspect",
+            "NSmnData.NOS",
+            "--json",
+            "--checksum",
+        ])
+        .unwrap();
+        assert!(matches!(
+            inspect.command,
+            Command::Ccinf {
+                command: CcinfCommand::Inspect {
+                    json: true,
+                    checksum: true,
+                    ..
+                }
+            }
+        ));
+
+        let unpack = Cli::try_parse_from([
+            "taletool",
+            "ccinf",
+            "unpack",
+            "NSmnData.NOS",
+            "--out",
+            "NSmnData.json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            unpack.command,
+            Command::Ccinf {
+                command: CcinfCommand::Unpack { .. }
+            }
+        ));
+
+        let pack = Cli::try_parse_from([
+            "taletool",
+            "ccinf",
+            "pack",
+            "NSmnData.json",
+            "--out",
+            "NSmnData.NOS",
+        ])
+        .unwrap();
+        assert!(matches!(
+            pack.command,
+            Command::Ccinf {
+                command: CcinfCommand::Pack { .. }
+            }
+        ));
+    }
+
+    #[test]
+    fn archive_type_no_longer_accepts_ccinf() {
+        let error = Cli::try_parse_from([
+            "taletool",
+            "archive",
+            "inspect",
+            "NSmnData.NOS",
+            "--type",
+            "ccinf",
+        ])
+        .unwrap_err();
+        assert!(error.to_string().contains("invalid value 'ccinf'"));
+    }
 }

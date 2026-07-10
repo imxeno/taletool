@@ -3,6 +3,7 @@
 mod archive_detect;
 mod binary_payloads;
 mod binary_preset;
+mod ccinf_file;
 mod cli;
 mod commands;
 mod paths;
@@ -12,7 +13,9 @@ mod util;
 
 use clap::Parser;
 use cli::{Cli, Command};
-use commands::{archive::run_archive, patch::run_patch, scan::run_scan, text::run_text};
+use commands::{
+    archive::run_archive, ccinf::run_ccinf, patch::run_patch, scan::run_scan, text::run_text,
+};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -23,6 +26,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Scan { data_dir, json } => run_scan(data_dir, cli.verbose > 0, json),
         Command::Archive { command } => run_archive(command),
+        Command::Ccinf { command } => run_ccinf(command),
         Command::Patch { command } => run_patch(command).await,
         Command::Text { command } => run_text(command),
     }

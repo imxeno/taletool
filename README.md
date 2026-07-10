@@ -20,14 +20,14 @@ Support
 | `NSetcData.NOS`           | Typewriter mini-game and unused “taboo” word lists | ✅                | ⚠️            |
 | `NSgrdData*.NOS`          | Optimized map height grid data                     | ✅                | ❌            |
 | `NSgtdData.NOS`           | Game data files                                    | ✅                | ⚠️            |
-| `NSipData*.NOS`           | Map-item sprite resources                          | ✅                | ❌            |
+| `NSipData*.NOS`           | Map-item sprites                                   | ✅                | ❌            |
 | `NSlangData_<locale>.NOS` | Language files                                     | ✅                | ⚠️            |
 | `NSmcData.NOS`            | Map-object animation definitions                   | ✅                | ❌            |
-| `NSmnData.NOS`            | Direct player/monster GBFC index                   | ❌                | ❌            |
+| `NSmnData.NOS`            | Direct player/monster GBFC index                   | N/A               | ✅            |
 | `NSmpData*.NOS`           | Map-object sprites                                 | ✅                | ❌            |
 | `NSpcData.NOS`            | Player animation definitions                       | ✅                | ❌            |
 | `NSpmData.NOS`            | Map-object frame/resource remap tables             | ✅                | ❌            |
-| `NSpnData.NOS`            | Player/descriptor GBFC map-object index            | ❌                | ❌            |
+| `NSpnData.NOS`            | Player/descriptor GBFC map-object index            | N/A               | ✅            |
 | `NSppData*.NOS`           | Player sprites                                     | ✅                | ❌            |
 | `NStcData*.NOS`           | Map cell flags                                     | ✅                | ❌            |
 | `NStgData*.NOS`           | Geometry                                           | ✅                | ❌            |
@@ -44,8 +44,8 @@ Support
 | `sndinfo.lst`             | Audio metadata                                     | N/A               | ❌            |
 | `*.PKG`                   | NosTale patch packages                             | ⚠️                | ⚠️            |
 
-✅ supported, ⚠️ partial support, ❌ not supported, N/A no Taletool-specific
-container or asset decoder needed
+✅ supported, ⚠️ partial support, ❌ not supported, N/A not applicable as an
+independent container or asset layer
 
 `*` groups the observed names for a family. Exact single, split, locale, and
 locale+chunk filename patterns are listed in the format docs.

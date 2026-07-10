@@ -1,28 +1,43 @@
-CCINF `.NOS` Archives
-=====================
+CCINF `.NOS` Files
+==================
 
-`NSmnData.NOS` and `NSpnData.NOS` are map-object GBFC index files. They use the
-`.NOS` extension, but they are not the standard numeric-ID binary `.NOS` archive
-layout used by other files.
+`NSmnData.NOS` and `NSpnData.NOS` are structured map-object GBFC index assets.
+They use the `.NOS` extension, but they are not multi-entry containers or the
+standard numeric-ID binary `.NOS` archive layout used by other files.
 
 The client loads both files with `TGBFCIndexList.Create` rather than
-`TEWMultiFileStreamMemory`/`TEWMultiFileStreamSimple`. The loader opens the file
-directly, skips a fixed `0x19` byte prefix, and then reads a compact variable
-length table.
+`TEWMultiFileStreamMemory`/`TEWMultiFileStreamSimple`. The file starts with a
+single-payload wrapper followed by a compact variable-length table.
 
 
 Top-Level Layout
 ----------------
 
-All integer fields are little-endian. The client does not validate the prefix
-contents; it only seeks past it. Observed files have a `CCINF V1.20` signature
-inside this prefix.
+All integer fields are little-endian. The two size fields cover the body from
+the entry count at `0x19` through the final cell. Known files store this body
+raw, so both sizes equal `file_size - 0x19` and the compression flag is zero.
 
-| Offset | Type       | Field                                        |
-| ------ | ---------- | -------------------------------------------- |
-| `0x00` | `u8[0x19]` | Prefix/header bytes.                         |
-| `0x19` | `i32`      | Entry count.                                 |
-| `0x1D` | variable   | Entry records, repeated `entry_count` times. |
+| Offset | Type     | Field                                        |
+| ------ | -------- | -------------------------------------------- |
+| `0x00` | `u8[16]` | Canonical CCINF header bytes.                 |
+| `0x10` | `u32`    | Unpacked body size.                          |
+| `0x14` | `u32`    | Stored body size.                            |
+| `0x18` | `u8`     | Compression flag.                            |
+| `0x19` | `i32`    | Entry count.                                 |
+| `0x1D` | variable | Entry records, repeated `entry_count` times. |
+
+The canonical 16-byte header is:
+
+~~~~ text
+43 43 49 4E 46 20 56 31 2E 32 30 1A 14 11 04 20
+~~~~
+
+The header layout is implied based on the binary NOS archive format. ReTale's
+[`TGBFCIndexList.Create`](https://github.com/imxeno/ReTale/blob/240eb8715525653e671b1cd2c3a8b2a98a8d9edc/src/Unit280.pas#L495-L512)
+seeks directly to `0x19`, skipping all 25 wrapper bytes without interpreting
+them. Consequently, compressed CCINF bodies are incompatible with this client
+even though the wrapper retains the standard unpacked-size, stored-size, and
+compression fields.
 
 Entries are read sequentially.
 
@@ -76,3 +91,20 @@ struct Cell {
 `selector` is the low word of `value`; `texture_resource_key` is read with an
 unaligned dword load from `cell + 2`. Cell lists are binary-searched by
 `selector`, so each list is expected to be sorted by ascending selector.
+
+
+CLI and JSON Representation
+---------------------------
+
+CCINF is exposed as a structured asset rather than through archive unpacking:
+
+~~~~ text
+taletool ccinf inspect NSmnData.NOS
+taletool ccinf unpack NSmnData.NOS --out NSmnData.json
+taletool ccinf pack NSmnData.json --out NSmnData.NOS
+~~~~
+
+The JSON document is strict and versioned. Its top-level fields are `format`,
+`version`, and `entries`; each entry contains the four typed dwords and exactly
+seven cell lists. Packing stably sorts entries by unsigned entry id and cells by
+selector before writing the canonical raw wrapper.

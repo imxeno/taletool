@@ -25,7 +25,7 @@ pub(crate) enum DetectedArchive {
 /// Detect the archive parser to use for a set of input paths.
 ///
 /// Explicit `ArchiveType` values require that parser to succeed. `Auto` tries
-/// both supported archive families and fails when both or neither match.
+/// all supported container families and fails when both or neither match.
 pub(crate) fn detect_archive_paths(
     paths: &[PathBuf],
     archive_type: ArchiveType,
