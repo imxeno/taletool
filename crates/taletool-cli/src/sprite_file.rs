@@ -97,7 +97,7 @@ pub(crate) fn unpack_free_size_sprite_png(
     Ok(())
 }
 
-/// Build and write a canonical sprite payload from a manifest-backed directory.
+/// Build and write a sprite payload from a manifest-backed directory.
 pub(crate) fn pack_sprite_dir(dir: &Path, out: &Path) -> anyhow::Result<usize> {
     let manifest_path = dir.join(SPRITE_MANIFEST_FILE);
     let manifest_bytes =
@@ -126,7 +126,7 @@ pub(crate) fn pack_sprite_dir(dir: &Path, out: &Path) -> anyhow::Result<usize> {
     Ok(frames.len())
 }
 
-/// Build and write a canonical free-size sprite payload from one PNG.
+/// Build and write a free-size sprite payload from one PNG.
 pub(crate) fn pack_free_size_sprite_png(input: &Path, out: &Path) -> anyhow::Result<(u32, u32)> {
     ensure_png_path(input, "free-size sprite input")?;
     let png = fs::read(input).with_context(|| format!("reading {}", input.display()))?;

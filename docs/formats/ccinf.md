@@ -16,14 +16,14 @@ raw, so both sizes equal `file_size - 0x19` and the compression flag is zero.
 
 | Offset | Type     | Field                                        |
 | ------ | -------- | -------------------------------------------- |
-| `0x00` | `u8[16]` | Canonical CCINF header bytes.                |
+| `0x00` | `u8[16]` | CCINF header bytes.                |
 | `0x10` | `u32`    | Unpacked body size.                          |
 | `0x14` | `u32`    | Stored body size.                            |
 | `0x18` | `u8`     | Compression flag.                            |
 | `0x19` | `i32`    | Entry count.                                 |
 | `0x1D` | variable | Entry records, repeated `entry_count` times. |
 
-The canonical 16-byte header is:
+The 16-byte header is:
 
 ```text
 43 43 49 4E 46 20 56 31 2E 32 30 1A 14 11 04 20

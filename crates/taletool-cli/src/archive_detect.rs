@@ -25,7 +25,7 @@ pub(crate) enum DetectedArchive {
     Sound(DelDxPack),
 }
 
-/// Return whether a file begins with the canonical CCINF signature.
+/// Return whether a file begins with the CCINF signature.
 ///
 /// Dedicated CCINF commands perform complete validation. Archive commands use
 /// this shallow check only to redirect the asset before container detection.

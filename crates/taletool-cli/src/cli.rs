@@ -126,7 +126,7 @@ pub(crate) enum CcinfCommand {
         #[arg(long)]
         out: PathBuf,
     },
-    /// Encode a versioned JSON document into a canonical raw CCINF file.
+    /// Encode a versioned JSON document into a CCINF file.
     Pack {
         input: PathBuf,
         #[arg(long)]

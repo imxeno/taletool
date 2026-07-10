@@ -1,9 +1,9 @@
 //! Typed support for CCINF `.NOS` files.
 //!
 //! `NSmnData.NOS` and `NSpnData.NOS` store a compact GBFC index behind a
-//! 25-byte wrapper. They are modeled as single structured files, not multi-entry
-//! containers. Known files are always raw: the wrapper's unpacked and stored
-//! sizes are equal and its compression flag is zero.
+//! 25-byte wrapper. Even though they are `.NOS` files, they are modeled as single
+//! structured files, not multi-entry containers. Known files are always raw:
+//! the wrapper's unpacked and stored sizes are equal and its compression flag is zero.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,7 +19,7 @@ pub const CCINF_PREFIX_LEN: usize = 0x19;
 /// Number of counted cell lists stored in every CCINF entry.
 pub const CCINF_CELL_LIST_COUNT: usize = 7;
 
-/// Return whether a byte slice begins with the canonical CCINF signature.
+/// Return whether a byte slice begins with the CCINF signature.
 ///
 /// This is intentionally a shallow check. Use [`Ccinf::from_memory`] or
 /// [`Ccinf::from_bytes`] to validate the complete file.
@@ -113,7 +113,7 @@ pub struct CcinfEntry {
     pub cell_lists: [Vec<CcinfCell>; CCINF_CELL_LIST_COUNT],
 }
 
-/// Parsed CCINF `.NOS` file.
+/// CCINF `.NOS` file.
 #[derive(Debug, Clone)]
 pub struct Ccinf {
     path: PathBuf,
@@ -296,7 +296,7 @@ impl Ccinf {
             .and_then(|index| self.entries.get(index))
     }
 
-    /// Return bytes rebuilt from the parsed entries.
+    /// Return bytes rebuilt from entries.
     pub fn to_bytes(&self) -> CcinfResult<Vec<u8>> {
         write_ccinf_bytes(&self.entries)
     }

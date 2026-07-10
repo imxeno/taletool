@@ -119,7 +119,7 @@ pub fn decode_free_size_sprite(data: &[u8]) -> FreeSizeSpriteResult<FreeSizeSpri
     Ok(FreeSizeSprite { image })
 }
 
-/// Encode a row-major RGBA image into the canonical block-interlaced layout.
+/// Encode a row-major RGBA image into the block-interlaced layout.
 pub fn write_free_size_sprite_bytes(image: &RgbaImage) -> FreeSizeSpriteResult<Vec<u8>> {
     let width = image.width();
     let height = image.height();

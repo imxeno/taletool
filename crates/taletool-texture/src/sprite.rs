@@ -61,13 +61,13 @@ pub enum SpriteError {
     },
     #[error("sprite has too many frames: {count}; maximum is 255")]
     TooManyFrames { count: usize },
-    #[error("canonical sprite payload is too large: {size} bytes")]
+    #[error("sprite payload is too large: {size} bytes")]
     PayloadTooLarge { size: usize },
 }
 
 pub type SpriteResult<T> = std::result::Result<T, SpriteError>;
 
-/// Editable sprite frame used by the canonical writer.
+/// Editable sprite frame used by the writer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpriteFrame {
     pub source_x: i16,
@@ -200,7 +200,7 @@ pub fn decode_sprite(data: &[u8]) -> SpriteResult<DecodedSprite> {
     Ok(DecodedSprite { frames })
 }
 
-/// Encode ordered RGBA frames into the canonical compact sprite layout.
+/// Encode ordered RGBA frames into the compact sprite layout.
 pub fn write_sprite_bytes(frames: &[SpriteFrame]) -> SpriteResult<Vec<u8>> {
     if frames.len() > usize::from(u8::MAX) {
         return Err(SpriteError::TooManyFrames {
