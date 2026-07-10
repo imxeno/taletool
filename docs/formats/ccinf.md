@@ -1,8 +1,8 @@
 # CCINF `.NOS` Files
 
 `NSmnData.NOS` and `NSpnData.NOS` are structured map-object GBFC index assets.
-They use the `.NOS` extension, but they are not multi-entry containers or the
-standard numeric-ID binary `.NOS` archive layout used by other files.
+They use the `.NOS` extension, but they are not multi-entry containers and do
+not use the numeric-ID binary `.NOS` archive layout.
 
 The client loads both files with `TGBFCIndexList.Create` rather than
 `TEWMultiFileStreamMemory`/`TEWMultiFileStreamSimple`. The file starts with a
@@ -29,7 +29,7 @@ The canonical 16-byte header is:
 43 43 49 4E 46 20 56 31 2E 32 30 1A 14 11 04 20
 ```
 
-The header layout is implied based on the binary NOS archive format. The client
+The wrapper fields mirror the binary `.NOS` container format. The client
 loader seeks directly to `0x19`, skipping all 25 wrapper bytes without
 interpreting them. Consequently, compressed CCINF bodies are incompatible with
 the client even though the wrapper retains the standard unpacked-size,
@@ -85,6 +85,6 @@ unaligned dword load from `cell + 2`. Cell lists are binary-searched by
 `selector`, so each list is expected to be sorted by ascending selector.
 
 The nonnegative base and cell resource keys select individual
-[`NSmpData` or `NSppData` sprite payloads](sprites.md). Which archive family
+[`NSmpData` or `NSppData` sprite payloads](sprites.md). Which sprite family
 supplies a key depends on the texture cache attached to the rendered map object;
 the CCINF file does not encode that distinction.

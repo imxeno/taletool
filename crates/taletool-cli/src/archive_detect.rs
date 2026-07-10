@@ -5,9 +5,12 @@
 //! accepted during auto-detection.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::fs;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
 use taletool_archive::{BinaryNosArchive, DelDxPack, TextNosArchive};
+use taletool_ccinf::{CCINF_HEADER, has_ccinf_header as bytes_have_ccinf_header};
 
 use crate::cli::ArchiveType;
 use crate::paths::binary_family_stem;
@@ -20,6 +23,18 @@ pub(crate) enum DetectedArchive {
     Text(TextNosArchive),
     /// A single DelDX sound pack.
     Sound(DelDxPack),
+}
+
+/// Return whether a file begins with the canonical CCINF signature.
+///
+/// Dedicated CCINF commands perform complete validation. Archive commands use
+/// this shallow check only to redirect the asset before container detection.
+pub(crate) fn has_ccinf_header(path: &Path) -> bool {
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut header = [0; CCINF_HEADER.len()];
+    file.read_exact(&mut header).is_ok() && bytes_have_ccinf_header(&header)
 }
 
 /// Detect the archive parser to use for a set of input paths.

@@ -1,12 +1,11 @@
 //! JSON and file helpers for CCINF `.NOS` assets.
 
 use std::fs;
-use std::io::Read;
 use std::path::Path;
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
-use taletool_archive::{CCINF_NOS_HEADER, CcinfNosArchive, CcinfNosArchiveEntry};
+use taletool_ccinf::{Ccinf, CcinfEntry};
 
 const CCINF_DOCUMENT_FORMAT: &str = "ccinf";
 const CCINF_DOCUMENT_VERSION: u32 = 1;
@@ -16,27 +15,15 @@ const CCINF_DOCUMENT_VERSION: u32 = 1;
 struct CcinfDocument {
     format: String,
     version: u32,
-    entries: Vec<CcinfNosArchiveEntry>,
-}
-
-/// Return whether a file begins with the canonical CCINF signature.
-///
-/// This intentionally checks only the signature. Dedicated CCINF commands run
-/// the complete parser and report structural errors from the rest of the file.
-pub(crate) fn has_ccinf_header(path: &Path) -> bool {
-    let Ok(mut file) = fs::File::open(path) else {
-        return false;
-    };
-    let mut header = [0; CCINF_NOS_HEADER.len()];
-    file.read_exact(&mut header).is_ok() && header == CCINF_NOS_HEADER
+    entries: Vec<CcinfEntry>,
 }
 
 /// Decode one CCINF file into a strict, versioned JSON document.
-pub(crate) fn unpack_ccinf_file(archive: &CcinfNosArchive, out: &Path) -> anyhow::Result<usize> {
+pub(crate) fn unpack_ccinf_file(ccinf: &Ccinf, out: &Path) -> anyhow::Result<usize> {
     let document = CcinfDocument {
         format: CCINF_DOCUMENT_FORMAT.to_owned(),
         version: CCINF_DOCUMENT_VERSION,
-        entries: archive.entries().to_vec(),
+        entries: ccinf.entries().to_vec(),
     };
     create_parent_dir(out)?;
     fs::write(out, serde_json::to_vec_pretty(&document)?)?;
@@ -44,7 +31,7 @@ pub(crate) fn unpack_ccinf_file(archive: &CcinfNosArchive, out: &Path) -> anyhow
 }
 
 /// Encode a strict JSON document into a canonical raw CCINF file.
-pub(crate) fn pack_ccinf_file(input: &Path, out: &Path) -> anyhow::Result<CcinfNosArchive> {
+pub(crate) fn pack_ccinf_file(input: &Path, out: &Path) -> anyhow::Result<Ccinf> {
     let document_bytes = fs::read(input).with_context(|| format!("reading {}", input.display()))?;
     let mut document: CcinfDocument = serde_json::from_slice(&document_bytes)
         .with_context(|| format!("parsing {}", input.display()))?;
@@ -57,10 +44,10 @@ pub(crate) fn pack_ccinf_file(input: &Path, out: &Path) -> anyhow::Result<CcinfN
     }
     document.entries.sort_by_key(|entry| entry.entry_id as u32);
 
-    let archive = CcinfNosArchive::from_entries(out.to_path_buf(), document.entries)?;
+    let ccinf = Ccinf::from_entries(out.to_path_buf(), document.entries)?;
     create_parent_dir(out)?;
-    archive.write_to(out)?;
-    Ok(archive)
+    ccinf.write_to(out)?;
+    Ok(ccinf)
 }
 
 fn validate_document_header(document: &CcinfDocument) -> anyhow::Result<()> {
@@ -96,7 +83,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use serde_json::json;
-    use taletool_archive::{CCINF_NOS_CELL_LIST_COUNT, CcinfNosCell};
+    use taletool_ccinf::{CCINF_CELL_LIST_COUNT, CcinfCell};
 
     use super::*;
 
@@ -108,16 +95,16 @@ mod tests {
         std::env::temp_dir().join(format!("taletool-{name}-{}-{nanos}", std::process::id()))
     }
 
-    fn entry(entry_id: i32, selectors: &[u16]) -> CcinfNosArchiveEntry {
+    fn entry(entry_id: i32, selectors: &[u16]) -> CcinfEntry {
         let mut cell_lists = std::array::from_fn(|_| Vec::new());
         cell_lists[0] = selectors
             .iter()
-            .map(|selector| CcinfNosCell {
+            .map(|selector| CcinfCell {
                 selector: *selector,
                 texture_resource_key: i32::from(*selector) * 10,
             })
             .collect();
-        CcinfNosArchiveEntry {
+        CcinfEntry {
             entry_id,
             base_resource_key: entry_id + 1,
             remap_table_file_id: entry_id + 2,
@@ -132,7 +119,7 @@ mod tests {
         let json_path = root.join("NSpnData.json");
         let output = root.join("NSpnData.NOS");
         fs::create_dir_all(&root).unwrap();
-        let source = CcinfNosArchive::from_entries(
+        let source = Ccinf::from_entries(
             root.join("source.NOS"),
             vec![entry(1, &[2, 3]), entry(7, &[4])],
         )
@@ -148,7 +135,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .len(),
-            CCINF_NOS_CELL_LIST_COUNT
+            CCINF_CELL_LIST_COUNT
         );
 
         let rebuilt = pack_ccinf_file(&json_path, &output).unwrap();
@@ -169,11 +156,11 @@ mod tests {
         };
         fs::write(&json_path, serde_json::to_vec(&document).unwrap()).unwrap();
 
-        let archive = pack_ccinf_file(&json_path, &root.join("NSmnData.NOS")).unwrap();
-        assert_eq!(archive.entries()[0].entry_id, 7);
-        assert_eq!(archive.entries()[1].entry_id, -1);
+        let ccinf = pack_ccinf_file(&json_path, &root.join("NSmnData.NOS")).unwrap();
+        assert_eq!(ccinf.entries()[0].entry_id, 7);
+        assert_eq!(ccinf.entries()[1].entry_id, -1);
         assert_eq!(
-            archive.entries()[0].cell_lists[0]
+            ccinf.entries()[0].cell_lists[0]
                 .iter()
                 .map(|cell| cell.selector)
                 .collect::<Vec<_>>(),
@@ -236,8 +223,8 @@ mod tests {
         assert!(pack_ccinf_file(&json_path, &root.join("bad.NOS")).is_err());
 
         let mut oversized = entry(1, &[]);
-        oversized.cell_lists[CCINF_NOS_CELL_LIST_COUNT - 1] = vec![
-            CcinfNosCell {
+        oversized.cell_lists[CCINF_CELL_LIST_COUNT - 1] = vec![
+            CcinfCell {
                 selector: 1,
                 texture_resource_key: 2,
             };
@@ -254,19 +241,6 @@ mod tests {
         )
         .unwrap();
         assert!(pack_ccinf_file(&json_path, &root.join("bad.NOS")).is_err());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn detects_only_the_canonical_header() {
-        let root = temp_dir("ccinf-header");
-        let path = root.join("input.NOS");
-        fs::create_dir_all(&root).unwrap();
-        fs::write(&path, CCINF_NOS_HEADER).unwrap();
-        assert!(has_ccinf_header(&path));
-
-        fs::write(&path, b"not ccinf").unwrap();
-        assert!(!has_ccinf_header(&path));
         fs::remove_dir_all(root).unwrap();
     }
 }

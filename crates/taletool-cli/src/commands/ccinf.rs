@@ -1,7 +1,7 @@
 //! Handlers for `taletool ccinf` structured asset commands.
 
 use serde_json::json;
-use taletool_archive::CcinfNosArchive;
+use taletool_ccinf::Ccinf;
 
 use crate::ccinf_file::{pack_ccinf_file, unpack_ccinf_file};
 use crate::cli::CcinfCommand;
@@ -15,11 +15,11 @@ pub(crate) fn run_ccinf(command: CcinfCommand) -> anyhow::Result<()> {
             json,
             checksum,
         } => {
-            let file = CcinfNosArchive::open(input)?;
+            let file = Ccinf::open(input)?;
             inspect_ccinf_file(&file, json, checksum)
         }
         CcinfCommand::Unpack { input, out } => {
-            let file = CcinfNosArchive::open(input)?;
+            let file = Ccinf::open(input)?;
             let count = unpack_ccinf_file(&file, &out)?;
             println!("unpacked {count} CCINF entries into {}", out.display());
             Ok(())
@@ -37,11 +37,7 @@ pub(crate) fn run_ccinf(command: CcinfCommand) -> anyhow::Result<()> {
 }
 
 /// Print wrapper metadata and a typed GBFC entry summary.
-fn inspect_ccinf_file(
-    file: &CcinfNosArchive,
-    json_output: bool,
-    checksum: bool,
-) -> anyhow::Result<()> {
+fn inspect_ccinf_file(file: &Ccinf, json_output: bool, checksum: bool) -> anyhow::Result<()> {
     let entries = file
         .entries()
         .iter()

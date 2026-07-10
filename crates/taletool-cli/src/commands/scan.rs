@@ -8,11 +8,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use taletool_archive::CcinfNosArchive;
+use taletool_ccinf::Ccinf;
 use taletool_core::validate_data_dir;
 
-use crate::archive_detect::{DetectedArchive, detect_archive_paths};
-use crate::ccinf_file::has_ccinf_header;
+use crate::archive_detect::{DetectedArchive, detect_archive_paths, has_ccinf_header};
 use crate::cli::ArchiveType;
 
 /// Scan a data directory and print either human-readable or JSON output.
@@ -70,7 +69,7 @@ fn scan_file(path: &Path, verbose: bool) -> ScanFile {
         .unwrap_or_default()
         .to_owned();
     if has_ccinf_header(path) {
-        return match CcinfNosArchive::open(path) {
+        return match Ccinf::open(path) {
             Ok(ccinf) => ScanFile {
                 file,
                 archive_type: Some("ccinf".to_owned()),
@@ -131,7 +130,7 @@ fn is_scannable_data_file(path: &Path) -> bool {
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use taletool_archive::write_ccinf_nos_archive_bytes;
+    use taletool_ccinf::write_ccinf_bytes;
 
     use super::*;
 
@@ -147,7 +146,7 @@ mod tests {
         ));
         let path = root.join("NSmnData.NOS");
         fs::create_dir_all(&root).unwrap();
-        fs::write(&path, write_ccinf_nos_archive_bytes(&[]).unwrap()).unwrap();
+        fs::write(&path, write_ccinf_bytes(&[]).unwrap()).unwrap();
 
         let scanned = scan_file(&path, true);
         assert_eq!(scanned.archive_type.as_deref(), Some("ccinf"));

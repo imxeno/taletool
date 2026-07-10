@@ -14,7 +14,7 @@ use taletool_archive::{
     TextNosRecordInput, write_text_nos_archive_bytes,
 };
 
-use crate::archive_detect::{DetectedArchive, detect_archive_paths};
+use crate::archive_detect::{DetectedArchive, detect_archive_paths, has_ccinf_header};
 use crate::binary_payloads::{
     BinaryPayloadInput, binary_payload_output_name, explicit_indexes_for_binary_ids,
     order_binary_payload_entries, parse_binary_payload_filename, parse_id_filename,
@@ -23,7 +23,6 @@ use crate::binary_preset::{
     binary_nos_archive_default_compression, format_chunk_pattern, output_pattern, parse_header_hex,
     resolve_binary_preset, resolve_zlib_profile,
 };
-use crate::ccinf_file::has_ccinf_header;
 use crate::cli::{ArchiveCommand, ArchiveType, ChunkingArg, CompressionArg};
 use crate::paths::{escape_archive_name, immediate_files, resolve_inputs, unescape_archive_name};
 use crate::sound_pack::{
@@ -625,7 +624,7 @@ fn output_is_text(out: &str) -> bool {
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use taletool_archive::write_ccinf_nos_archive_bytes;
+    use taletool_ccinf::CCINF_HEADER;
 
     use super::*;
 
@@ -655,7 +654,7 @@ mod tests {
         let root = temp_dir("ccinf-input-redirect");
         let path = root.join("NSmnData.NOS");
         fs::create_dir_all(&root).unwrap();
-        fs::write(&path, write_ccinf_nos_archive_bytes(&[]).unwrap()).unwrap();
+        fs::write(&path, CCINF_HEADER).unwrap();
 
         for operation in ["inspect", "unpack"] {
             let error = reject_ccinf_inputs(std::slice::from_ref(&path), operation).unwrap_err();
