@@ -1,11 +1,8 @@
-Taletool Docs
-=============
+# Taletool Docs
 
 These pages document NosTale file formats that taletool knows about.
 
-
-Archive Formats
----------------
+## Archive Formats
 
 | Page                                                     | Covers                                                                    |
 | -------------------------------------------------------- | ------------------------------------------------------------------------- |
@@ -15,9 +12,7 @@ Archive Formats
 | [Sound package](formats/audio.md)                        | `snd.pck` containers.                                                     |
 | [Patch packages](formats/patch-packages.md)              | `.PKG` packages, opcodes, and apply semantics.                            |
 
-
-Asset Formats
--------------
+## Asset Formats
 
 | Page                                            | Covers                                                                           |
 | ----------------------------------------------- | -------------------------------------------------------------------------------- |

@@ -1,5 +1,4 @@
-Videos
-======
+# Videos
 
 NosTale stores some MPEG videos with custom extensions under `wave`.
 

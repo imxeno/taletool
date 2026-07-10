@@ -1,10 +1,8 @@
-Text
-====
+# Text
 
 Text files are stored inside `NSgtdData`, `NSlangData`, `NScliData`, and
-`NSetcData` archives.
-After a file is extracted from the archive, its payload is one of a
-few simple text-oriented formats.
+`NSetcData` archives. After a file is extracted from the archive, its payload is
+one of a few simple text-oriented formats.
 
 | Archive                   | Contents                                                              |
 | ------------------------- | --------------------------------------------------------------------- |
@@ -22,9 +20,9 @@ few simple text-oriented formats.
 
 Plain `.txt` records do not declare their character encoding. The encoding
 depends on the locale/archive the record came from, so localized files should be
-decoded with the matching client locale in mind.
-For `_code_<locale>_*.txt` records, the two-letter locale code in the record
-name identifies the expected encoding.
+decoded with the matching client locale in mind. For `_code_<locale>_*.txt`
+records, the two-letter locale code in the record name identifies the expected
+encoding.
 
 Known locale encodings:
 
@@ -45,9 +43,7 @@ Known locale encodings:
 Non-localized text records should be treated as EUC-KR (they may contain
 comments in Korean)
 
-
-DAT Compact Text
-----------------
+## DAT Compact Text
 
 DAT payloads are line-based. The byte `0xFF` ends a line. Other bytes describe
 either packed characters from a small table or raw bytes XORed with `0x33`.
@@ -60,13 +56,11 @@ either packed characters from a small table or raw bytes XORed with `0x33`.
 
 Packed runs store two 4-bit values per byte. The compact character table is:
 
-~~~~ text
+```text
 0, space, -, ., 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, newline, 0
-~~~~
+```
 
-
-List Text
----------
+## List Text
 
 List payloads start with a line count. Each line then stores a byte length
 followed by that many bytes. Line bytes are XORed with `0x01`.

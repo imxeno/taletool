@@ -1,5 +1,4 @@
-CCINF `.NOS` Archives
-=====================
+# CCINF `.NOS` Archives
 
 `NSmnData.NOS` and `NSpnData.NOS` are map-object GBFC index files. They use the
 `.NOS` extension, but they are not the standard numeric-ID binary `.NOS` archive
@@ -10,9 +9,7 @@ The client loads both files with `TGBFCIndexList.Create` rather than
 directly, skips a fixed `0x19` byte prefix, and then reads a compact variable
 length table.
 
-
-Top-Level Layout
-----------------
+## Top-Level Layout
 
 All integer fields are little-endian. The client does not validate the prefix
 contents; it only seeks past it. Observed files have a `CCINF V1.20` signature
@@ -26,9 +23,7 @@ inside this prefix.
 
 Entries are read sequentially.
 
-
-Entry Layout
-------------
+## Entry Layout
 
 Each entry begins with four dwords and then stores seven counted cell lists.
 
@@ -44,9 +39,7 @@ The client binary-searches entries by `entry id` and does not sort after
 loading, so files are expected to store entries in ascending unsigned `entry id`
 order.
 
-
-Cell List Layout
-----------------
+## Cell List Layout
 
 Each of the seven lists has this layout:
 
@@ -57,21 +50,21 @@ Each of the seven lists has this layout:
 
 The raw client type is equivalent to:
 
-~~~~ text
+```text
 struct RawCell {
     i32 value;
     u16 tile;
 }
-~~~~
+```
 
 The consumers treat the same six bytes as:
 
-~~~~ text
+```text
 struct Cell {
     u16 selector;
     i32 texture_resource_key; // unaligned, starts at byte 2
 }
-~~~~
+```
 
 `selector` is the low word of `value`; `texture_resource_key` is read with an
 unaligned dword load from `cell + 2`. Cell lists are binary-searched by

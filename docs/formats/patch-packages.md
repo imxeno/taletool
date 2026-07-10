@@ -1,12 +1,9 @@
-Patch Packages
-==============
+# Patch Packages
 
 Original NosTale patch packages distributed as `.PKG` files. All integer fields
 described below are little-endian.
 
-
-Package Container
------------------
+## Package Container
 
 Each package is a sequence of independently encoded operation segments.
 
@@ -37,14 +34,11 @@ Segment table records:
 | `0x04`             |    4 | Segment file offset |
 
 The updater applies requested segment ids in numeric order from `0` to
-`count - 1`. In all known packages, the lookup flag is `1` and segment
-ids match table indexes, so this is also table order. For lookup flag `0`,
-the table must be ordered by segment id because the updater uses a binary
-search.
+`count - 1`. In all known packages, the lookup flag is `1` and segment ids match
+table indexes, so this is also table order. For lookup flag `0`, the table must
+be ordered by segment id because the updater uses a binary search.
 
-
-Segment Encoding
-----------------
+## Segment Encoding
 
 Each segment starts at the offset listed in the package table:
 
@@ -59,9 +53,7 @@ Each segment starts at the offset listed in the package table:
 For raw segments, decoded size must equal encoded size. For zlib segments, the
 decompressed byte count must match the one in the header.
 
-
-Operation Body
---------------
+## Operation Body
 
 The decoded segment body is one operation:
 
@@ -76,9 +68,7 @@ Target paths are encoded as EUC-KR/Windows-949. ASCII-only paths decode
 identically under that code page. In observed packages, stored paths use Windows
 separators and begin with `$(INSTALLED)\`.
 
-
-Opcodes
--------
+## Opcodes
 
 | Opcode | Operation             | Payload                      | Updater behavior                                                                                                                     |
 | -----: | --------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -90,9 +80,7 @@ Opcodes
 |    `5` | DelDX pack mutation   | DelDX pack mutation stream   | Load the target DelDX pack such as `snd.pck`, apply record-level pack updates, and write the rebuilt file.                           |
 |    `6` | Replace and run       | Complete replacement bytes   | Write payload bytes to the target path and run the written file. Historically this was used only for `NostaleData\ExtractUIEff.dat`. |
 
-
-Opcode 2 Binary Delta
----------------------
+## Opcode 2 Binary Delta
 
 Opcode `2` payloads rebuild a target file from the current source bytes.
 
@@ -140,9 +128,7 @@ The rebuilt chunk starts at target position `1`. Literal bytes fill any gap
 before the next target position, then copy bytes are taken from the source
 chunk.
 
-
-Opcode 4 Binary `.NOS` Archive Updates
---------------------------------------
+## Opcode 4 Binary `.NOS` Archive Updates
 
 Opcode `4` payloads are patch instructions for binary table/chunk `.NOS`
 archives. The payload begins with the output archive header, followed by update
@@ -182,12 +168,10 @@ stored source index or source cursor position. The reconstructed archive must
 contain exactly the output count declared in the update header.
 
 Some archive update packages target split archive names, for example
-`NStpData08.NOS`, while using records from the unsuffixed parent archive such
-as `NStpData.NOS`. This was historically used to split files into chunks.
+`NStpData08.NOS`, while using records from the unsuffixed parent archive such as
+`NStpData.NOS`. This was historically used to split files into chunks.
 
-
-Opcode 5 DelDX Pack Mutations
------------------------------
+## Opcode 5 DelDX Pack Mutations
 
 Opcode `5` payloads update DelDX packs such as `NostaleData/wave/snd.pck`.
 
@@ -210,9 +194,9 @@ Mutation record tags:
 | other | none                                                      | No      | One-byte no-output marker.   |
 
 The 2018 updater from `uk/99990476.PKG` dispatches all tag values other than
-`0`, `1`, `2`, and `5` as one-byte records that read no extra fields and
-produce no output. The local mirror scan found opcode `5` payloads using tags
-`0`, `1`, `2`, and `5`.
+`0`, `1`, `2`, and `5` as one-byte records that read no extra fields and produce
+no output. The local mirror scan found opcode `5` payloads using tags `0`, `1`,
+`2`, and `5`.
 
 Inline rows contain the normal DelDX row prefix at `0x00..0x43`, data offset at
 `0x44`, and payload size at `0x48`. The mutation payload stores the actual
@@ -223,9 +207,7 @@ Copy records include both `target_key` and `source_key`; observed mutation
 behavior also depends on the expected sorted index. If the referenced entry is
 missing, the output contains an empty placeholder record.
 
-
-Opcode 6 Replace And Run
-------------------------
+## Opcode 6 Replace And Run
 
 Opcode `6` writes the payload to the target path and runs the written file.
 Observed packages use it with a helper executable named
@@ -234,9 +216,9 @@ UI/effect records out of broad binary `.NOS` archives.
 
 Observed helper SHA1:
 
-~~~~ text
+```text
 8db83a801a27308d6306121a556918cd223c7752
-~~~~
+```
 
 The observed helper performs these archive splits:
 

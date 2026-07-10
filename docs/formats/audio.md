@@ -1,13 +1,10 @@
-Audio
-=====
+# Audio
 
 NosTale stores audio under `wave`. Most sound effects are packed in `snd.pck`
-and described by `sndinfo.lst`. Background music may also appear as loose
-`BGM*` files in the same directory.
+and described by `sndinfo.lst`. Background music may also appear as loose `BGM*`
+files in the same directory.
 
-
-`sndinfo.lst`
--------------
+## `sndinfo.lst`
 
 `sndinfo.lst` is a sound lookup table. It maps three logical keys to a sound id
 and an associated filename.
@@ -39,10 +36,9 @@ The client can resolve a row in two directions:
 
 Once a row is selected, its filename is resolved relative to the `wave`
 directory. If the stored filename exists, it is used as-is. If it does not
-exist, the client searches the stored filename for the literal `.wav`
-substring. When found, it tries the portion before `.wav`. This is how rows
-such as `BGM (1).30000.wav` resolve to the shipped loose file
-`BGM (1).30000`.
+exist, the client searches the stored filename for the literal `.wav` substring.
+When found, it tries the portion before `.wav`. This is how rows such as
+`BGM (1).30000.wav` resolve to the shipped loose file `BGM (1).30000`.
 
 Observed `Key 0` groups in the client:
 
@@ -68,23 +64,19 @@ Example BGM rows:
 
 The file extension of loose files matches the sound id, but this is not a rule.
 
+## BGM Files
 
-BGM Files
----------
-
-Background music files use names such as `BGM (1).30000` or
-`BGM (104).30104`. These files are ordinary MP3 or Ogg audio streams.
+Background music files use names such as `BGM (1).30000` or `BGM (104).30104`.
+These files are ordinary MP3 or Ogg audio streams.
 
 The loose filename is resolved through `sndinfo.lst`. The table may store a
 `.wav` suffix, but the shipped loose BGM files usually omit it.
 
-
-`snd.pck`
----------
+## `snd.pck`
 
 `snd.pck` is a DelDX packed sound container used for many sound-effect files.
-Entries are raw `.wav` payloads, although historical packs can contain
-other extensions such as `.av`. In the checked 2011 pack, the `.av` entry still
+Entries are raw `.wav` payloads, although historical packs can contain other
+extensions such as `.av`. In the checked 2011 pack, the `.av` entry still
 contains a RIFF/WAVE payload.
 
 The pack header is `0x1C` bytes:
@@ -92,7 +84,7 @@ The pack header is `0x1C` bytes:
 | Offset       | Field          | Notes                                                                                                                                   |
 | ------------ | -------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `0x00`       | Magic length   | Expected value is `0x10`.                                                                                                               |
-| `0x01..0x10` | Magic text     | Expected value is `DelDX Pack File `.                                                                                                   |
+| `0x01..0x10` | Magic text     | Expected bytes are ASCII `DelDX Pack File` followed by `0x20`.                                                                          |
 | `0x11..0x13` | Reserved bytes | Unknown. Observed as `f0 fd 7f` in a 2011 pack and `00 00 00` in a 2026 pack. Client loader treats this area as padding and ignores it. |
 | `0x14..0x17` | Version        | Little-endian `i32`; NosTale accepts versions up to `10`.                                                                               |
 | `0x18..0x1B` | Entry count    | Little-endian `i32`.                                                                                                                    |
@@ -113,9 +105,9 @@ Entry names are byte strings, not paths. Older Korean names are stored as
 Windows-949/EUC-KR bytes; ASCII names decode identically. Names commonly follow
 this shape:
 
-~~~~ text
+```text
 <label>.<sound-id>.wav
-~~~~
+```
 
 The decimal number between the first and second dot is the DelDX entry key used
 by patch mutation records when copying existing entries. If that shape is not
