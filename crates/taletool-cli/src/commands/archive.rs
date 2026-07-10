@@ -102,7 +102,7 @@ pub(crate) fn run_archive(command: ArchiveCommand) -> anyhow::Result<()> {
     }
 }
 
-/// Redirect structured CCINF files away from archive container commands.
+/// Redirect CCINF files away from archive container commands.
 fn reject_ccinf_inputs(paths: &[PathBuf], operation: &str) -> anyhow::Result<()> {
     if let Some(path) = paths.iter().find(|path| has_ccinf_header(path)) {
         let suggestion = match operation {
@@ -114,7 +114,7 @@ fn reject_ccinf_inputs(paths: &[PathBuf], operation: &str) -> anyhow::Result<()>
             _ => unreachable!("archive CCINF redirect operation is known"),
         };
         anyhow::bail!(
-            "{} is a structured CCINF asset, not an archive container; use `{suggestion}`",
+            "{} is a CCINF asset, not an archive container; use `{suggestion}`",
             path.display(),
         );
     }
@@ -125,7 +125,7 @@ fn reject_ccinf_inputs(paths: &[PathBuf], operation: &str) -> anyhow::Result<()>
 fn reject_ccinf_pack(dir: &Path, out: &str) -> anyhow::Result<()> {
     if output_is_ccinf(out) || dir.join("ccinf.json").is_file() {
         anyhow::bail!(
-            "CCINF .NOS files are structured assets, not archive containers; use `taletool ccinf pack <input.json> --out {out}`"
+            "CCINF .NOS files are assets, not archive containers; use `taletool ccinf pack <input.json> --out {out}`"
         );
     }
     Ok(())

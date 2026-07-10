@@ -2,7 +2,7 @@
 
 /// Archive container command handlers.
 pub(crate) mod archive;
-/// CCINF structured asset command handlers.
+/// CCINF asset command handlers.
 pub(crate) mod ccinf;
 /// Patch package command handlers.
 pub(crate) mod patch;

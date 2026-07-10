@@ -14,7 +14,7 @@
 //! modules directly:
 //!
 //! - [`binary`] for numeric-ID binary `.NOS` table/chunk archives.
-//! - [`ccinf`] for structured CCINF GBFC index `.NOS` files.
+//! - [`ccinf`] for CCINF GBFC index `.NOS` files.
 //! - [`text`] for named-record text `.NOS` archives.
 //! - [`deldx`] for DelDX pack files such as `snd.pck`.
 

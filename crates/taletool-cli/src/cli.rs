@@ -109,7 +109,7 @@ pub(crate) enum ArchiveCommand {
     },
 }
 
-/// Operations for structured CCINF GBFC index files.
+/// Operations for CCINF GBFC index files.
 #[derive(Debug, Subcommand)]
 pub(crate) enum CcinfCommand {
     /// Print wrapper metadata and a typed entry summary.

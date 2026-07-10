@@ -1,4 +1,4 @@
-//! Structured CCINF `.NOS` file support.
+//! CCINF `.NOS` file support.
 //!
 //! `NSmnData.NOS` and `NSpnData.NOS` store a compact GBFC index behind a
 //! 25-byte wrapper. They are modeled as single structured files, not multi-entry

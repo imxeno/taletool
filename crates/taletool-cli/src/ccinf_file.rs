@@ -1,4 +1,4 @@
-//! JSON and file helpers for structured CCINF `.NOS` assets.
+//! JSON and file helpers for CCINF `.NOS` assets.
 
 use std::fs;
 use std::io::Read;

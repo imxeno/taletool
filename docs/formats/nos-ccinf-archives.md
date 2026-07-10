@@ -88,18 +88,3 @@ The nonnegative base and cell resource keys select individual
 [`NSmpData` or `NSppData` sprite payloads](sprites.md). Which archive family
 supplies a key depends on the texture cache attached to the rendered map object;
 the CCINF file does not encode that distinction.
-
-## CLI and JSON Representation
-
-CCINF is exposed as a structured asset rather than through archive unpacking:
-
-```text
-taletool ccinf inspect NSmnData.NOS
-taletool ccinf unpack NSmnData.NOS --out NSmnData.json
-taletool ccinf pack NSmnData.json --out NSmnData.NOS
-```
-
-The JSON document is strict and versioned. Its top-level fields are `format`,
-`version`, and `entries`; each entry contains the four typed dwords and exactly
-seven cell lists. Packing stably sorts entries by unsigned entry id and cells by
-selector before writing the canonical raw wrapper.
