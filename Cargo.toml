@@ -1,0 +1,39 @@
+[workspace]
+members = [
+    "crates/taletool-cli",
+    "crates/taletool-core",
+    "crates/taletool-archive",
+    "crates/taletool-patch",
+    "crates/taletool-zlib",
+    "crates/taletool-text",
+    "crates/taletool-texture",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/imxeno/taletool"
+rust-version = "1.85"
+
+[workspace.dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+cc = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+crc32fast = "1.4"
+encoding_rs = "0.8"
+flate2 = "1.0"
+hex = "0.4"
+image = { version = "0.25", default-features = false, features = ["png"] }
+miniz_oxide = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha1 = "0.10"
+thiserror = "1.0"
+tokio = { version = "1.48", features = ["fs", "macros", "rt-multi-thread", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

@@ -1,0 +1,9 @@
+/target/
+/exports/
+*.pdb
+*.exe
+*.dll
+*.so
+*.dylib
+*.log
+

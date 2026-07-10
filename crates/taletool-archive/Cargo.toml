@@ -1,0 +1,19 @@
+[package]
+name = "taletool-archive"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+flate2.workspace = true
+serde.workspace = true
+taletool-core = { path = "../taletool-core" }
+taletool-text = { path = "../taletool-text" }
+taletool-zlib = { path = "../taletool-zlib" }
+thiserror.workspace = true
+
+[lints]
+workspace = true
