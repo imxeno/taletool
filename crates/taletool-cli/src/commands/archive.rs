@@ -534,10 +534,10 @@ fn pack_binary_archive_dir(
         } else {
             PathBuf::from(format_chunk_pattern(&output_pattern, chunk))
         };
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent)?;
         }
         let archive = BinaryNosArchive::from_entries(
             path.clone(),

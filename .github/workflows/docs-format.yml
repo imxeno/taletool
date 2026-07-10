@@ -1,0 +1,30 @@
+name: Docs format
+
+on:
+  push:
+    paths:
+      - "**/*.md"
+      - "dprint.json"
+      - ".github/workflows/docs-format.yml"
+  pull_request:
+    paths:
+      - "**/*.md"
+      - "dprint.json"
+      - ".github/workflows/docs-format.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dprint:
+    name: Check Markdown formatting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Check docs formatting
+        uses: dprint/check@9cb3a2b17a8e606d37aae341e49df3654933fc23 # v2.3
+        with:
+          dprint-version: 0.55.1

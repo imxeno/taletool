@@ -84,7 +84,7 @@ The pack header is `0x1C` bytes:
 | Offset       | Field          | Notes                                                                                                                                   |
 | ------------ | -------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `0x00`       | Magic length   | Expected value is `0x10`.                                                                                                               |
-| `0x01..0x10` | Magic text     | Expected value is `DelDX Pack File `.                                                                                                   |
+| `0x01..0x10` | Magic text     | Expected bytes are ASCII `DelDX Pack File` followed by `0x20`.                                                                          |
 | `0x11..0x13` | Reserved bytes | Unknown. Observed as `f0 fd 7f` in a 2011 pack and `00 00 00` in a 2026 pack. Client loader treats this area as padding and ignores it. |
 | `0x14..0x17` | Version        | Little-endian `i32`; NosTale accepts versions up to `10`.                                                                               |
 | `0x18..0x1B` | Entry count    | Little-endian `i32`.                                                                                                                    |

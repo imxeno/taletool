@@ -8,6 +8,7 @@ cargo test --workspace
 
 ## Docs Format
 
-```bash
-mdformat --wrap 80 --end-of-line keep .
+```powershell
+dprint fmt
+dprint check
 ```
