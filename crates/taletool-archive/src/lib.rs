@@ -3,7 +3,7 @@
 //! Several unrelated NosTale archive families use the `.NOS` extension. Public
 //! type names therefore describe the format shape instead of claiming `.NOS` as
 //! a single archive kind. The root module re-exports the stable API used by the
-//! CLI and by `taletool-patch`;  code may also import from the format modules 
+//! CLI and by `taletool-patch`;  code may also import from the format modules
 //! directly:
 //!
 //! - [`binary`] for numeric-ID binary `.NOS` table/chunk archives.
