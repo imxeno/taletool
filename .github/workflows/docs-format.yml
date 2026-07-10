@@ -1,0 +1,34 @@
+name: Docs format
+
+on:
+  push:
+    paths:
+      - "**/*.md"
+      - ".github/workflows/docs-format.yml"
+  pull_request:
+    paths:
+      - "**/*.md"
+      - ".github/workflows/docs-format.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mdformat:
+    name: Check Markdown formatting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install mdformat
+        run: python -m pip install mdformat==1.0.0 mdformat-gfm==1.0.0
+
+      - name: Check docs formatting
+        run: mdformat --check --wrap 80 --end-of-line keep .
