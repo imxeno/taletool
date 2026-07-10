@@ -489,10 +489,11 @@ pub fn write_deldx_pack_bytes(
     Ok(out)
 }
 
-/// Return DelDX header bytes in the canonical form Taletool writes.
+/// Return DelDX header bytes in the canonical form.
 ///
 /// Bytes `0x11..0x13` are reserved/ignored by the original client loader. Old
-/// packs have been observed with non-zero values there; Taletool writes zeroes.
+/// packs have been observed with non-zero values there; Taletool almays
+/// writes zeros.
 pub fn normalize_deldx_pack_header_for_write(
     mut header: [u8; DELDX_PACK_HEADER_LEN],
 ) -> [u8; DELDX_PACK_HEADER_LEN] {

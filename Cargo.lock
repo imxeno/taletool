@@ -547,12 +547,15 @@ dependencies = [
  "async-trait",
  "clap",
  "hex",
+ "image",
  "serde",
  "serde_json",
  "taletool-archive",
+ "taletool-ccinf",
  "taletool-core",
  "taletool-patch",
  "taletool-text",
+ "taletool-texture",
  "taletool-zlib",
  "tokio",
  "tracing",
@@ -569,6 +572,15 @@ dependencies = [
  "taletool-core",
  "taletool-text",
  "taletool-zlib",
+ "thiserror",
+]
+
+[[package]]
+name = "taletool-ccinf"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "taletool-core",
  "thiserror",
 ]
 

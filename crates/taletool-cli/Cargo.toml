@@ -11,12 +11,15 @@ anyhow.workspace = true
 async-trait.workspace = true
 clap.workspace = true
 hex.workspace = true
+image.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 taletool-core = { path = "../taletool-core" }
 taletool-archive = { path = "../taletool-archive" }
+taletool-ccinf = { path = "../taletool-ccinf" }
 taletool-patch = { path = "../taletool-patch" }
 taletool-text = { path = "../taletool-text" }
+taletool-texture = { path = "../taletool-texture" }
 taletool-zlib = { path = "../taletool-zlib" }
 tokio.workspace = true
 tracing.workspace = true

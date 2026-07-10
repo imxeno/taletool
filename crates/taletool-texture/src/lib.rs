@@ -1,7 +1,14 @@
+//! NosTale raster asset decoding.
+//!
+//! The crate supports header-based texture payloads and [`sprite`] payloads
+//! while sharing their low-level pixel codecs internally.
+
 use image::{Rgba, RgbaImage};
 use serde::{Deserialize, Serialize};
 use taletool_core::ByteReader;
 use thiserror::Error;
+
+pub mod sprite;
 
 #[derive(Debug, Error)]
 pub enum TextureError {
@@ -149,10 +156,10 @@ fn decode_texture_level(
             ])),
             TextureFormat::A8R8G8B8 => {
                 let offset = index * 4;
-                Rgba([
-                    pixels[offset + 2],
-                    pixels[offset + 1],
+                decode_a8r8g8b8([
                     pixels[offset],
+                    pixels[offset + 1],
+                    pixels[offset + 2],
                     pixels[offset + 3],
                 ])
             }
@@ -174,12 +181,27 @@ fn mip_dimension(base: u16, level: usize) -> u16 {
     (base >> level).max(1)
 }
 
-fn decode_a4r4g4b4(value: u16) -> Rgba<u8> {
+pub(crate) fn decode_a4r4g4b4(value: u16) -> Rgba<u8> {
     let a = expand_4((value >> 12) as u8);
     let r = expand_4(((value >> 8) & 0x0f) as u8);
     let g = expand_4(((value >> 4) & 0x0f) as u8);
     let b = expand_4((value & 0x0f) as u8);
     Rgba([r, g, b, a])
+}
+
+pub(crate) fn encode_a4r4g4b4(pixel: Rgba<u8>) -> u16 {
+    let [r, g, b, a] = pixel.0;
+    (quantize_4(a) << 12) | (quantize_4(r) << 8) | (quantize_4(g) << 4) | quantize_4(b)
+}
+
+pub(crate) fn decode_a8r8g8b8(encoded: [u8; 4]) -> Rgba<u8> {
+    let [blue, green, red, alpha] = encoded;
+    Rgba([red, green, blue, alpha])
+}
+
+pub(crate) fn encode_a8r8g8b8(pixel: Rgba<u8>) -> [u8; 4] {
+    let [red, green, blue, alpha] = pixel.0;
+    [blue, green, red, alpha]
 }
 
 fn decode_a1r5g5b5(value: u16) -> Rgba<u8> {
@@ -192,6 +214,10 @@ fn decode_a1r5g5b5(value: u16) -> Rgba<u8> {
 
 fn expand_4(value: u8) -> u8 {
     (value << 4) | value
+}
+
+fn quantize_4(value: u8) -> u16 {
+    (u16::from(value) * 15 + 127) / 255
 }
 
 fn expand_5(value: u8) -> u8 {

@@ -24,12 +24,12 @@ observed binary archive families.
 | `NStsData.NOS`   | `NT Data 09` | raw                  | single file        | Unknown and unused map-related data               |
 | `NSgrdData*.NOS` | `NT Data 26` | raw                  | `file_id & 7`      | [Optimized map height grids](map-height-grids.md) |
 | `NSmcData.NOS`   | `NT Data 16` | raw                  | single file        | TBD                                               |
-| `NSmpData*.NOS`  | `NT Data 17` | zlib 1.1.2 (level 1) | low-byte, 16 files | TBD                                               |
+| `NSmpData*.NOS`  | `NT Data 17` | zlib 1.1.2 (level 1) | low-byte, 16 files | [Map-object sprite payloads](sprites.md)          |
 | `NSpcData.NOS`   | `NT Data 13` | raw                  | single file        | TBD                                               |
 | `NSpmData.NOS`   | `NT Data 15` | raw                  | single file        | TBD                                               |
-| `NSppData*.NOS`  | `NT Data 14` | zlib 1.1.2 (level 1) | low-byte, 32 files | TBD                                               |
-| `NSipData*.NOS`  | `NT Data 24` | zlib 1.1.2 (level 1) | single file        | TBD                                               |
-| `NS4BbData*.NOS` | `32GBS V1.0` | zlib 1.1.2 (level 9) | single file        | TBD                                               |
+| `NSppData*.NOS`  | `NT Data 14` | zlib 1.1.2 (level 1) | low-byte, 32 files | [Map-object sprite payloads](sprites.md)          |
+| `NSipData*.NOS`  | `NT Data 24` | zlib 1.1.2 (level 1) | single file        | [Map-object sprite payloads](sprites.md)          |
+| `NS4BbData*.NOS` | `32GBS V1.0` | zlib 1.1.2 (level 9) | single file        | [Free-size sprite payloads](sprites.md)           |
 
 `*` means the archive family may appear as an older single archive name such as
 `NStgData.NOS` or as a chunked name such as `NStgData00.NOS`.
