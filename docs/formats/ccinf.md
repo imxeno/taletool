@@ -29,11 +29,11 @@ The canonical 16-byte header is:
 43 43 49 4E 46 20 56 31 2E 32 30 1A 14 11 04 20
 ```
 
-The wrapper fields mirror the binary `.NOS` container format. The client
-loader seeks directly to `0x19`, skipping all 25 wrapper bytes without
-interpreting them. Consequently, compressed CCINF bodies are incompatible with
-the client even though the wrapper retains the standard unpacked-size,
-stored-size, and compression fields.
+The wrapper fields mirror the binary `.NOS` container format. The client loader
+seeks directly to `0x19`, skipping all 25 wrapper bytes without interpreting
+them. Consequently, compressed CCINF bodies are incompatible with the client
+even though the wrapper retains the standard unpacked-size, stored-size, and
+compression fields.
 
 Entries are read sequentially.
 
