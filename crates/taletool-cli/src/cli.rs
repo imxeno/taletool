@@ -42,6 +42,11 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: CcinfCommand,
     },
+    /// Inspect, decode, or encode geometry payloads.
+    Geometry {
+        #[command(subcommand)]
+        command: GeometryCommand,
+    },
     /// Inspect, decode, or encode extracted sprite payloads.
     Sprite {
         #[command(subcommand)]
@@ -57,6 +62,31 @@ pub(crate) enum Command {
     Text {
         #[command(subcommand)]
         command: TextCommand,
+    },
+}
+
+/// Operations for `NStgData` and `NStgeData` geometry payloads.
+#[derive(Debug, Subcommand)]
+pub(crate) enum GeometryCommand {
+    /// Print geometry bounds, animation timing, and structural counts.
+    Inspect {
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        checksum: bool,
+    },
+    /// Decode a geometry payload into a versioned JSON document.
+    Unpack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Encode a versioned JSON document into a geometry payload.
+    Pack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
     },
 }
 
@@ -346,6 +376,61 @@ mod tests {
         ])
         .unwrap_err();
         assert!(error.to_string().contains("invalid value 'ccinf'"));
+    }
+
+    #[test]
+    fn parses_dedicated_geometry_commands() {
+        let inspect = Cli::try_parse_from([
+            "taletool",
+            "geometry",
+            "inspect",
+            "16777578.bin",
+            "--json",
+            "--checksum",
+        ])
+        .unwrap();
+        assert!(matches!(
+            inspect.command,
+            Command::Geometry {
+                command: GeometryCommand::Inspect {
+                    json: true,
+                    checksum: true,
+                    ..
+                }
+            }
+        ));
+
+        let unpack = Cli::try_parse_from([
+            "taletool",
+            "geometry",
+            "unpack",
+            "16777578.bin",
+            "--out",
+            "geometry.json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            unpack.command,
+            Command::Geometry {
+                command: GeometryCommand::Unpack { .. }
+            }
+        ));
+
+        let pack = Cli::try_parse_from([
+            "taletool",
+            "geometry",
+            "pack",
+            "geometry.json",
+            "--out",
+            "16777578.bin",
+        ])
+        .unwrap();
+        assert!(matches!(
+            pack.command,
+            Command::Geometry {
+                command: GeometryCommand::Pack { .. }
+            }
+        ));
     }
 
     #[test]

@@ -9,9 +9,9 @@ observed binary archive families.
 
 | Family           | Header       | Compression          | Split layout       | Content                                           |
 | ---------------- | ------------ | -------------------- | ------------------ | ------------------------------------------------- |
-| `NStgData*.NOS`  | `NT Data 06` | raw                  | low-byte, 4 files  | TBD                                               |
-| `NStgeData*.NOS` | `NT Data 10` | raw                  | single file        | TBD                                               |
-| `NStpData*.NOS`  | `NT Data 07` | raw                  | low-byte, 32 files | [Primary texture payloads](textures.md)           |
+| `NStgData*.NOS`  | `NT Data 06` | raw                  | low-byte, 4 files  | [Geometry payloads](geometry.md)                  |
+| `NStgeData*.NOS` | `NT Data 10` | raw                  | single file        | [Effect geometry payloads](geometry.md)           |
+| `NStpData*.NOS`  | `NT Data 07` | raw                  | low-byte, 32 files | [Texture payloads](textures.md)                   |
 | `NStpeData*.NOS` | `NT Data 11` | raw                  | low-byte, 8 files  | [Effect texture payloads](textures.md)            |
 | `NStpuData*.NOS` | `NT Data 12` | raw                  | low-byte, 4 files  | [UI/widget texture payloads](textures.md)         |
 | `NSedData.NOS`   | `NT Data 20` | raw                  | single file        | TBD                                               |
