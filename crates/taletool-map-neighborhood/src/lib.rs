@@ -44,7 +44,7 @@ pub enum MapNeighborhoodError {
 
 pub type MapNeighborhoodResult<T> = std::result::Result<T, MapNeighborhoodError>;
 
-/// Axis-aligned bounds associated with one neighboring scene.
+/// Axis-aligned bounds associated with one neighboring map.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MapBounds {
@@ -52,7 +52,7 @@ pub struct MapBounds {
     pub maximum: [f32; 3],
 }
 
-/// Bounding sphere used to cull one neighboring scene.
+/// Bounding sphere used to cull one neighboring map.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MapBoundingSphere {
