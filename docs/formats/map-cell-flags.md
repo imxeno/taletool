@@ -1,7 +1,6 @@
 # Map Cell Flags
 
-`NStcData.NOS` stores rectangular map cell-flag grids. Each archive entry is
-keyed by a scene resource id; that id is not necessarily a public map id.
+`NStcData.NOS` stores rectangular map cell-flag grids keyed by map id.
 
 ## Layout
 
@@ -34,10 +33,3 @@ server behavior.
 | `0x04` | `UNKNOWN_04`              |
 | `0x08` | `MONSTER_AGGRO_DISABLED`  |
 | `0x10` | `PVP_DISABLED`            |
-
-## Runtime Use
-
-The client loads a grid by the scene resource-file id, copies the complete
-payload into scene state, and uploads a derived walkability texture. Pathfinding
-compares cell bytes with a caller-supplied mask. Observed caller masks use
-`0x01` for players and NPCs and `0x09` for monsters.
