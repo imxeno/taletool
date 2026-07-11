@@ -5,7 +5,7 @@ use std::path::Path;
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
-use taletool_height_grid::{HeightGrid, write_height_grid_bytes};
+use taletool_map::{HeightGrid, write_height_grid_bytes};
 
 const HEIGHT_GRID_DOCUMENT_FORMAT: &str = "height-grid";
 const HEIGHT_GRID_DOCUMENT_VERSION: u32 = 1;
@@ -77,7 +77,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use serde_json::json;
-    use taletool_height_grid::{
+    use taletool_map::{
         HeightGridBounds, HeightGridDimensions, HeightGridEncoding, decode_height_grid,
     };
 

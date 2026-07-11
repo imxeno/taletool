@@ -4,7 +4,7 @@ use std::fs;
 
 use anyhow::Context;
 use serde_json::json;
-use taletool_height_grid::{HeightGrid, HeightGridEncoding, decode_height_grid};
+use taletool_map::{HeightGrid, HeightGridEncoding, decode_height_grid};
 
 use crate::cli::HeightGridCommand;
 use crate::height_grid_file::{pack_height_grid_file, unpack_height_grid_file};
