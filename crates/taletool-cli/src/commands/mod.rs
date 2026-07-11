@@ -8,6 +8,8 @@ pub(crate) mod ccinf;
 pub(crate) mod cell_flag;
 /// Geometry payload command handlers.
 pub(crate) mod geometry;
+/// Map height-grid payload command handlers.
+pub(crate) mod height_grid;
 /// Patch package command handlers.
 pub(crate) mod patch;
 /// Directory scan command handler.

@@ -557,6 +557,7 @@ dependencies = [
  "taletool-ccinf",
  "taletool-core",
  "taletool-geometry",
+ "taletool-height-grid",
  "taletool-map",
  "taletool-patch",
  "taletool-text",
@@ -599,6 +600,15 @@ dependencies = [
 
 [[package]]
 name = "taletool-geometry"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "taletool-core",
+ "thiserror",
+]
+
+[[package]]
+name = "taletool-height-grid"
 version = "0.1.0"
 dependencies = [
  "serde",

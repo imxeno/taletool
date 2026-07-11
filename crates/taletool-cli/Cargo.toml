@@ -18,6 +18,7 @@ taletool-core = { path = "../taletool-core" }
 taletool-archive = { path = "../taletool-archive" }
 taletool-ccinf = { path = "../taletool-ccinf" }
 taletool-geometry = { path = "../taletool-geometry" }
+taletool-height-grid = { path = "../taletool-height-grid" }
 taletool-map = { path = "../taletool-map" }
 taletool-patch = { path = "../taletool-patch" }
 taletool-text = { path = "../taletool-text" }

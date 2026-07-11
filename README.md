@@ -15,7 +15,7 @@ client data formats.
 | `NSemData.NOS`            | Effect transform animation keyframes               | ✅                | ❌            |
 | `NSesData.NOS`            | Effect texture animation frame keys                | ✅                | ❌            |
 | `NSetcData.NOS`           | Typewriter mini-game and unused “taboo” word lists | ✅                | ⚠️             |
-| `NSgrdData*.NOS`          | Optimized map height grid data                     | ✅                | ❌            |
+| `NSgrdData*.NOS`          | Optimized map height grid data                     | ✅                | ✅            |
 | `NSgtdData.NOS`           | Game data files                                    | ✅                | ⚠️             |
 | `NSipData*.NOS`           | Map-item sprite resources                          | ✅                | ✅            |
 | `NSlangData_<locale>.NOS` | Language files                                     | ✅                | ⚠️             |

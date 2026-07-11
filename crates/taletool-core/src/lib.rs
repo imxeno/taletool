@@ -143,6 +143,10 @@ impl<'a> ByteReader<'a> {
         Ok(u32::from_le_bytes(self.read_array(field)?))
     }
 
+    pub fn read_u64_le(&mut self, field: &'static str) -> Result<u64, ByteReadError> {
+        Ok(u64::from_le_bytes(self.read_array(field)?))
+    }
+
     pub fn read_i32_le(&mut self, field: &'static str) -> Result<i32, ByteReadError> {
         Ok(i32::from_le_bytes(self.read_array(field)?))
     }

@@ -3,6 +3,7 @@ members = [
     "crates/taletool-cli",
     "crates/taletool-core",
     "crates/taletool-geometry",
+    "crates/taletool-height-grid",
     "crates/taletool-archive",
     "crates/taletool-ccinf",
     "crates/taletool-patch",
