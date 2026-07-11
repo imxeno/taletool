@@ -9,6 +9,7 @@ members = [
     "crates/taletool-zlib",
     "crates/taletool-text",
     "crates/taletool-texture",
+    "crates/taletool-map",
 ]
 resolver = "2"
 
@@ -21,6 +22,7 @@ rust-version = "1.97.0"
 [workspace.dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
+bitflags = { version = "2.10", features = ["serde"] }
 cc = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 crc32fast = "1.4"

@@ -4,6 +4,8 @@
 pub(crate) mod archive;
 /// CCINF asset command handlers.
 pub(crate) mod ccinf;
+/// Map cell-flag payload command handlers.
+pub(crate) mod cell_flag;
 /// Geometry payload command handlers.
 pub(crate) mod geometry;
 /// Patch package command handlers.

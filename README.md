@@ -26,7 +26,7 @@ client data formats.
 | `NSpmData.NOS`            | Map-object frame/resource remap tables             | ✅                | ❌            |
 | `NSpnData.NOS`            | Player/descriptor GBFC map-object index            | N/A               | ✅            |
 | `NSppData*.NOS`           | Player sprites                                     | ✅                | ✅            |
-| `NStcData*.NOS`           | Map cell flags                                     | ✅                | ❌            |
+| `NStcData.NOS`            | Map cell flags                                     | ✅                | ✅            |
 | `NStgData*.NOS`           | Geometry                                           | ✅                | ✅            |
 | `NStgeData*.NOS`          | Effect geometry                                    | ✅                | ✅            |
 | `NStkData*.NOS`           | Scene NH/MV resource-link records                  | ✅                | ❌            |

@@ -18,7 +18,7 @@ observed binary archive families.
 | `NSeffData.NOS`  | `NT Data 23` | raw                  | single file        | TBD                                               |
 | `NSemData.NOS`   | `NT Data 21` | raw                  | single file        | TBD                                               |
 | `NSesData.NOS`   | `NT Data 22` | raw                  | single file        | TBD                                               |
-| `NStcData*.NOS`  | `NT Data 05` | zlib 1.1.2 (level 9) | single file        | TBD                                               |
+| `NStcData.NOS`   | `NT Data 05` | zlib 1.1.2 (level 9) | single file        | [Map cell flags](map-cell-flags.md)               |
 | `NStuData*.NOS`  | `NT Data 02` | zlib 1.1.2 (level 9) | single file        | TBD                                               |
 | `NStkData*.NOS`  | `NT Data 03` | raw                  | single file        | TBD                                               |
 | `NStsData.NOS`   | `NT Data 09` | raw                  | single file        | Unknown and unused map-related data               |

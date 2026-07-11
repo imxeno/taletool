@@ -5,6 +5,7 @@
 //! that Clap parses.
 
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -68,6 +69,71 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: TextureCommand,
     },
+    /// Export extracted map cell-flag payloads.
+    CellFlag {
+        #[command(subcommand)]
+        command: CellFlagCommand,
+    },
+}
+
+/// Operations for individual map cell-flag payloads extracted from archives.
+#[derive(Debug, Subcommand)]
+pub(crate) enum CellFlagCommand {
+    /// Export an NStc cell grid as a color-keyed or filtered PNG.
+    ExportPng {
+        payload: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        /// Render cells containing this single flag as black and all others as white.
+        #[arg(long)]
+        flag: Option<CellFlagArg>,
+    },
+}
+
+/// A validated single-bit map cell flag supplied on the command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CellFlagArg(u8);
+
+impl CellFlagArg {
+    pub(crate) fn bits(self) -> u8 {
+        self.0
+    }
+}
+
+impl FromStr for CellFlagArg {
+    type Err = String;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let value = match input.to_ascii_lowercase().as_str() {
+            "walking-disabled" => 0x01,
+            "attack-through-disabled" => 0x02,
+            "unknown-04" => 0x04,
+            "monster-aggro-disabled" => 0x08,
+            "pvp-disabled" => 0x10,
+            _ => parse_cell_flag_number(input)?,
+        };
+
+        if value == 0 || !value.is_power_of_two() {
+            return Err(format!(
+                "cell flag must be one non-zero bit in the range 0x01..=0x80, got {input}"
+            ));
+        }
+        Ok(Self(value))
+    }
+}
+
+fn parse_cell_flag_number(input: &str) -> Result<u8, String> {
+    if let Some(hex) = input
+        .strip_prefix("0x")
+        .or_else(|| input.strip_prefix("0X"))
+    {
+        u8::from_str_radix(hex, 16)
+            .map_err(|_| format!("unknown cell flag name or invalid hexadecimal mask: {input}"))
+    } else {
+        input
+            .parse::<u8>()
+            .map_err(|_| format!("unknown cell flag name or invalid decimal mask: {input}"))
+    }
 }
 
 /// Operations for `NStgData` and `NStgeData` geometry payloads.
