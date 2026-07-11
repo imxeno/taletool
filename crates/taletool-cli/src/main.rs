@@ -17,8 +17,8 @@ mod util;
 use clap::Parser;
 use cli::{Cli, Command};
 use commands::{
-    archive::run_archive, ccinf::run_ccinf, geometry::run_geometry, patch::run_patch,
-    scan::run_scan, sprite::run_sprite, text::run_text, texture::run_texture,
+    archive::run_archive, ccinf::run_ccinf, cell_flag::run_cell_flag, geometry::run_geometry,
+    patch::run_patch, scan::run_scan, sprite::run_sprite, text::run_text, texture::run_texture,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -36,6 +36,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Patch { command } => run_patch(command).await,
         Command::Text { command } => run_text(command),
         Command::Texture { command } => run_texture(command),
+        Command::CellFlag { command } => run_cell_flag(command),
     }
 }
 
