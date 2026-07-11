@@ -29,7 +29,7 @@ client data formats.
 | `NStcData.NOS`            | Map cell flags                                     | ✅                | ✅            |
 | `NStgData*.NOS`           | Geometry                                           | ✅                | ✅            |
 | `NStgeData*.NOS`          | Effect geometry                                    | ✅                | ✅            |
-| `NStkData*.NOS`           | Scene NH/MV resource-link records                  | ✅                | ❌            |
+| `NStkData.NOS`            | Map neighborhood data                              | ✅                | ⚠️             |
 | `NStpData*.NOS`           | Textures                                           | ✅                | ✅            |
 | `NStpeData*.NOS`          | Effect textures                                    | ✅                | ✅            |
 | `NStpuData*.NOS`          | UI/widget textures                                 | ✅                | ✅            |

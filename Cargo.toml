@@ -10,6 +10,7 @@ members = [
     "crates/taletool-text",
     "crates/taletool-texture",
     "crates/taletool-map",
+    "crates/taletool-map-neighborhood",
 ]
 resolver = "2"
 

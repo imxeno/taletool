@@ -53,6 +53,11 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: HeightGridCommand,
     },
+    /// Inspect, decode, or encode map-neighborhood payloads.
+    MapNeighborhood {
+        #[command(subcommand)]
+        command: MapNeighborhoodCommand,
+    },
     /// Inspect, decode, or encode sprite payloads.
     Sprite {
         #[command(subcommand)]
@@ -184,6 +189,31 @@ pub(crate) enum HeightGridCommand {
         out: PathBuf,
     },
     /// Encode a versioned JSON document into a height-grid payload.
+    Pack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+}
+
+/// Operations for `NStkData` map-neighborhood payloads.
+#[derive(Debug, Subcommand)]
+pub(crate) enum MapNeighborhoodCommand {
+    /// Print neighbor-map keys and point-sequence structural counts.
+    Inspect {
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        checksum: bool,
+    },
+    /// Decode a map-neighborhood payload into a versioned JSON document.
+    Unpack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Encode a versioned JSON document into a map-neighborhood payload.
     Pack {
         input: PathBuf,
         #[arg(long)]
@@ -689,6 +719,68 @@ mod tests {
                 command: HeightGridCommand::Pack { .. }
             }
         ));
+    }
+
+    #[test]
+    fn parses_dedicated_map_neighborhood_commands() {
+        let inspect = Cli::try_parse_from([
+            "taletool",
+            "map-neighborhood",
+            "inspect",
+            "2006.bin",
+            "--json",
+            "--checksum",
+        ])
+        .unwrap();
+        assert!(matches!(
+            inspect.command,
+            Command::MapNeighborhood {
+                command: MapNeighborhoodCommand::Inspect {
+                    json: true,
+                    checksum: true,
+                    ..
+                }
+            }
+        ));
+
+        let unpack = Cli::try_parse_from([
+            "taletool",
+            "map-neighborhood",
+            "unpack",
+            "2006.bin",
+            "--out",
+            "2006.json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            unpack.command,
+            Command::MapNeighborhood {
+                command: MapNeighborhoodCommand::Unpack { .. }
+            }
+        ));
+
+        let pack = Cli::try_parse_from([
+            "taletool",
+            "map-neighborhood",
+            "pack",
+            "2006.json",
+            "--out",
+            "2006.bin",
+        ])
+        .unwrap();
+        assert!(matches!(
+            pack.command,
+            Command::MapNeighborhood {
+                command: MapNeighborhoodCommand::Pack { .. }
+            }
+        ));
+
+        assert!(
+            Cli::try_parse_from(["taletool", "scene-neighborhood", "inspect", "2006.bin"]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["taletool", "scene-resource", "inspect", "2006.bin"]).is_err()
+        );
     }
 
     #[test]
