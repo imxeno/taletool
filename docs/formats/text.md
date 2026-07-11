@@ -1,8 +1,8 @@
 # Text
 
 Text files are stored inside `NSgtdData`, `NSlangData`, `NScliData`, and
-`NSetcData` archives. After a file is extracted from the archive, its payload is
-one of a few simple text-oriented formats.
+`NSetcData` archives. Their record payloads use a few simple text-oriented
+formats.
 
 | Archive                   | Contents                                                              |
 | ------------------------- | --------------------------------------------------------------------- |

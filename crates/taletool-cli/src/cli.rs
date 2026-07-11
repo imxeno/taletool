@@ -47,7 +47,7 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: GeometryCommand,
     },
-    /// Inspect, decode, or encode extracted sprite payloads.
+    /// Inspect, decode, or encode sprite payloads.
     Sprite {
         #[command(subcommand)]
         command: SpriteCommand,
@@ -58,12 +58,12 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: PatchCommand,
     },
-    /// Inspect, decode, or encode extracted text payload files.
+    /// Inspect, decode, or encode text payload files.
     Text {
         #[command(subcommand)]
         command: TextCommand,
     },
-    /// Inspect, decode, or encode extracted texture payloads.
+    /// Inspect, decode, or encode texture payloads.
     Texture {
         #[command(subcommand)]
         command: TextureCommand,
@@ -226,7 +226,7 @@ pub(crate) enum PatchCommand {
     },
 }
 
-/// Operations for individual text payload files extracted from archives.
+/// Operations for individual text payload files.
 #[derive(Debug, Subcommand)]
 pub(crate) enum TextCommand {
     /// Print payload size, inferred kind, and a decoded preview.
@@ -253,7 +253,7 @@ pub(crate) enum TextCommand {
     },
 }
 
-/// Operations for texture payloads extracted from texture archives.
+/// Operations for texture payloads.
 #[derive(Debug, Subcommand)]
 pub(crate) enum TextureCommand {
     /// Print texture dimensions, format, mip levels, and optional checksum.
@@ -270,7 +270,7 @@ pub(crate) enum TextureCommand {
         #[arg(long)]
         out: PathBuf,
     },
-    /// Encode a manifest-backed texture directory into one payload.
+    /// Encode a texture manifest directory into one payload.
     Pack {
         dir: PathBuf,
         #[arg(long)]

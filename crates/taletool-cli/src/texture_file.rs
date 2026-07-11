@@ -1,4 +1,4 @@
-//! Strict manifest and PNG helpers for extracted texture payloads.
+//! Strict manifest and PNG helpers for texture payloads.
 
 use std::collections::HashSet;
 use std::fs;
@@ -53,11 +53,11 @@ pub(crate) fn unpack_texture_file(texture: &DecodedTexture, out: &Path) -> anyho
     Ok(document.mip_levels.len())
 }
 
-/// Build and write a texture payload from a manifest-backed directory.
+/// Build and write a texture payload from a texture manifest directory.
 pub(crate) fn pack_texture_dir(dir: &Path, out: &Path) -> anyhow::Result<(TextureHeader, usize)> {
     if !dir.is_dir() {
         bail!(
-            "texture input must be a manifest-backed directory: {}",
+            "texture input must be a directory containing texture.json: {}",
             dir.display()
         );
     }

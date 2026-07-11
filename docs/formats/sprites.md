@@ -51,9 +51,9 @@ produced by Taletool therefore rebuild their source pixels exactly.
 
 ## Free-Size Sprites
 
-Entries extracted from `NS4BbData*.NOS` use the free-size format. These assets
-are typically splash screens, login backgrounds, and other large screen images.
-Each payload contains one image and begins with a 4-byte header:
+Entries in `NS4BbData*.NOS` use the free-size format. These assets are typically
+splash screens, login backgrounds, and other large screen images. Each payload
+contains one image and begins with a 4-byte header:
 
 | Offset | Type  | Field             |
 | ------ | ----- | ----------------- |
