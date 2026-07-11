@@ -1,7 +1,7 @@
 //! Handlers for `taletool text` payload commands.
 //!
-//! These commands operate on individual extracted payload files, not full text
-//! archives. Archive-level packing remains in the `archive` command module.
+//! These commands operate on individual payload files, not full text archives.
+//! Archive-level packing remains in the `archive` command module.
 
 use std::fs;
 

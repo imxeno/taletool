@@ -15,7 +15,7 @@ These pages document NosTale file formats that taletool knows about.
 
 | Page                                            | Covers                                                                           |
 | ----------------------------------------------- | -------------------------------------------------------------------------------- |
-| [Text](formats/text.md)                         | Extracted `.dat`, `.lst`, `.txt`, and raw text record payloads.                  |
+| [Text](formats/text.md)                         | `.dat`, `.lst`, `.txt`, and raw text record payloads.                            |
 | [CCINF `.NOS` files](formats/ccinf.md)          | `NSmnData.NOS` and `NSpnData.NOS` GBFC indexes and wrapper.                      |
 | [Textures](formats/textures.md)                 | Texture header and pixel formats.                                                |
 | [Sprites](formats/sprites.md)                   | Map-object descriptor sprites and block-interlaced free-size sprites.            |

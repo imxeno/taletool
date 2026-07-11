@@ -47,7 +47,7 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: GeometryCommand,
     },
-    /// Inspect, decode, or encode extracted sprite payloads.
+    /// Inspect, decode, or encode sprite payloads.
     Sprite {
         #[command(subcommand)]
         command: SpriteCommand,
@@ -58,10 +58,15 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: PatchCommand,
     },
-    /// Inspect, decode, or encode extracted text payload files.
+    /// Inspect, decode, or encode text payload files.
     Text {
         #[command(subcommand)]
         command: TextCommand,
+    },
+    /// Inspect, decode, or encode texture payloads.
+    Texture {
+        #[command(subcommand)]
+        command: TextureCommand,
     },
 }
 
@@ -221,7 +226,7 @@ pub(crate) enum PatchCommand {
     },
 }
 
-/// Operations for individual text payload files extracted from archives.
+/// Operations for individual text payload files.
 #[derive(Debug, Subcommand)]
 pub(crate) enum TextCommand {
     /// Print payload size, inferred kind, and a decoded preview.
@@ -245,6 +250,31 @@ pub(crate) enum TextCommand {
         out: PathBuf,
         #[arg(long, value_enum, default_value_t = TextPayloadKindArg::Auto)]
         kind: TextPayloadKindArg,
+    },
+}
+
+/// Operations for texture payloads.
+#[derive(Debug, Subcommand)]
+pub(crate) enum TextureCommand {
+    /// Print texture dimensions, format, mip levels, and optional checksum.
+    Inspect {
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        checksum: bool,
+    },
+    /// Decode a texture payload into PNG mip levels and `texture.json`.
+    Unpack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Encode a texture manifest directory into one payload.
+    Pack {
+        dir: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
     },
 }
 
@@ -506,6 +536,48 @@ mod tests {
                     kind: SpriteKindArg::Auto,
                     ..
                 }
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_dedicated_texture_commands() {
+        let inspect = Cli::try_parse_from([
+            "taletool",
+            "texture",
+            "inspect",
+            "123.bin",
+            "--json",
+            "--checksum",
+        ])
+        .unwrap();
+        assert!(matches!(
+            inspect.command,
+            Command::Texture {
+                command: TextureCommand::Inspect {
+                    json: true,
+                    checksum: true,
+                    ..
+                }
+            }
+        ));
+
+        let unpack =
+            Cli::try_parse_from(["taletool", "texture", "unpack", "123.bin", "--out", "123"])
+                .unwrap();
+        assert!(matches!(
+            unpack.command,
+            Command::Texture {
+                command: TextureCommand::Unpack { .. }
+            }
+        ));
+
+        let pack = Cli::try_parse_from(["taletool", "texture", "pack", "123", "--out", "123.bin"])
+            .unwrap();
+        assert!(matches!(
+            pack.command,
+            Command::Texture {
+                command: TextureCommand::Pack { .. }
             }
         ));
     }

@@ -30,9 +30,9 @@ client data formats.
 | `NStgData*.NOS`           | Geometry                                           | ✅                | ✅            |
 | `NStgeData*.NOS`          | Effect geometry                                    | ✅                | ✅            |
 | `NStkData*.NOS`           | Scene NH/MV resource-link records                  | ✅                | ❌            |
-| `NStpData*.NOS`           | Textures                                           | ✅                | ❌            |
-| `NStpeData*.NOS`          | Effect textures                                    | ✅                | ❌            |
-| `NStpuData*.NOS`          | UI/widget textures                                 | ✅                | ❌            |
+| `NStpData*.NOS`           | Textures                                           | ✅                | ✅            |
+| `NStpeData*.NOS`          | Effect textures                                    | ✅                | ✅            |
+| `NStpuData*.NOS`          | UI/widget textures                                 | ✅                | ✅            |
 | `NStsData.NOS`            | Unknown and unused map-related data                | ✅                | ❌            |
 | `NStuData*.NOS`           | Scene bulk object-tree payloads                    | ✅                | ❌            |
 | `BGM*`                    | BGM audio files                                    | N/A               | N/A           |

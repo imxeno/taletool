@@ -11,13 +11,14 @@ mod paths;
 mod sound_pack;
 mod sprite_file;
 mod text_payload;
+mod texture_file;
 mod util;
 
 use clap::Parser;
 use cli::{Cli, Command};
 use commands::{
     archive::run_archive, ccinf::run_ccinf, geometry::run_geometry, patch::run_patch,
-    scan::run_scan, sprite::run_sprite, text::run_text,
+    scan::run_scan, sprite::run_sprite, text::run_text, texture::run_texture,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -34,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Sprite { command } => run_sprite(command),
         Command::Patch { command } => run_patch(command).await,
         Command::Text { command } => run_text(command),
+        Command::Texture { command } => run_texture(command),
     }
 }
 
