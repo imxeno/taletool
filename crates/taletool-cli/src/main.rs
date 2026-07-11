@@ -6,6 +6,7 @@ mod binary_preset;
 mod ccinf_file;
 mod cli;
 mod commands;
+mod geometry_file;
 mod paths;
 mod sound_pack;
 mod sprite_file;
@@ -15,8 +16,8 @@ mod util;
 use clap::Parser;
 use cli::{Cli, Command};
 use commands::{
-    archive::run_archive, ccinf::run_ccinf, patch::run_patch, scan::run_scan, sprite::run_sprite,
-    text::run_text,
+    archive::run_archive, ccinf::run_ccinf, geometry::run_geometry, patch::run_patch,
+    scan::run_scan, sprite::run_sprite, text::run_text,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -29,6 +30,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Scan { data_dir, json } => run_scan(data_dir, cli.verbose > 0, json),
         Command::Archive { command } => run_archive(command),
         Command::Ccinf { command } => run_ccinf(command),
+        Command::Geometry { command } => run_geometry(command),
         Command::Sprite { command } => run_sprite(command),
         Command::Patch { command } => run_patch(command).await,
         Command::Text { command } => run_text(command),
