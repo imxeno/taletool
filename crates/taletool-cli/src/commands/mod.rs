@@ -14,3 +14,5 @@ pub(crate) mod scan;
 pub(crate) mod sprite;
 /// Text payload command handler.
 pub(crate) mod text;
+/// Texture payload command handlers.
+pub(crate) mod texture;
