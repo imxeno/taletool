@@ -558,6 +558,7 @@ dependencies = [
  "taletool-core",
  "taletool-geometry",
  "taletool-map",
+ "taletool-map-neighborhood",
  "taletool-patch",
  "taletool-text",
  "taletool-texture",
@@ -611,6 +612,15 @@ name = "taletool-map"
 version = "0.1.0"
 dependencies = [
  "bitflags",
+ "serde",
+ "taletool-core",
+ "thiserror",
+]
+
+[[package]]
+name = "taletool-map-neighborhood"
+version = "0.1.0"
+dependencies = [
  "serde",
  "taletool-core",
  "thiserror",

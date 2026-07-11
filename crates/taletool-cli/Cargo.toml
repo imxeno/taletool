@@ -20,6 +20,7 @@ taletool-ccinf = { path = "../taletool-ccinf" }
 taletool-geometry = { path = "../taletool-geometry" }
 taletool-map = { path = "../taletool-map" }
 taletool-patch = { path = "../taletool-patch" }
+taletool-map-neighborhood = { path = "../taletool-map-neighborhood" }
 taletool-text = { path = "../taletool-text" }
 taletool-texture = { path = "../taletool-texture" }
 taletool-zlib = { path = "../taletool-zlib" }

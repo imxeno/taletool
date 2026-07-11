@@ -10,6 +10,8 @@ pub(crate) mod cell_flag;
 pub(crate) mod geometry;
 /// Map height-grid payload command handlers.
 pub(crate) mod height_grid;
+/// Map-neighborhood payload command handlers.
+pub(crate) mod map_neighborhood;
 /// Patch package command handlers.
 pub(crate) mod patch;
 /// Directory scan command handler.
