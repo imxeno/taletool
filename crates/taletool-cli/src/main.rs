@@ -7,6 +7,7 @@ mod ccinf_file;
 mod cli;
 mod commands;
 mod geometry_file;
+mod height_grid_file;
 mod paths;
 mod sound_pack;
 mod sprite_file;
@@ -18,7 +19,8 @@ use clap::Parser;
 use cli::{Cli, Command};
 use commands::{
     archive::run_archive, ccinf::run_ccinf, cell_flag::run_cell_flag, geometry::run_geometry,
-    patch::run_patch, scan::run_scan, sprite::run_sprite, text::run_text, texture::run_texture,
+    height_grid::run_height_grid, patch::run_patch, scan::run_scan, sprite::run_sprite,
+    text::run_text, texture::run_texture,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -32,6 +34,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Archive { command } => run_archive(command),
         Command::Ccinf { command } => run_ccinf(command),
         Command::Geometry { command } => run_geometry(command),
+        Command::HeightGrid { command } => run_height_grid(command),
         Command::Sprite { command } => run_sprite(command),
         Command::Patch { command } => run_patch(command).await,
         Command::Text { command } => run_text(command),

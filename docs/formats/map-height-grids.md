@@ -1,91 +1,97 @@
 # Map Height Grids
 
-`NSgrdData*.NOS` archives store optional optimized map height grids. Each
-payload is keyed by a root bulk/map id and is used to resolve the ground height
-for an X/Z world position.
+`NSgrdData*.NOS` archives store optional map height grids. A grid partitions
+collision triangles into X/Z cells so ground-height checks only need to test a
+small subset of the map geometry.
 
-| Archive          | Contents                                          |
-| ---------------- | ------------------------------------------------- |
-| `NSgrdData*.NOS` | Height grid payloads keyed by root bulk / map id. |
+Each archive payload contains its own grid and map identifiers. In observed
+files both identifiers also match the containing archive entry ID, but the
+fields are independent and are preserved separately.
 
-## Layout
+All integer and floating-point fields are little-endian.
 
-The binary archive payload starts with an extra grid id prefix:
+## Preamble and Versions
 
-| Offset | Field     | Type  | Notes                                |
-| ------ | --------- | ----- | ------------------------------------ |
-| `0x00` | Grid id   | `i32` | Observed value matches the table id. |
-| `0x04` | Grid body | bytes | Grid body.                           |
+Every payload starts with a grid ID followed by either a map ID or an explicit
+version tag:
 
-The grid body has two compatible variants.
+| Offset | Type  | Field                                                                     |
+| ------ | ----- | ------------------------------------------------------------------------- |
+| `0x00` | `i32` | Grid ID.                                                                  |
+| `0x04` | `u32` | Map ID for the implicit layout, or an explicit version tag.               |
+| `0x08` | `i32` | Map ID when offset `0x04` contains an explicit version; otherwise absent. |
 
-| First dword     | Meaning                                                                           |
-| --------------- | --------------------------------------------------------------------------------- |
-| `0x0BF82311`    | Explicit version.                                                                 |
-| `0x0BF82312`    | Explicit version.                                                                 |
-| Any other value | No explicit version. This value is Map id; version is assumed to be `0x0BF82311`. |
+The recognized explicit tags are:
 
-The only currently observed `NSgrdData06.NOS` entry uses the no-explicit-version
-form.
+| Tag          | Triangle indices | Cell triangle references |
+| ------------ | ---------------- | ------------------------ |
+| `0x0BF82311` | `u16`            | `u16`                    |
+| `0x0BF82312` | `i32`            | `i32`                    |
 
-## Grid Body Header
+When offset `0x04` is not one of these tags, uses the `0x0BF82311` index layout
+without storing a version tag.
 
-Offsets below are for the no-explicit-version body. Add `4` to each offset for
-the explicit-version body.
+## Fixed Grid Header
 
-| Offset | Field          | Type        | Notes                                                    |
-| ------ | -------------- | ----------- | -------------------------------------------------------- |
-| `0x00` | Map id         | `i32`       | Matches the record ID in the container.                  |
-| `0x04` | Data size      | `u64`       | Checked against the archive payload size.                |
-| `0x0C` | Origin         | `vec3<f32>` | World-space origin used for X/Z cell lookup.             |
-| `0x18` | Bounds vector  | `vec3<f32>` | Loaded by the client; not used by the known lookup path. |
-| `0x24` | Grid width     | `u16`       | Cell count in X.                                         |
-| `0x26` | Grid depth     | `u16`       | Cell count in Z.                                         |
-| `0x28` | Cell count     | `u32`       | Usually `grid_width * grid_depth`.                       |
-| `0x2C` | Cell size      | `vec3<f32>` | The client divides by the first scalar component.        |
-| `0x38` | Vertex count   | `u32`       | Number of following vertices.                            |
-| `0x3C` | Triangle count | `u32`       | Number of following triangle records.                    |
+The fixed header follows the map ID. Offsets below describe the implicit layout;
+add four bytes for either explicit-version layout.
 
-Vertices follow immediately after the header. Each vertex is `vec3<f32>`.
+| Offset | Type        | Field                                                                 |
+| ------ | ----------- | --------------------------------------------------------------------- |
+| `0x08` | `u64`       | Total payload size, including the grid ID and optional version tag.   |
+| `0x10` | `vec3<f32>` | World-space bounds minimum.                                           |
+| `0x1C` | `vec3<f32>` | World-space bounds maximum.                                           |
+| `0x28` | `u16`       | Grid width in X cells.                                                |
+| `0x2A` | `u16`       | Grid depth in Z cells.                                                |
+| `0x2C` | `u32`       | Cell count; valid grids use `width * depth`.                          |
+| `0x30` | `vec3<f32>` | Cell size. The runtime lookup divides X and Z by the first component. |
+| `0x3C` | `u32`       | Vertex count.                                                         |
+| `0x40` | `u32`       | Triangle count.                                                       |
 
-## Triangle Array
+The declared payload size includes every byte from the grid ID through the last
+cell row. Bounds and cell-size components must be finite. Dimensions and
+cell-size components are positive.
 
-Triangle records follow the vertex array.
+## Vertices and Triangles
 
-| Version                 | Stored type           | Client memory type    |
-| ----------------------- | --------------------- | --------------------- |
-| `0x0BF82311` or assumed | `u16 vertex_index[3]` | `i32 vertex_index[3]` |
-| `0x0BF82312`            | `i32 vertex_index[3]` | `i32 vertex_index[3]` |
+Vertices follow the fixed header. Each vertex is a world-space `vec3<f32>`.
+
+The triangle array follows the vertices. Each triangle stores three indices into
+the vertex array. The implicit layout and explicit `0x0BF82311` layout store
+`u16` indices. The `0x0BF82312` layout stores signed `i32` values; valid indices
+are non-negative.
+
+The runtime intersection path tests triangle vertices in stored order `0, 2,
+1`.
+The payload itself retains the original three-index order.
 
 ## Cell Rows
 
-Cell rows follow the triangle array. Rows are stored in X/Z row-major order:
+Cell rows follow the triangle array in X/Z row-major order:
 
 ```text
 cell_index = grid_width * z + x
 ```
 
-Each row contains a list of triangle-array indices for that cell.
+There are exactly `grid_width * grid_depth` rows. Each row contains:
 
-| Field          | Type               | Notes                                    |
-| -------------- | ------------------ | ---------------------------------------- |
-| Triangle count | `u16`              | Number of triangle indices in this cell. |
-| Indices        | `u16[]` or `i32[]` | Index width follows the grid version.    |
+| Field                    | Type               | Meaning                               |
+| ------------------------ | ------------------ | ------------------------------------- |
+| Triangle reference count | `u16`              | Number of following triangle indices. |
+| Triangle references      | `u16[]` or `i32[]` | Indices into the triangle array.      |
 
-For version `0x0BF82311`, including the assumed form, cell indices are `u16`.
-For version `0x0BF82312`, cell indices are `i32`.
+Reference width follows the version table above. Empty rows store a zero count
+and no references.
 
 ## Runtime Use
 
-When map bulk resources are refreshed, the client tries to load a grid whose id
-matches the root bulk sort key. If the grid exists, ground-height lookups use
-the grid callbacks. If it does not exist, the client uses the default bulk
-geometry callbacks.
+When map resources are refreshed, the game looks for a grid whose ID matches the
+active root map resource. If found, a ground-height lookup:
 
-The HKH lookup:
-
-- subtracts the grid origin from the queried world position
-- converts X/Z to a grid cell
-- reads that cell's triangle-index list
+- subtracts the grid bounds minimum from the queried position
+- converts X/Z to a grid cell using the cell size
+- reads that cell's triangle references
 - casts a ray downward from `Y = 1000`
-- writes the hit height back to `position.Y`
+- updates the queried Y coordinate with the nearest hit
+
+If no matching grid exists, the normal map geometry path handles the query.

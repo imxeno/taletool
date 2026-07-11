@@ -48,6 +48,11 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: GeometryCommand,
     },
+    /// Inspect, decode, or encode map height-grid payloads.
+    HeightGrid {
+        #[command(subcommand)]
+        command: HeightGridCommand,
+    },
     /// Inspect, decode, or encode sprite payloads.
     Sprite {
         #[command(subcommand)]
@@ -154,6 +159,31 @@ pub(crate) enum GeometryCommand {
         out: PathBuf,
     },
     /// Encode a versioned JSON document into a geometry payload.
+    Pack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+}
+
+/// Operations for `NSgrdData` map height-grid payloads.
+#[derive(Debug, Subcommand)]
+pub(crate) enum HeightGridCommand {
+    /// Print grid identifiers, bounds, dimensions, and structural counts.
+    Inspect {
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        checksum: bool,
+    },
+    /// Decode a height-grid payload into a versioned JSON document.
+    Unpack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Encode a versioned JSON document into a height-grid payload.
     Pack {
         input: PathBuf,
         #[arg(long)]
@@ -602,6 +632,61 @@ mod tests {
                     kind: SpriteKindArg::Auto,
                     ..
                 }
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_dedicated_height_grid_commands() {
+        let inspect = Cli::try_parse_from([
+            "taletool",
+            "height-grid",
+            "inspect",
+            "2006.bin",
+            "--json",
+            "--checksum",
+        ])
+        .unwrap();
+        assert!(matches!(
+            inspect.command,
+            Command::HeightGrid {
+                command: HeightGridCommand::Inspect {
+                    json: true,
+                    checksum: true,
+                    ..
+                }
+            }
+        ));
+
+        let unpack = Cli::try_parse_from([
+            "taletool",
+            "height-grid",
+            "unpack",
+            "2006.bin",
+            "--out",
+            "2006.json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            unpack.command,
+            Command::HeightGrid {
+                command: HeightGridCommand::Unpack { .. }
+            }
+        ));
+
+        let pack = Cli::try_parse_from([
+            "taletool",
+            "height-grid",
+            "pack",
+            "2006.json",
+            "--out",
+            "2006.bin",
+        ])
+        .unwrap();
+        assert!(matches!(
+            pack.command,
+            Command::HeightGrid {
+                command: HeightGridCommand::Pack { .. }
             }
         ));
     }
