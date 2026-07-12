@@ -38,6 +38,11 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: ArchiveCommand,
     },
+    /// Inspect, decode, or encode map payloads.
+    Map {
+        #[command(subcommand)]
+        command: MapCommand,
+    },
     /// Inspect, decode, or encode CCINF GBFC index files.
     Ccinf {
         #[command(subcommand)]
@@ -121,6 +126,31 @@ pub(crate) enum AudioCommand {
     },
 }
 
+/// Operations for `NStuData` map payloads.
+#[derive(Debug, Subcommand)]
+pub(crate) enum MapCommand {
+    /// Print scene settings, geometry references, and structural counts.
+    Inspect {
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        checksum: bool,
+    },
+    /// Decode a map payload into a JSON document.
+    Unpack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Encode a JSON document into a map payload.
+    Pack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+}
+
 /// Operations for individual map cell-flag payloads extracted from archives.
 #[derive(Debug, Subcommand)]
 pub(crate) enum CellFlagCommand {
@@ -194,7 +224,7 @@ pub(crate) enum EffectCommand {
         #[arg(long)]
         checksum: bool,
     },
-    /// Decode an effect payload into a versioned JSON document.
+    /// Decode an effect payload into a JSON document.
     Unpack {
         input: PathBuf,
         #[arg(long)]
@@ -202,7 +232,7 @@ pub(crate) enum EffectCommand {
         #[arg(long, value_enum, default_value_t = EffectKindArg::Auto)]
         kind: EffectKindArg,
     },
-    /// Encode a versioned JSON document into an effect payload.
+    /// Encode a JSON document into an effect payload.
     Pack {
         input: PathBuf,
         #[arg(long)]
@@ -221,13 +251,13 @@ pub(crate) enum GeometryCommand {
         #[arg(long)]
         checksum: bool,
     },
-    /// Decode a geometry payload into a versioned JSON document.
+    /// Decode a geometry payload into a JSON document.
     Unpack {
         input: PathBuf,
         #[arg(long)]
         out: PathBuf,
     },
-    /// Encode a versioned JSON document into a geometry payload.
+    /// Encode a JSON document into a geometry payload.
     Pack {
         input: PathBuf,
         #[arg(long)]
@@ -246,13 +276,13 @@ pub(crate) enum HeightGridCommand {
         #[arg(long)]
         checksum: bool,
     },
-    /// Decode a height-grid payload into a versioned JSON document.
+    /// Decode a height-grid payload into a JSON document.
     Unpack {
         input: PathBuf,
         #[arg(long)]
         out: PathBuf,
     },
-    /// Encode a versioned JSON document into a height-grid payload.
+    /// Encode a JSON document into a height-grid payload.
     Pack {
         input: PathBuf,
         #[arg(long)]
@@ -271,13 +301,13 @@ pub(crate) enum MapNeighborhoodCommand {
         #[arg(long)]
         checksum: bool,
     },
-    /// Decode a map-neighborhood payload into a versioned JSON document.
+    /// Decode a map-neighborhood payload into a JSON document.
     Unpack {
         input: PathBuf,
         #[arg(long)]
         out: PathBuf,
     },
-    /// Encode a versioned JSON document into a map-neighborhood payload.
+    /// Encode a JSON document into a map-neighborhood payload.
     Pack {
         input: PathBuf,
         #[arg(long)]
@@ -345,13 +375,13 @@ pub(crate) enum CcinfCommand {
         #[arg(long)]
         checksum: bool,
     },
-    /// Decode a CCINF file into a versioned JSON document.
+    /// Decode a CCINF file into a JSON document.
     Unpack {
         input: PathBuf,
         #[arg(long)]
         out: PathBuf,
     },
-    /// Encode a versioned JSON document into a CCINF file.
+    /// Encode a JSON document into a CCINF file.
     Pack {
         input: PathBuf,
         #[arg(long)]
@@ -572,6 +602,50 @@ pub(crate) enum TextFormatArg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_dedicated_map_commands() {
+        let inspect = Cli::try_parse_from([
+            "taletool",
+            "map",
+            "inspect",
+            "42.bin",
+            "--json",
+            "--checksum",
+        ])
+        .unwrap();
+        assert!(matches!(
+            inspect.command,
+            Command::Map {
+                command: MapCommand::Inspect {
+                    json: true,
+                    checksum: true,
+                    ..
+                }
+            }
+        ));
+
+        let unpack =
+            Cli::try_parse_from(["taletool", "map", "unpack", "42.bin", "--out", "42.json"])
+                .unwrap();
+        assert!(matches!(
+            unpack.command,
+            Command::Map {
+                command: MapCommand::Unpack { .. }
+            }
+        ));
+
+        let pack =
+            Cli::try_parse_from(["taletool", "map", "pack", "42.json", "--out", "42.bin"]).unwrap();
+        assert!(matches!(
+            pack.command,
+            Command::Map {
+                command: MapCommand::Pack { .. }
+            }
+        ));
+
+        assert!(Cli::try_parse_from(["taletool", "bulk", "inspect", "42.bin"]).is_err());
+    }
 
     #[test]
     fn parses_dedicated_ccinf_commands() {

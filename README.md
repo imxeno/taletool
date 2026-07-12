@@ -33,7 +33,7 @@ client data formats.
 | `NStpeData*.NOS`          | Effect textures                                    | ✅                | ✅            |
 | `NStpuData*.NOS`          | UI/widget textures                                 | ✅                | ✅            |
 | `NStsData.NOS`            | Unknown and unused map-related data                | ✅                | ❌            |
-| `NStuData.NOS`            | Scene bulk object-tree payloads                    | ✅                | ❌            |
+| `NStuData*.NOS`           | Map settings and geometry object trees             | ✅                | ✅            |
 | `BGM*`                    | BGM audio files                                    | N/A               | N/A           |
 | `*.ntm`, `*.nam`          | Intro/act videos                                   | N/A               | N/A           |
 | `snd.pck`                 | Audio files                                        | ✅                | N/A           |
