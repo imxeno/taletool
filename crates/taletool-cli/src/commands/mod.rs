@@ -2,6 +2,8 @@
 
 /// Archive container command handlers.
 pub(crate) mod archive;
+/// Audio metadata command handlers.
+pub(crate) mod audio;
 /// CCINF asset command handlers.
 pub(crate) mod ccinf;
 /// Map cell-flag payload command handlers.

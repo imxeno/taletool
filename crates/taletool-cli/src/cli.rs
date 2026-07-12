@@ -79,6 +79,11 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: TextCommand,
     },
+    /// Inspect, unpack, or pack sndinfo.lst audio metadata.
+    Audio {
+        #[command(subcommand)]
+        command: AudioCommand,
+    },
     /// Inspect, decode, or encode texture payloads.
     Texture {
         #[command(subcommand)]
@@ -88,6 +93,31 @@ pub(crate) enum Command {
     CellFlag {
         #[command(subcommand)]
         command: CellFlagCommand,
+    },
+}
+
+/// Operations for `sndinfo.lst` audio metadata.
+#[derive(Debug, Subcommand)]
+pub(crate) enum AudioCommand {
+    /// Print sound-table entries and optionally resolve files in a wave directory.
+    Inspect {
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        wave_dir: Option<PathBuf>,
+    },
+    /// Convert sndinfo.lst into an editable JSON manifest.
+    Unpack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Build sndinfo.lst from a JSON manifest.
+    Pack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
     },
 }
 

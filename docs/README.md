@@ -8,7 +8,7 @@ These pages document NosTale file formats that taletool knows about.
 | -------------------------------------------------------- | ------------------------------------------------------------------------- |
 | [Binary `.NOS` archives](formats/nos-binary-archives.md) | Standard `.NOS` container layout, split archives, filenames, compression. |
 | [Text `.NOS` archives](formats/nos-text-archives.md)     | `NSgtdData`, `NSlangData`, `NScliData`, and `NSetcData` layout.           |
-| [Sound package](formats/audio.md)                        | `snd.pck` containers.                                                     |
+| [Sound package](formats/audio.md)                        | `snd.pck` containers and their entry lookup behavior.                     |
 | [Patch packages](formats/patch-packages.md)              | `.PKG` packages, opcodes, and apply semantics.                            |
 
 ## Asset Formats
