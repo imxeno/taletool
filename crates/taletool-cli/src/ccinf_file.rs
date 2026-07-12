@@ -18,7 +18,7 @@ struct CcinfDocument {
     entries: Vec<CcinfEntry>,
 }
 
-/// Decode one CCINF file into a strict, versioned JSON document.
+/// Decode one CCINF file into a JSON document.
 pub(crate) fn unpack_ccinf_file(ccinf: &Ccinf, out: &Path) -> anyhow::Result<usize> {
     let document = CcinfDocument {
         format: CCINF_DOCUMENT_FORMAT.to_owned(),
@@ -30,7 +30,7 @@ pub(crate) fn unpack_ccinf_file(ccinf: &Ccinf, out: &Path) -> anyhow::Result<usi
     Ok(document.entries.len())
 }
 
-/// Encode a strict JSON document into a CCINF file.
+/// Encode a JSON document into a CCINF file.
 pub(crate) fn pack_ccinf_file(input: &Path, out: &Path) -> anyhow::Result<Ccinf> {
     let document_bytes = fs::read(input).with_context(|| format!("reading {}", input.display()))?;
     let mut document: CcinfDocument = serde_json::from_slice(&document_bytes)

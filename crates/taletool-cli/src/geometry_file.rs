@@ -18,7 +18,7 @@ struct GeometryDocument {
     geometry: Geometry,
 }
 
-/// Write decoded geometry as a strict, versioned JSON document.
+/// Write decoded geometry as a JSON document.
 pub(crate) fn unpack_geometry_file(geometry: &Geometry, out: &Path) -> anyhow::Result<()> {
     let document = GeometryDocument {
         format: GEOMETRY_DOCUMENT_FORMAT.to_owned(),
@@ -31,7 +31,7 @@ pub(crate) fn unpack_geometry_file(geometry: &Geometry, out: &Path) -> anyhow::R
     Ok(())
 }
 
-/// Build and write native geometry bytes from a strict JSON document.
+/// Build and write native geometry bytes from a JSON document.
 pub(crate) fn pack_geometry_file(input: &Path, out: &Path) -> anyhow::Result<Geometry> {
     let document_bytes = fs::read(input).with_context(|| format!("reading {}", input.display()))?;
     let document: GeometryDocument = serde_json::from_slice(&document_bytes)

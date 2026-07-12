@@ -18,7 +18,7 @@ struct HeightGridDocument {
     grid: HeightGrid,
 }
 
-/// Write a decoded height grid as a strict, versioned JSON document.
+/// Write a decoded height grid as a JSON document.
 pub(crate) fn unpack_height_grid_file(grid: &HeightGrid, out: &Path) -> anyhow::Result<()> {
     let document = HeightGridDocument {
         format: HEIGHT_GRID_DOCUMENT_FORMAT.to_owned(),
@@ -31,7 +31,7 @@ pub(crate) fn unpack_height_grid_file(grid: &HeightGrid, out: &Path) -> anyhow::
     Ok(())
 }
 
-/// Build and write native height-grid bytes from a strict JSON document.
+/// Build and write native height-grid bytes from a JSON document.
 pub(crate) fn pack_height_grid_file(input: &Path, out: &Path) -> anyhow::Result<HeightGrid> {
     let document_bytes = fs::read(input).with_context(|| format!("reading {}", input.display()))?;
     let document: HeightGridDocument = serde_json::from_slice(&document_bytes)

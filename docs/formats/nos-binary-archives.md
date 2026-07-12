@@ -19,8 +19,8 @@ observed binary archive families.
 | `NSemData.NOS`   | `NT Data 21` | raw                  | single file        | [Effect transform animations](effects.md)         |
 | `NSesData.NOS`   | `NT Data 22` | raw                  | single file        | [Effect texture animations](effects.md)           |
 | `NStcData.NOS`   | `NT Data 05` | zlib 1.1.2 (level 9) | single file        | [Map cell flags](map-cell-flags.md)               |
-| `NStuData.NOS`   | `NT Data 02` | zlib 1.1.2 (level 9) | single file        | TBD                                               |
-| `NStkData.NOS`   | `NT Data 03` | raw                  | single file        | [Map neighborhoods](map-neighborhoods.md)         |
+| `NStuData*.NOS`  | `NT Data 02` | zlib 1.1.2 (level 9) | single file        | [Map payloads](maps.md)                           |
+| `NStkData*.NOS`  | `NT Data 03` | raw                  | single file        | [Map neighborhoods](map-neighborhoods.md)         |
 | `NStsData.NOS`   | `NT Data 09` | raw                  | single file        | Unknown and unused map-related data               |
 | `NSgrdData*.NOS` | `NT Data 26` | raw                  | `file_id & 7`      | [Optimized map height grids](map-height-grids.md) |
 | `NSmcData.NOS`   | `NT Data 16` | raw                  | single file        | TBD                                               |

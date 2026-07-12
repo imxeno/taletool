@@ -18,7 +18,7 @@ struct MapNeighborhoodDocument {
     map_neighborhood: MapNeighborhood,
 }
 
-/// Write a decoded map neighborhood as a strict, versioned JSON document.
+/// Write a decoded map neighborhood as a JSON document.
 pub(crate) fn unpack_map_neighborhood_file(
     map_neighborhood: &MapNeighborhood,
     out: &Path,
@@ -34,7 +34,7 @@ pub(crate) fn unpack_map_neighborhood_file(
     Ok(())
 }
 
-/// Build and write native map-neighborhood bytes from a strict JSON document.
+/// Build and write native map-neighborhood bytes from a JSON document.
 pub(crate) fn pack_map_neighborhood_file(
     input: &Path,
     out: &Path,
