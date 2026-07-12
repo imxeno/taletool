@@ -1,5 +1,7 @@
 //! Command handlers for the top-level CLI command groups.
 
+/// Sprite-animation payload command handlers.
+pub(crate) mod animation;
 /// Archive container command handlers.
 pub(crate) mod archive;
 /// Audio metadata command handlers.

@@ -1,5 +1,6 @@
 //! Command-line interface for inspecting and transforming NosTale data files.
 
+mod animation_file;
 mod archive_detect;
 mod binary_payloads;
 mod binary_preset;
@@ -22,10 +23,10 @@ mod util;
 use clap::Parser;
 use cli::{Cli, Command};
 use commands::{
-    archive::run_archive, audio::run_audio, ccinf::run_ccinf, cell_flag::run_cell_flag,
-    effect::run_effect, geometry::run_geometry, height_grid::run_height_grid, map::run_map,
-    map_neighborhood::run_map_neighborhood, patch::run_patch, scan::run_scan, sprite::run_sprite,
-    text::run_text, texture::run_texture,
+    animation::run_animation, archive::run_archive, audio::run_audio, ccinf::run_ccinf,
+    cell_flag::run_cell_flag, effect::run_effect, geometry::run_geometry,
+    height_grid::run_height_grid, map::run_map, map_neighborhood::run_map_neighborhood,
+    patch::run_patch, scan::run_scan, sprite::run_sprite, text::run_text, texture::run_texture,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -37,6 +38,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Command::Scan { data_dir, json } => run_scan(data_dir, cli.verbose > 0, json),
         Command::Archive { command } => run_archive(command),
+        Command::Animation { command } => run_animation(command),
         Command::Map { command } => run_map(command),
         Command::Ccinf { command } => run_ccinf(command),
         Command::Effect { command } => run_effect(command),

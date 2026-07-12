@@ -19,6 +19,7 @@ These pages document NosTale file formats that taletool knows about.
 | [CCINF `.NOS` files](formats/ccinf.md)            | `NSmnData.NOS` and `NSpnData.NOS` GBFC indexes and wrapper.               |
 | [Textures](formats/textures.md)                   | Texture header and pixel formats.                                         |
 | [Sprites](formats/sprites.md)                     | Map-object descriptor sprites and block-interlaced free-size sprites.     |
+| [Sprite animations](formats/sprite-animations.md) | `NSmcData` and `NSpcData` sprite animation sequences.                     |
 | [Geometry](formats/geometry.md)                   | `NStgData` and `NStgeData` geometry, animation, and render-node payloads. |
 | [Effects](formats/effects.md)                     | `NSedData`, `NSeffData`, `NSemData`, and `NSesData` effect payloads.      |
 | [Maps](formats/maps.md)                           | `NStuData` map settings, geometry references, and object trees.           |
@@ -27,4 +28,4 @@ These pages document NosTale file formats that taletool knows about.
 | [Map height grids](formats/map-height-grids.md)   | `NSgrdData` optimized map height grid payloads.                           |
 | [Videos](formats/videos.md)                       | `.ntm` and `.nam` intro/act video files.                                  |
 | [Audio](formats/audio.md)                         | `snd.pck`, `sndinfo.lst`, and loose `BGM*` audio files in `wave`.         |
-| TBD                                               | `NStsData`, `NSmcData`, `NSpcData`, and `NSpmData` payload families.      |
+| TBD                                               | `NStsData` and `NSpmData` payload families.                               |

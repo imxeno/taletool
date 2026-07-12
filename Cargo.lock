@@ -553,6 +553,7 @@ dependencies = [
  "image",
  "serde",
  "serde_json",
+ "taletool-animation",
  "taletool-archive",
  "taletool-audio",
  "taletool-ccinf",
@@ -568,6 +569,15 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "taletool-animation"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "taletool-core",
+ "thiserror",
 ]
 
 [[package]]
