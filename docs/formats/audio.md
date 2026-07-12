@@ -17,32 +17,51 @@ The file starts with a little-endian record count:
 
 Records follow immediately. Each record is `0x7C` bytes:
 
-| Offset | Field    | Type                 | Notes                                                                             |
-| ------ | -------- | -------------------- | --------------------------------------------------------------------------------- |
-| `0x00` | Key 0    | `i32`                | Sound group.                                                                      |
-| `0x04` | Key 1    | `i32`                | Group-specific lookup value.                                                      |
-| `0x08` | Key 2    | `i32`                | Group-specific lookup value.                                                      |
-| `0x0C` | Sound id | `i32`                | Runtime sound id. `-1` marks an empty or disabled row.                            |
-| `0x10` | Unknown  | `i32`                | Varies by row; not used by the known key, sound-id, or filename resolution paths. |
-| `0x14` | Filename | Delphi string `[50]` | One length byte followed by up to 50 filename bytes.                              |
-| `0x47` | Unknown  | 53 bytes             | Always zero in modern client data; loaded but not used by the client.             |
+| Offset | Field         | Type                 | Notes                                                                                  |
+| ------ | ------------- | -------------------- | -------------------------------------------------------------------------------------- |
+| `0x00` | Group         | `i32`                | Broad sound group.                                                                     |
+| `0x04` | Primary key   | `i32`                | Group-specific lookup value.                                                           |
+| `0x08` | Secondary key | `i32`                | Group-specific lookup value.                                                           |
+| `0x0C` | Sound id      | `i32`                | Runtime sound id. `-1` marks an empty or disabled row.                                 |
+| `0x10` | Unknown 10    | `i32`                | Varies by row; not used by the known resolution paths.                                 |
+| `0x14` | Filename      | Delphi string `[50]` | One length byte and a fixed 50-byte storage area.                                      |
+| `0x47` | Unknown 47    | 53 bytes             | Always zero in client data. |
 
-The client can resolve a row in two directions:
+### Likely Authoring Workflow
 
-| Lookup      | Behavior                                                                |
-| ----------- | ----------------------------------------------------------------------- |
-| By keys     | Find the row whose `(Key 0, Key 1, Key 2)` matches the requested tuple. |
-| By sound id | Find a row with the matching sound id, then reuse that row's key tuple. |
+Unused bytes in the fixed filename storage are not consistently zero. Some rows
+declare an empty filename while retaining a complete older Korean `.wav` name;
+others retain only the suffix of a previously longer filename.
+
+This strongly suggests that Entwell's tooling maintains and writes a snapshot of an in-memory
+master table. Their tools likely edit or clone fixed-size records, assign
+Delphi short strings without clearing unused bytes, and then write complete
+`0x7C`-byte records. A clean export from normalized source data is
+unlikely.
+
+### Client Flow
+
+The client can resolve a row in two directions. Taletool calls the three key
+components `group`, `primary`, and `secondary`; the latter two names are
+intentionally neutral because their meaning depends on the group.
+
+| Lookup      | Behavior                                                                          |
+| ----------- | --------------------------------------------------------------------------------- |
+| By keys     | Find a row whose `(group, primary, secondary)` matches the requested tuple.       |
+| By sound id | Find a row with the matching sound id, then resolve that row's logical key tuple. |
 
 Once a row is selected, its filename is resolved relative to the `wave`
 directory. If the stored filename exists, it is used as-is. If it does not
 exist, the client searches the stored filename for the literal `.wav` substring.
 When found, it tries the portion before `.wav`. This is how rows such as
-`BGM (1).30000.wav` resolve to the shipped loose file `BGM (1).30000`.
+`BGM (1).30000.wav` resolve to the shipped loose file `BGM (1).30000`. If that
+also fails, the client scans loose `.wav` files and selects a filename
+containing the row's decimal sound id. Taletool reproduces these steps and sorts
+the final directory scan to make ambiguous matches deterministic.
 
-Observed `Key 0` groups in the client:
+Observed groups in the client:
 
-| Key 0 | Meaning                                                 |
+| Group | Meaning                                                 |
 | ----- | ------------------------------------------------------- |
 | `0`   | Character/actor sounds.                                 |
 | `1`   | Gameplay and UI sounds.                                 |
@@ -51,8 +70,8 @@ Observed `Key 0` groups in the client:
 | `4`   | Ambient/environment sounds.                             |
 | `5`   | Specialist/vehicle sounds.                              |
 
-For BGM rows, `Key 0` is `3`, `Key 1` is the music slot, and `Key 2` is usually
-`0`.
+For BGM rows, `group` is `3`, `primary` is the music slot, and `secondary` is
+usually `0`.
 
 Example BGM rows:
 

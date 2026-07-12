@@ -6,6 +6,7 @@ members = [
     "crates/taletool-geometry",
     "crates/taletool-archive",
     "crates/taletool-ccinf",
+    "crates/taletool-audio",
     "crates/taletool-patch",
     "crates/taletool-zlib",
     "crates/taletool-text",

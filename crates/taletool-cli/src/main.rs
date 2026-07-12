@@ -11,6 +11,7 @@ mod geometry_file;
 mod height_grid_file;
 mod map_neighborhood_file;
 mod paths;
+mod sound_info;
 mod sound_pack;
 mod sprite_file;
 mod text_payload;
@@ -20,9 +21,10 @@ mod util;
 use clap::Parser;
 use cli::{Cli, Command};
 use commands::{
-    archive::run_archive, ccinf::run_ccinf, cell_flag::run_cell_flag, effect::run_effect,
-    geometry::run_geometry, height_grid::run_height_grid, map_neighborhood::run_map_neighborhood,
-    patch::run_patch, scan::run_scan, sprite::run_sprite, text::run_text, texture::run_texture,
+    archive::run_archive, audio::run_audio, ccinf::run_ccinf, cell_flag::run_cell_flag,
+    effect::run_effect, geometry::run_geometry, height_grid::run_height_grid,
+    map_neighborhood::run_map_neighborhood, patch::run_patch, scan::run_scan, sprite::run_sprite,
+    text::run_text, texture::run_texture,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -44,6 +46,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Text { command } => run_text(command),
         Command::Texture { command } => run_texture(command),
         Command::CellFlag { command } => run_cell_flag(command),
+        Command::Audio { command } => run_audio(command),
     }
 }
 

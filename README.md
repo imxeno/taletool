@@ -38,7 +38,7 @@ client data formats.
 | `BGM*`                    | BGM audio files                                    | N/A               | N/A           |
 | `*.ntm`, `*.nam`          | Intro/act videos                                   | N/A               | N/A           |
 | `snd.pck`                 | Audio files                                        | ✅                | N/A           |
-| `sndinfo.lst`             | Audio metadata                                     | N/A               | ❌            |
+| `sndinfo.lst`             | Audio metadata                                     | N/A               | ✅            |
 | `*.PKG`                   | NosTale patch packages                             | ⚠️                 | ⚠️             |
 
 ✅ supported, ⚠️ partial support, ❌ not supported, N/A not applicable as an
