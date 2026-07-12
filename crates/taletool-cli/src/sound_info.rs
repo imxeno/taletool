@@ -1,4 +1,4 @@
-//! Lossless JSON manifest helpers for `sndinfo.lst`.
+//! JSON manifest helpers for `sndinfo.lst`.
 
 use std::fs;
 use std::path::Path;

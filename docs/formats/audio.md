@@ -17,15 +17,15 @@ The file starts with a little-endian record count:
 
 Records follow immediately. Each record is `0x7C` bytes:
 
-| Offset | Field         | Type                 | Notes                                                                                  |
-| ------ | ------------- | -------------------- | -------------------------------------------------------------------------------------- |
-| `0x00` | Group         | `i32`                | Broad sound group.                                                                     |
-| `0x04` | Primary key   | `i32`                | Group-specific lookup value.                                                           |
-| `0x08` | Secondary key | `i32`                | Group-specific lookup value.                                                           |
-| `0x0C` | Sound id      | `i32`                | Runtime sound id. `-1` marks an empty or disabled row.                                 |
-| `0x10` | Unknown 10    | `i32`                | Varies by row; not used by the known resolution paths.                                 |
-| `0x14` | Filename      | Delphi string `[50]` | One length byte and a fixed 50-byte storage area.                                      |
-| `0x47` | Unknown 47    | 53 bytes             | Always zero in client data. |
+| Offset | Field         | Type                 | Notes                                                  |
+| ------ | ------------- | -------------------- | ------------------------------------------------------ |
+| `0x00` | Group         | `i32`                | Broad sound group.                                     |
+| `0x04` | Primary key   | `i32`                | Group-specific lookup value.                           |
+| `0x08` | Secondary key | `i32`                | Group-specific lookup value.                           |
+| `0x0C` | Sound id      | `i32`                | Runtime sound id. `-1` marks an empty or disabled row. |
+| `0x10` | Unknown 10    | `i32`                | Varies by row; not used by the known resolution paths. |
+| `0x14` | Filename      | Delphi string `[50]` | One length byte and a fixed 50-byte storage area.      |
+| `0x47` | Unknown 47    | 53 bytes             | Always zero in client data.                            |
 
 ### Likely Authoring Workflow
 
@@ -33,10 +33,10 @@ Unused bytes in the fixed filename storage are not consistently zero. Some rows
 declare an empty filename while retaining a complete older Korean `.wav` name;
 others retain only the suffix of a previously longer filename.
 
-This strongly suggests that Entwell's tooling maintains and writes a snapshot of an in-memory
-master table. Their tools likely edit or clone fixed-size records, assign
-Delphi short strings without clearing unused bytes, and then write complete
-`0x7C`-byte records. A clean export from normalized source data is
+This strongly suggests that Entwell's tooling maintains and writes a snapshot of
+an in-memory master table. Their tools likely edit or clone fixed-size records,
+assign Delphi short strings without clearing unused bytes, and then write
+complete `0x7C`-byte records. A clean export from normalized source data is
 unlikely.
 
 ### Client Flow
