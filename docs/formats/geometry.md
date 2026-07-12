@@ -1,6 +1,6 @@
 # Geometry Payloads
 
-Entries in `NStgData*.NOS` and `NStgeData*.NOS` use the same geometry format.
+Entries in `NStgData*.NOS` and `NStgeData.NOS` use the same geometry format.
 `NStgData` contains scene and model geometry; `NStgeData` contains effect
 geometry. The containing binary `.NOS` archive supplies the resource id. The
 payload itself has no magic value or embedded id.
