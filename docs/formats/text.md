@@ -43,6 +43,39 @@ Known locale encodings:
 Non-localized text records should be treated as EUC-KR (they may contain
 comments in Korean)
 
+## NScli Constant Strings
+
+The `conststring.dat` record stored in `NScliData` is a compact-DAT sequence of
+numeric key/value rows. It contains, well, const strings that are not related to
+the game data like items or monsters, used pretty much everywhere in the game.
+Each nonblank row has this form:
+
+```text
+<signed decimal key><vertical tab><text>
+```
+
+The separator is byte `0x0B`. The client splits at the first separator, parses
+the prefix as a signed integer, and retains the complete suffix as text. Literal
+`#13#10` sequences are expanded to CRLF before the row is split.
+
+A value containing `<NEW_TYPE>` causes the client to sort the loaded list by its
+integer keys after parsing. Without that marker, stored row order is retained.
+
+## NSlang Language Tables
+
+Records named `_code_<locale>_*.txt` in `NSlangData` are compact-DAT sequences
+of string key/value rows. A normal row has this form:
+
+```text
+<key><tab><text>
+```
+
+The client ignores blank rows and rows whose first byte is `#`. It expands
+literal `#13#10` sequences to CRLF, splits at the first tab, and retains any
+additional tabs in the value. It then expands every `[n]` token in the value to
+CRLF. A nonblank, non-comment row without a tab produces a row whose key and
+value are both `0`.
+
 ## DAT Compact Text
 
 DAT payloads are line-based. The byte `0xFF` ends a line. Other bytes describe

@@ -7,13 +7,12 @@ Text `.NOS` archives are used to store game data and localization strings.
 Several unrelated NosTale containers use the `.NOS` extension. These are the
 observed text archive families. Text archives are not chunked.
 
-| Family                    | Record order    | Record IDs        | Packed flag convention          | Content                                 |
-| ------------------------- | --------------- | ----------------- | ------------------------------- | --------------------------------------- |
-| `NSgtdData.NOS`           | file name order | stored per record | `.dat` and `.txt` records use 1 | [Game data files](text.md)              |
-| `NSlangData_<locale>.NOS` | file name order | stored per record | `.dat` and `.txt` records use 1 | [Language files](text.md)               |
-| `NScliData.NOS`           | file name order | stored per record | `.dat` records use 1            | Client const strings                    |
-| `NScliData_<locale>.NOS`  | file name order | stored per record | `.dat` records use 1            | Localized const strings                 |
-| `NSetcData.NOS`           | file name order | stored per record | `.dat` records use 1            | Typewriter word list and `TabooStr.lst` |
+| Family            | Record order    | Record IDs        | Packed flag convention          | Content                                 |
+| ----------------- | --------------- | ----------------- | ------------------------------- | --------------------------------------- |
+| `NSgtdData.NOS`   | file name order | stored per record | `.dat` and `.txt` records use 1 | [Game data files](text.md)              |
+| `NSlangData*.NOS` | file name order | stored per record | `.dat` and `.txt` records use 1 | [Language files](text.md)               |
+| `NScliData*.NOS`  | file name order | stored per record | `.dat` records use 1            | [Client const strings](text.md)         |
+| `NSetcData.NOS`   | file name order | stored per record | `.dat` records use 1            | Typewriter word list and `TabooStr.lst` |
 
 ## Layout
 
