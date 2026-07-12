@@ -6,6 +6,8 @@ pub(crate) mod archive;
 pub(crate) mod ccinf;
 /// Map cell-flag payload command handlers.
 pub(crate) mod cell_flag;
+/// Effect asset command handlers.
+pub(crate) mod effect;
 /// Geometry payload command handlers.
 pub(crate) mod geometry;
 /// Map height-grid payload command handlers.

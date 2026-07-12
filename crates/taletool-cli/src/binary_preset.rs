@@ -83,6 +83,46 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunk_format: "NStpuData{chunk:02X}.NOS",
     },
     BinaryPreset {
+        name: "NSedData",
+        header: *b"NT Data 20\0\0\x15\x07\x04 ",
+        direct_index: 0,
+        compression: BinaryCompression::Raw,
+        zlib_profile: None,
+        chunking: ChunkingArg::Single,
+        chunk_count: 1,
+        chunk_format: "NSedData.NOS",
+    },
+    BinaryPreset {
+        name: "NSemData",
+        header: *b"NT Data 21\0\0\x15\x07\x04 ",
+        direct_index: 0,
+        compression: BinaryCompression::Raw,
+        zlib_profile: None,
+        chunking: ChunkingArg::Single,
+        chunk_count: 1,
+        chunk_format: "NSemData.NOS",
+    },
+    BinaryPreset {
+        name: "NSesData",
+        header: *b"NT Data 22\0\0\x15\x07\x04 ",
+        direct_index: 0,
+        compression: BinaryCompression::Raw,
+        zlib_profile: None,
+        chunking: ChunkingArg::Single,
+        chunk_count: 1,
+        chunk_format: "NSesData.NOS",
+    },
+    BinaryPreset {
+        name: "NSeffData",
+        header: *b"NT Data 23\0\0\x15\x07\x04 ",
+        direct_index: 0,
+        compression: BinaryCompression::Raw,
+        zlib_profile: None,
+        chunking: ChunkingArg::Single,
+        chunk_count: 1,
+        chunk_format: "NSeffData.NOS",
+    },
+    BinaryPreset {
         name: "NStcData",
         header: *b"NT Data 05\0\0\x15\x07\x04 ",
         direct_index: 0,
@@ -409,6 +449,22 @@ mod tests {
             assert_eq!(preset.compression, BinaryCompression::Zlib);
             assert_eq!(preset.zlib_profile, Some(ZlibProfile::default_level(level)));
             assert_eq!(preset.chunk_count, chunk_count);
+        }
+    }
+
+    #[test]
+    fn effect_archive_presets_are_raw_single_file_archives() {
+        for (name, data_number) in [
+            ("NSedData", b"20"),
+            ("NSemData", b"21"),
+            ("NSesData", b"22"),
+            ("NSeffData", b"23"),
+        ] {
+            let preset = resolve_binary_preset(&format!("{name}.NOS"), "auto").unwrap();
+            assert_eq!(preset.compression, BinaryCompression::Raw);
+            assert_eq!(preset.chunking, ChunkingArg::Single);
+            assert_eq!(preset.chunk_count, 1);
+            assert_eq!(&preset.header[8..10], data_number);
         }
     }
 

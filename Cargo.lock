@@ -556,6 +556,7 @@ dependencies = [
  "taletool-archive",
  "taletool-ccinf",
  "taletool-core",
+ "taletool-effect",
  "taletool-geometry",
  "taletool-map",
  "taletool-map-neighborhood",
@@ -595,6 +596,15 @@ name = "taletool-core"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "taletool-effect"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "taletool-core",
  "thiserror",
 ]
 

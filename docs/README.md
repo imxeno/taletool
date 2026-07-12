@@ -20,11 +20,11 @@ These pages document NosTale file formats that taletool knows about.
 | [Textures](formats/textures.md)                   | Texture header and pixel formats.                                         |
 | [Sprites](formats/sprites.md)                     | Map-object descriptor sprites and block-interlaced free-size sprites.     |
 | [Geometry](formats/geometry.md)                   | `NStgData` and `NStgeData` geometry, animation, and render-node payloads. |
+| [Effects](formats/effects.md)                     | `NSedData`, `NSeffData`, `NSemData`, and `NSesData` effect payloads.      |
 | [Map cell flags](formats/map-cell-flags.md)       | Map cell flags.                                                           |
 | [Map neighborhoods](formats/map-neighborhoods.md) | `NStkData` map neighbor system data.                                      |
 | [Videos](formats/videos.md)                       | `.ntm` and `.nam` intro/act video files.                                  |
 | [Audio](formats/audio.md)                         | `snd.pck`, `sndinfo.lst`, and loose `BGM*` audio files in `wave`.         |
-| TBD                                               | `NSedData`, `NSeffData`, `NSemData`, and `NSesData` payload families.     |
 | TBD                                               | `NStuData` scene object-tree payloads.                                    |
 | TBD                                               | `NStsData`, `NSmcData`, `NSpcData`, and `NSpmData` payload families.      |
 | [Map height grids](formats/map-height-grids.md)   | `NSgrdData` optimized map height grid payloads.                           |

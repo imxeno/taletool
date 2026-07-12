@@ -43,6 +43,11 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: CcinfCommand,
     },
+    /// Inspect, decode, or encode effect payloads.
+    Effect {
+        #[command(subcommand)]
+        command: EffectCommand,
+    },
     /// Inspect, decode, or encode geometry payloads.
     Geometry {
         #[command(subcommand)]
@@ -144,6 +149,35 @@ fn parse_cell_flag_number(input: &str) -> Result<u8, String> {
             .parse::<u8>()
             .map_err(|_| format!("unknown cell flag name or invalid decimal mask: {input}"))
     }
+}
+
+/// Operations for effect definitions and effect animation payloads.
+#[derive(Debug, Subcommand)]
+pub(crate) enum EffectCommand {
+    /// Print effect timing, component, and keyframe metadata.
+    Inspect {
+        input: PathBuf,
+        #[arg(long, value_enum, default_value_t = EffectKindArg::Auto)]
+        kind: EffectKindArg,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        checksum: bool,
+    },
+    /// Decode an effect payload into a versioned JSON document.
+    Unpack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long, value_enum, default_value_t = EffectKindArg::Auto)]
+        kind: EffectKindArg,
+    },
+    /// Encode a versioned JSON document into an effect payload.
+    Pack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
 }
 
 /// Operations for `NStgData` and `NStgeData` geometry payloads.
@@ -428,6 +462,21 @@ pub(crate) enum SpriteKindArg {
     FreeSize,
 }
 
+/// Effect payload format selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum EffectKindArg {
+    /// Require exactly one supported semantic format to match.
+    Auto,
+    /// Color animation keys from `NSedData`.
+    ColorAnimation,
+    /// Effect component definitions from `NSeffData`.
+    Definition,
+    /// Transform animation keys from `NSemData`.
+    TransformAnimation,
+    /// Texture resource animation keys from `NSesData`.
+    TextureAnimation,
+}
+
 /// Compression override for binary archive packing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum CompressionArg {
@@ -585,6 +634,63 @@ mod tests {
             pack.command,
             Command::Geometry {
                 command: GeometryCommand::Pack { .. }
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_dedicated_effect_commands() {
+        let inspect = Cli::try_parse_from([
+            "taletool",
+            "effect",
+            "inspect",
+            "42.bin",
+            "--kind",
+            "definition",
+            "--json",
+            "--checksum",
+        ])
+        .unwrap();
+        assert!(matches!(
+            inspect.command,
+            Command::Effect {
+                command: EffectCommand::Inspect {
+                    kind: EffectKindArg::Definition,
+                    json: true,
+                    checksum: true,
+                    ..
+                }
+            }
+        ));
+
+        let unpack = Cli::try_parse_from([
+            "taletool",
+            "effect",
+            "unpack",
+            "42.bin",
+            "--out",
+            "42.json",
+            "--kind",
+            "transform-animation",
+        ])
+        .unwrap();
+        assert!(matches!(
+            unpack.command,
+            Command::Effect {
+                command: EffectCommand::Unpack {
+                    kind: EffectKindArg::TransformAnimation,
+                    ..
+                }
+            }
+        ));
+
+        let pack =
+            Cli::try_parse_from(["taletool", "effect", "pack", "42.json", "--out", "42.bin"])
+                .unwrap();
+        assert!(matches!(
+            pack.command,
+            Command::Effect {
+                command: EffectCommand::Pack { .. }
             }
         ));
     }

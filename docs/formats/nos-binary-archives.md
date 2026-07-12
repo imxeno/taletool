@@ -14,10 +14,10 @@ observed binary archive families.
 | `NStpData*.NOS`  | `NT Data 07` | raw                  | low-byte, 32 files | [Texture payloads](textures.md)                   |
 | `NStpeData*.NOS` | `NT Data 11` | raw                  | low-byte, 8 files  | [Effect texture payloads](textures.md)            |
 | `NStpuData*.NOS` | `NT Data 12` | raw                  | low-byte, 4 files  | [UI/widget texture payloads](textures.md)         |
-| `NSedData.NOS`   | `NT Data 20` | raw                  | single file        | TBD                                               |
-| `NSeffData.NOS`  | `NT Data 23` | raw                  | single file        | TBD                                               |
-| `NSemData.NOS`   | `NT Data 21` | raw                  | single file        | TBD                                               |
-| `NSesData.NOS`   | `NT Data 22` | raw                  | single file        | TBD                                               |
+| `NSedData.NOS`   | `NT Data 20` | raw                  | single file        | [Effect color animations](effects.md)             |
+| `NSeffData.NOS`  | `NT Data 23` | raw                  | single file        | [Effect definitions](effects.md)                  |
+| `NSemData.NOS`   | `NT Data 21` | raw                  | single file        | [Effect transform animations](effects.md)         |
+| `NSesData.NOS`   | `NT Data 22` | raw                  | single file        | [Effect texture animations](effects.md)           |
 | `NStcData.NOS`   | `NT Data 05` | zlib 1.1.2 (level 9) | single file        | [Map cell flags](map-cell-flags.md)               |
 | `NStuData*.NOS`  | `NT Data 02` | zlib 1.1.2 (level 9) | single file        | TBD                                               |
 | `NStkData*.NOS`  | `NT Data 03` | raw                  | single file        | [Map neighborhoods](map-neighborhoods.md)         |
