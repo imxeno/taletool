@@ -6,6 +6,7 @@ mod binary_preset;
 mod ccinf_file;
 mod cli;
 mod commands;
+mod effect_file;
 mod geometry_file;
 mod height_grid_file;
 mod map_neighborhood_file;
@@ -19,9 +20,9 @@ mod util;
 use clap::Parser;
 use cli::{Cli, Command};
 use commands::{
-    archive::run_archive, ccinf::run_ccinf, cell_flag::run_cell_flag, geometry::run_geometry,
-    height_grid::run_height_grid, map_neighborhood::run_map_neighborhood, patch::run_patch,
-    scan::run_scan, sprite::run_sprite, text::run_text, texture::run_texture,
+    archive::run_archive, ccinf::run_ccinf, cell_flag::run_cell_flag, effect::run_effect,
+    geometry::run_geometry, height_grid::run_height_grid, map_neighborhood::run_map_neighborhood,
+    patch::run_patch, scan::run_scan, sprite::run_sprite, text::run_text, texture::run_texture,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -34,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Scan { data_dir, json } => run_scan(data_dir, cli.verbose > 0, json),
         Command::Archive { command } => run_archive(command),
         Command::Ccinf { command } => run_ccinf(command),
+        Command::Effect { command } => run_effect(command),
         Command::Geometry { command } => run_geometry(command),
         Command::HeightGrid { command } => run_height_grid(command),
         Command::MapNeighborhood { command } => run_map_neighborhood(command),

@@ -10,10 +10,10 @@ client data formats.
 | `NS4BbData*.NOS`          | Free-size sprite resources                         | ✅                | ✅            |
 | `NScliData.NOS`           | Client const strings                               | ✅                | ⚠️             |
 | `NScliData_<locale>.NOS`  | Localized client const strings                     | ✅                | ⚠️             |
-| `NSedData.NOS`            | Effect color animation keyframes                   | ✅                | ❌            |
-| `NSeffData.NOS`           | Effect definitions                                 | ✅                | ❌            |
-| `NSemData.NOS`            | Effect transform animation keyframes               | ✅                | ❌            |
-| `NSesData.NOS`            | Effect texture animation frame keys                | ✅                | ❌            |
+| `NSedData.NOS`            | Effect color animation keyframes                   | ✅                | ✅            |
+| `NSeffData.NOS`           | Effect definitions                                 | ✅                | ✅            |
+| `NSemData.NOS`            | Effect transform animation keyframes               | ✅                | ✅            |
+| `NSesData.NOS`            | Effect texture animation frame keys                | ✅                | ✅            |
 | `NSetcData.NOS`           | Typewriter mini-game and unused “taboo” word lists | ✅                | ⚠️             |
 | `NSgrdData*.NOS`          | Optimized map height grid data                     | ✅                | ✅            |
 | `NSgtdData.NOS`           | Game data files                                    | ✅                | ⚠️             |

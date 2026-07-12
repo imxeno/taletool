@@ -17,6 +17,7 @@ serde_json.workspace = true
 taletool-core = { path = "../taletool-core" }
 taletool-archive = { path = "../taletool-archive" }
 taletool-ccinf = { path = "../taletool-ccinf" }
+taletool-effect = { path = "../taletool-effect" }
 taletool-geometry = { path = "../taletool-geometry" }
 taletool-map = { path = "../taletool-map" }
 taletool-patch = { path = "../taletool-patch" }
