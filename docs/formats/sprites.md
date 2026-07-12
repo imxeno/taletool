@@ -7,7 +7,7 @@ resource id; the containing binary `.NOS` archive supplies the id.
 
 ## Map-Object Sprites
 
-Entries in `NSmpData*.NOS`, `NSppData*.NOS`, and `NSipData*.NOS` files use the
+Entries in `NSmpData*.NOS`, `NSppData*.NOS`, and `NSipData.NOS` files use the
 map-object format. The first byte is a frame count, followed by one 12-byte
 descriptor per frame and the referenced pixel blocks.
 
@@ -51,7 +51,7 @@ produced by Taletool therefore rebuild their source pixels exactly.
 
 ## Free-Size Sprites
 
-Entries in `NS4BbData*.NOS` use the free-size format. These assets are typically
+Entries in `NS4BbData.NOS` use the free-size format. These assets are typically
 splash screens, login backgrounds, and other large screen images. Each payload
 contains one image and begins with a 4-byte header:
 

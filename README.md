@@ -7,7 +7,7 @@ client data formats.
 
 | Name                      | Contains                                           | Container support | Asset support |
 | ------------------------- | -------------------------------------------------- | ----------------- | ------------- |
-| `NS4BbData*.NOS`          | Free-size sprite resources                         | ✅                | ✅            |
+| `NS4BbData.NOS`           | Free-size sprite resources                         | ✅                | ✅            |
 | `NScliData.NOS`           | Client const strings                               | ✅                | ⚠️             |
 | `NScliData_<locale>.NOS`  | Localized client const strings                     | ✅                | ⚠️             |
 | `NSedData.NOS`            | Effect color animation keyframes                   | ✅                | ✅            |
@@ -17,7 +17,7 @@ client data formats.
 | `NSetcData.NOS`           | Typewriter mini-game and unused “taboo” word lists | ✅                | ⚠️             |
 | `NSgrdData*.NOS`          | Optimized map height grid data                     | ✅                | ✅            |
 | `NSgtdData.NOS`           | Game data files                                    | ✅                | ⚠️             |
-| `NSipData*.NOS`           | Map-item sprite resources                          | ✅                | ✅            |
+| `NSipData.NOS`            | Map-item sprite resources                          | ✅                | ✅            |
 | `NSlangData_<locale>.NOS` | Language files                                     | ✅                | ⚠️             |
 | `NSmcData.NOS`            | Map-object animation definitions                   | ✅                | ❌            |
 | `NSmnData.NOS`            | Direct player/monster GBFC index                   | N/A               | ✅            |
@@ -28,13 +28,13 @@ client data formats.
 | `NSppData*.NOS`           | Player sprites                                     | ✅                | ✅            |
 | `NStcData.NOS`            | Map cell flags                                     | ✅                | ✅            |
 | `NStgData*.NOS`           | Geometry                                           | ✅                | ✅            |
-| `NStgeData*.NOS`          | Effect geometry                                    | ✅                | ✅            |
+| `NStgeData.NOS`           | Effect geometry                                    | ✅                | ✅            |
 | `NStkData.NOS`            | Map neighborhood data                              | ✅                | ⚠️             |
 | `NStpData*.NOS`           | Textures                                           | ✅                | ✅            |
 | `NStpeData*.NOS`          | Effect textures                                    | ✅                | ✅            |
 | `NStpuData*.NOS`          | UI/widget textures                                 | ✅                | ✅            |
 | `NStsData.NOS`            | Unknown and unused map-related data                | ✅                | ❌            |
-| `NStuData*.NOS`           | Scene bulk object-tree payloads                    | ✅                | ❌            |
+| `NStuData.NOS`            | Scene bulk object-tree payloads                    | ✅                | ❌            |
 | `BGM*`                    | BGM audio files                                    | N/A               | N/A           |
 | `*.ntm`, `*.nam`          | Intro/act videos                                   | N/A               | N/A           |
 | `snd.pck`                 | Audio files                                        | ✅                | N/A           |

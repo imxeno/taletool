@@ -10,7 +10,7 @@ observed binary archive families.
 | Family           | Header       | Compression          | Split layout       | Content                                           |
 | ---------------- | ------------ | -------------------- | ------------------ | ------------------------------------------------- |
 | `NStgData*.NOS`  | `NT Data 06` | raw                  | low-byte, 4 files  | [Geometry payloads](geometry.md)                  |
-| `NStgeData*.NOS` | `NT Data 10` | raw                  | single file        | [Effect geometry payloads](geometry.md)           |
+| `NStgeData.NOS`  | `NT Data 10` | raw                  | single file        | [Effect geometry payloads](geometry.md)           |
 | `NStpData*.NOS`  | `NT Data 07` | raw                  | low-byte, 32 files | [Texture payloads](textures.md)                   |
 | `NStpeData*.NOS` | `NT Data 11` | raw                  | low-byte, 8 files  | [Effect texture payloads](textures.md)            |
 | `NStpuData*.NOS` | `NT Data 12` | raw                  | low-byte, 4 files  | [UI/widget texture payloads](textures.md)         |
@@ -19,8 +19,8 @@ observed binary archive families.
 | `NSemData.NOS`   | `NT Data 21` | raw                  | single file        | [Effect transform animations](effects.md)         |
 | `NSesData.NOS`   | `NT Data 22` | raw                  | single file        | [Effect texture animations](effects.md)           |
 | `NStcData.NOS`   | `NT Data 05` | zlib 1.1.2 (level 9) | single file        | [Map cell flags](map-cell-flags.md)               |
-| `NStuData*.NOS`  | `NT Data 02` | zlib 1.1.2 (level 9) | single file        | TBD                                               |
-| `NStkData*.NOS`  | `NT Data 03` | raw                  | single file        | [Map neighborhoods](map-neighborhoods.md)         |
+| `NStuData.NOS`   | `NT Data 02` | zlib 1.1.2 (level 9) | single file        | TBD                                               |
+| `NStkData.NOS`   | `NT Data 03` | raw                  | single file        | [Map neighborhoods](map-neighborhoods.md)         |
 | `NStsData.NOS`   | `NT Data 09` | raw                  | single file        | Unknown and unused map-related data               |
 | `NSgrdData*.NOS` | `NT Data 26` | raw                  | `file_id & 7`      | [Optimized map height grids](map-height-grids.md) |
 | `NSmcData.NOS`   | `NT Data 16` | raw                  | single file        | TBD                                               |
@@ -28,8 +28,8 @@ observed binary archive families.
 | `NSpcData.NOS`   | `NT Data 13` | raw                  | single file        | TBD                                               |
 | `NSpmData.NOS`   | `NT Data 15` | raw                  | single file        | TBD                                               |
 | `NSppData*.NOS`  | `NT Data 14` | zlib 1.1.2 (level 1) | low-byte, 32 files | [Map-object sprite payloads](sprites.md)          |
-| `NSipData*.NOS`  | `NT Data 24` | zlib 1.1.2 (level 1) | single file        | [Map-object sprite payloads](sprites.md)          |
-| `NS4BbData*.NOS` | `32GBS V1.0` | zlib 1.1.2 (level 9) | single file        | [Free-size sprite payloads](sprites.md)           |
+| `NSipData.NOS`   | `NT Data 24` | zlib 1.1.2 (level 1) | single file        | [Map-object sprite payloads](sprites.md)          |
+| `NS4BbData.NOS`  | `32GBS V1.0` | zlib 1.1.2 (level 9) | single file        | [Free-size sprite payloads](sprites.md)           |
 
 `*` means the archive family may appear as an older single archive name such as
 `NStgData.NOS` or as a chunked name such as `NStgData00.NOS`.
@@ -85,5 +85,6 @@ original Delphi 7 tooling used zlib 1.1.2.
 
 Some archive families are split into several files. Low-byte split families
 route entries by the low byte of the table `file_id`; single-file families keep
-all entries in one archive. `NSgrdData*.NOS` is a special case, it's split with
-`file_id & 7`.
+all entries in one archive. Missing numbered chunks are allowed; a lookup fails
+if its `file_id` routes to a missing chunk. `NSgrdData*.NOS` is a special case
+only in its routing rule, which uses `file_id & 7`.
