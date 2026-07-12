@@ -432,6 +432,15 @@ pub(crate) enum TextCommand {
         out: PathBuf,
         #[arg(long, value_enum, default_value_t = TextPayloadKindArg::Auto)]
         kind: TextPayloadKindArg,
+        /// Select the logical structured-text format instead of inferring it.
+        #[arg(long, value_enum, default_value_t = TextFormatArg::Auto)]
+        format: TextFormatArg,
+        /// Write a structured NSlang key/value JSON document.
+        #[arg(long)]
+        json: bool,
+        /// Override the character encoding inferred from the NSlang locale suffix.
+        #[arg(long, requires = "json")]
+        encoding: Option<String>,
     },
     /// Encode a plain text file into the selected payload format.
     Pack {
@@ -440,6 +449,15 @@ pub(crate) enum TextCommand {
         out: PathBuf,
         #[arg(long, value_enum, default_value_t = TextPayloadKindArg::Auto)]
         kind: TextPayloadKindArg,
+        /// Select the logical structured-text format instead of inferring it.
+        #[arg(long, value_enum, default_value_t = TextFormatArg::Auto)]
+        format: TextFormatArg,
+        /// Read a structured NSlang key/value JSON document.
+        #[arg(long)]
+        json: bool,
+        /// Override the character encoding inferred from the NSlang output name.
+        #[arg(long, requires = "json")]
+        encoding: Option<String>,
     },
 }
 
@@ -538,6 +556,17 @@ pub(crate) enum TextPayloadKindArg {
     List,
     /// Leave bytes unchanged.
     Raw,
+}
+
+/// Logical structured formats supported by `taletool text --json`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum TextFormatArg {
+    /// Infer the structured format from the native payload filename.
+    Auto,
+    /// Parse or write an NSlang ordered key/value table.
+    Lang,
+    /// Parse or write an NScli numeric constant-string table.
+    Cli,
 }
 
 #[cfg(test)]
@@ -959,5 +988,113 @@ mod tests {
                 command: TextureCommand::Pack { .. }
             }
         ));
+    }
+
+    #[test]
+    fn parses_structured_language_text_commands() {
+        let unpack = Cli::try_parse_from([
+            "taletool",
+            "text",
+            "unpack",
+            "_code_uk_Item.txt",
+            "--out",
+            "Item.json",
+            "--json",
+            "--encoding",
+            "windows-1252",
+        ])
+        .unwrap();
+        assert!(matches!(
+            unpack.command,
+            Command::Text {
+                command: TextCommand::Unpack {
+                    json: true,
+                    encoding: Some(_),
+                    format: TextFormatArg::Auto,
+                    ..
+                }
+            }
+        ));
+
+        let renamed = Cli::try_parse_from([
+            "taletool",
+            "text",
+            "unpack",
+            "Item.txt",
+            "--out",
+            "Item.json",
+            "--json",
+            "--format",
+            "lang",
+            "--encoding",
+            "windows-1252",
+        ])
+        .unwrap();
+        assert!(matches!(
+            renamed.command,
+            Command::Text {
+                command: TextCommand::Unpack {
+                    json: true,
+                    format: TextFormatArg::Lang,
+                    ..
+                }
+            }
+        ));
+
+        let nscli = Cli::try_parse_from([
+            "taletool",
+            "text",
+            "unpack",
+            "strings.txt",
+            "--out",
+            "strings.json",
+            "--json",
+            "--format",
+            "cli",
+            "--encoding",
+            "windows-1252",
+        ])
+        .unwrap();
+        assert!(matches!(
+            nscli.command,
+            Command::Text {
+                command: TextCommand::Unpack {
+                    json: true,
+                    format: TextFormatArg::Cli,
+                    ..
+                }
+            }
+        ));
+
+        let pack = Cli::try_parse_from([
+            "taletool",
+            "text",
+            "pack",
+            "Item.json",
+            "--out",
+            "_code_uk_Item.txt",
+            "--json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            pack.command,
+            Command::Text {
+                command: TextCommand::Pack { json: true, .. }
+            }
+        ));
+
+        assert!(
+            Cli::try_parse_from([
+                "taletool",
+                "text",
+                "unpack",
+                "_code_uk_Item.txt",
+                "--out",
+                "Item.txt",
+                "--encoding",
+                "windows-1252",
+            ])
+            .is_err()
+        );
     }
 }

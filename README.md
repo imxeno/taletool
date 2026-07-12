@@ -8,8 +8,7 @@ client data formats.
 | Name                      | Contains                                           | Container support | Asset support |
 | ------------------------- | -------------------------------------------------- | ----------------- | ------------- |
 | `NS4BbData.NOS`           | Free-size sprite resources                         | ✅                | ✅            |
-| `NScliData.NOS`           | Client const strings                               | ✅                | ⚠️             |
-| `NScliData_<locale>.NOS`  | Localized client const strings                     | ✅                | ⚠️             |
+| `NScliData*.NOS`          | Client const strings                               | ✅                | ✅            |
 | `NSedData.NOS`            | Effect color animation keyframes                   | ✅                | ✅            |
 | `NSeffData.NOS`           | Effect definitions                                 | ✅                | ✅            |
 | `NSemData.NOS`            | Effect transform animation keyframes               | ✅                | ✅            |
@@ -18,7 +17,7 @@ client data formats.
 | `NSgrdData*.NOS`          | Optimized map height grid data                     | ✅                | ✅            |
 | `NSgtdData.NOS`           | Game data files                                    | ✅                | ⚠️             |
 | `NSipData.NOS`            | Map-item sprite resources                          | ✅                | ✅            |
-| `NSlangData_<locale>.NOS` | Language files                                     | ✅                | ⚠️             |
+| `NSlangData_<locale>.NOS` | Language files                                     | ✅                | ✅            |
 | `NSmcData.NOS`            | Map-object animation definitions                   | ✅                | ❌            |
 | `NSmnData.NOS`            | Direct player/monster GBFC index                   | N/A               | ✅            |
 | `NSmpData*.NOS`           | Map-object sprites                                 | ✅                | ✅            |

@@ -7,9 +7,13 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+encoding_rs.workspace = true
 serde.workspace = true
 taletool-core = { path = "../taletool-core" }
 thiserror.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
