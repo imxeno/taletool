@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/taletool-animation",
     "crates/taletool-cli",
     "crates/taletool-core",
     "crates/taletool-effect",

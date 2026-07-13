@@ -153,6 +153,16 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunk_format: "NSipData.NOS",
     },
     BinaryPreset {
+        name: "NSmcData",
+        header: *b"NT Data 16\0\0\x15\x07\x04 ",
+        direct_index: 1,
+        compression: BinaryCompression::Raw,
+        zlib_profile: None,
+        chunking: ChunkingArg::Single,
+        chunk_count: 1,
+        chunk_format: "NSmcData.NOS",
+    },
+    BinaryPreset {
         name: "NSmpData",
         header: *b"NT Data 17\0\0\x15\x07\x04 ",
         direct_index: 0,
@@ -171,6 +181,16 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::LowByte,
         chunk_count: 32,
         chunk_format: "NSppData{chunk:02X}.NOS",
+    },
+    BinaryPreset {
+        name: "NSpcData",
+        header: *b"NT Data 13\0\0\x15\x07\x04 ",
+        direct_index: 1,
+        compression: BinaryCompression::Raw,
+        zlib_profile: None,
+        chunking: ChunkingArg::Single,
+        chunk_count: 1,
+        chunk_format: "NSpcData.NOS",
     },
     BinaryPreset {
         name: "NStkData",
@@ -465,6 +485,23 @@ mod tests {
             assert_eq!(preset.chunking, ChunkingArg::Single);
             assert_eq!(preset.chunk_count, 1);
             assert_eq!(&preset.header[8..10], data_number);
+        }
+    }
+
+    #[test]
+    fn animation_presets_define_raw_single_file_archives() {
+        for (name, header) in [
+            ("NSmcData", *b"NT Data 16\0\0\x15\x07\x04 "),
+            ("NSpcData", *b"NT Data 13\0\0\x15\x07\x04 "),
+        ] {
+            let preset = resolve_binary_preset(&format!("{name}.NOS"), "auto").unwrap();
+            assert_eq!(preset.header, header);
+            assert_eq!(preset.direct_index, 1);
+            assert_eq!(preset.compression, BinaryCompression::Raw);
+            assert_eq!(preset.zlib_profile, None);
+            assert_eq!(preset.chunking, ChunkingArg::Single);
+            assert_eq!(preset.chunk_count, 1);
+            assert_eq!(preset.chunk_format, format!("{name}.NOS"));
         }
     }
 

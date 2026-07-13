@@ -1,4 +1,4 @@
-//! Strict JSON and file helpers for effect payloads.
+//! JSON and file helpers for effect payloads.
 
 use std::fs;
 use std::path::Path;

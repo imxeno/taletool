@@ -18,12 +18,12 @@ client data formats.
 | `NSgtdData.NOS`           | Game data files                                    | ✅                | ⚠️             |
 | `NSipData.NOS`            | Map-item sprite resources                          | ✅                | ✅            |
 | `NSlangData_<locale>.NOS` | Language files                                     | ✅                | ✅            |
-| `NSmcData.NOS`            | Map-object animation definitions                   | ✅                | ❌            |
-| `NSmnData.NOS`            | Direct player/monster GBFC index                   | N/A               | ✅            |
+| `NSmcData.NOS`            | Map-object animation definitions                   | ✅                | ✅            |
+| `NSmnData.NOS`            | Map-object GBFC index                              | N/A               | ✅            |
 | `NSmpData*.NOS`           | Map-object sprites                                 | ✅                | ✅            |
-| `NSpcData.NOS`            | Player animation definitions                       | ✅                | ❌            |
+| `NSpcData.NOS`            | Player animation definitions                       | ✅                | ✅            |
 | `NSpmData.NOS`            | Map-object frame/resource remap tables             | ✅                | ❌            |
-| `NSpnData.NOS`            | Player/descriptor GBFC map-object index            | N/A               | ✅            |
+| `NSpnData.NOS`            | Player GBFC map-object index                       | N/A               | ✅            |
 | `NSppData*.NOS`           | Player sprites                                     | ✅                | ✅            |
 | `NStcData.NOS`            | Map cell flags                                     | ✅                | ✅            |
 | `NStgData*.NOS`           | Geometry                                           | ✅                | ✅            |

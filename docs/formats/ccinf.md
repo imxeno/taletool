@@ -88,3 +88,7 @@ The nonnegative base and cell resource keys select individual
 [`NSmpData` or `NSppData` sprite payloads](sprites.md). Which sprite family
 supplies a key depends on the texture cache attached to the rendered map object;
 the CCINF file does not encode that distinction.
+
+The animation file id selects a
+[`NSmcData` or `NSpcData` sprite-animation payload](sprite-animations.md).
+`NSmnData` entries use `NSmcData`, while `NSpnData` entries use `NSpcData`.

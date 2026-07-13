@@ -38,6 +38,11 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: ArchiveCommand,
     },
+    /// Inspect, decode, or encode sprite-animation payloads.
+    Animation {
+        #[command(subcommand)]
+        command: AnimationCommand,
+    },
     /// Inspect, decode, or encode map payloads.
     Map {
         #[command(subcommand)]
@@ -98,6 +103,31 @@ pub(crate) enum Command {
     CellFlag {
         #[command(subcommand)]
         command: CellFlagCommand,
+    },
+}
+
+/// Operations for `NSmcData` and `NSpcData` sprite-animation payloads.
+#[derive(Debug, Subcommand)]
+pub(crate) enum AnimationCommand {
+    /// Print playback flags, timing, and frame counts.
+    Inspect {
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        checksum: bool,
+    },
+    /// Decode a sprite-animation payload into a versioned JSON document.
+    Unpack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Encode a versioned JSON document into a sprite-animation payload.
+    Pack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
     },
 }
 
@@ -824,6 +854,61 @@ mod tests {
             pack.command,
             Command::Effect {
                 command: EffectCommand::Pack { .. }
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_dedicated_animation_commands() {
+        let inspect = Cli::try_parse_from([
+            "taletool",
+            "animation",
+            "inspect",
+            "42.bin",
+            "--json",
+            "--checksum",
+        ])
+        .unwrap();
+        assert!(matches!(
+            inspect.command,
+            Command::Animation {
+                command: AnimationCommand::Inspect {
+                    json: true,
+                    checksum: true,
+                    ..
+                }
+            }
+        ));
+
+        let unpack = Cli::try_parse_from([
+            "taletool",
+            "animation",
+            "unpack",
+            "42.bin",
+            "--out",
+            "42.json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            unpack.command,
+            Command::Animation {
+                command: AnimationCommand::Unpack { .. }
+            }
+        ));
+
+        let pack = Cli::try_parse_from([
+            "taletool",
+            "animation",
+            "pack",
+            "42.json",
+            "--out",
+            "42.bin",
+        ])
+        .unwrap();
+        assert!(matches!(
+            pack.command,
+            Command::Animation {
+                command: AnimationCommand::Pack { .. }
             }
         ));
     }
