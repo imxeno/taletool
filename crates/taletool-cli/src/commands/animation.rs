@@ -68,7 +68,7 @@ fn inspect_animation(
                 "duration_ticks": animation.duration_ticks(),
                 "looping": animation.is_looping(),
                 "playback_flags": animation.playback_flags,
-                "event_count": animation.event_count(),
+                "marked_frame_count": animation.marked_frame_count(),
                 "checksum_fnv1a64": checksum.map(|value| format!("{value:016x}")),
             }))?
         );
@@ -79,7 +79,7 @@ fn inspect_animation(
         println!("duration_ticks: {}", animation.duration_ticks());
         println!("looping: {}", animation.is_looping());
         println!("playback_flags: 0x{:02x}", animation.playback_flags);
-        println!("events: {}", animation.event_count());
+        println!("marked_frames: {}", animation.marked_frame_count());
         if let Some(checksum) = checksum {
             println!("checksum_fnv1a64: {checksum:016x}");
         }

@@ -1,7 +1,7 @@
 //! Sprite-animation payloads stored in `NSmcData` and `NSpcData` archives.
 //!
 //! Each payload contains one playback-flags byte and an ordered sequence of
-//! sprite-frame indexes paired with event markers.
+//! sprite-frame indexes paired with event-timing flags.
 
 use serde::{Deserialize, Serialize};
 use taletool_core::{ByteReadError, ByteReader};
@@ -20,8 +20,8 @@ pub const MAX_ANIMATION_FRAMES: usize = u8::MAX as usize;
 pub struct SpriteAnimationFrame {
     /// Frame selected from each participating sprite resource.
     pub sprite_frame_index: u8,
-    /// Non-zero values mark an event at the end of this animation frame.
-    pub event_marker: u8,
+    /// Raw event-timing flag; zero is unmarked and all non-zero values mark the frame end.
+    pub event_timing_flag: u8,
 }
 
 /// A complete sprite-animation sequence.
@@ -30,7 +30,7 @@ pub struct SpriteAnimationFrame {
 pub struct SpriteAnimation {
     /// Raw playback flags. Unknown bits are preserved.
     pub playback_flags: u8,
-    /// Ordered sprite frames and their event markers.
+    /// Ordered sprite frames and their event-timing flags.
     pub frames: Vec<SpriteAnimationFrame>,
 }
 
@@ -47,11 +47,11 @@ impl SpriteAnimation {
             .saturating_mul(ANIMATION_FRAME_TICKS)
     }
 
-    /// Number of frames whose event marker is non-zero.
-    pub fn event_count(&self) -> usize {
+    /// Number of frames whose event-timing flag is non-zero.
+    pub fn marked_frame_count(&self) -> usize {
         self.frames
             .iter()
-            .filter(|frame| frame.event_marker != 0)
+            .filter(|frame| frame.event_timing_flag != 0)
             .count()
     }
 }
@@ -95,7 +95,7 @@ pub fn decode_sprite_animation(data: &[u8]) -> SpriteAnimationResult<SpriteAnima
     for _ in 0..frame_count {
         frames.push(SpriteAnimationFrame {
             sprite_frame_index: reader.read_u8("sprite_animation.frame.sprite_frame_index")?,
-            event_marker: reader.read_u8("sprite_animation.frame.event_marker")?,
+            event_timing_flag: reader.read_u8("sprite_animation.frame.event_timing_flag")?,
         });
     }
     if reader.remaining() != 0 {
@@ -124,7 +124,7 @@ pub fn write_sprite_animation_bytes(animation: &SpriteAnimation) -> SpriteAnimat
     output.push(animation.playback_flags);
     for frame in &animation.frames {
         output.push(frame.sprite_frame_index);
-        output.push(frame.event_marker);
+        output.push(frame.event_timing_flag);
     }
     Ok(output)
 }
@@ -140,21 +140,21 @@ mod tests {
         assert_eq!(animation.playback_flags, 0x85);
         assert!(animation.is_looping());
         assert_eq!(animation.duration_ticks(), 180);
-        assert_eq!(animation.event_count(), 2);
+        assert_eq!(animation.marked_frame_count(), 2);
         assert_eq!(
             animation.frames,
             [
                 SpriteAnimationFrame {
                     sprite_frame_index: 4,
-                    event_marker: 0,
+                    event_timing_flag: 0,
                 },
                 SpriteAnimationFrame {
                     sprite_frame_index: 7,
-                    event_marker: 2,
+                    event_timing_flag: 2,
                 },
                 SpriteAnimationFrame {
                     sprite_frame_index: 9,
-                    event_marker: 0xff,
+                    event_timing_flag: 0xff,
                 },
             ]
         );
@@ -175,7 +175,7 @@ mod tests {
             frames: vec![
                 SpriteAnimationFrame {
                     sprite_frame_index: 0xfe,
-                    event_marker: 0,
+                    event_timing_flag: 0,
                 };
                 MAX_ANIMATION_FRAMES
             ],
@@ -231,7 +231,7 @@ mod tests {
             frames: vec![
                 SpriteAnimationFrame {
                     sprite_frame_index: 0,
-                    event_marker: 0,
+                    event_timing_flag: 0,
                 };
                 MAX_ANIMATION_FRAMES + 1
             ],

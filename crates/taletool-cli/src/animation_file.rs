@@ -103,11 +103,11 @@ mod tests {
             frames: vec![
                 SpriteAnimationFrame {
                     sprite_frame_index: 2,
-                    event_marker: 0,
+                    event_timing_flag: 0,
                 },
                 SpriteAnimationFrame {
                     sprite_frame_index: 5,
-                    event_marker: 3,
+                    event_timing_flag: 3,
                 },
             ],
         }
@@ -127,6 +127,12 @@ mod tests {
         assert_eq!(document["format"], SPRITE_ANIMATION_DOCUMENT_FORMAT);
         assert_eq!(document["version"], SPRITE_ANIMATION_DOCUMENT_VERSION);
         assert_eq!(document["animation"]["playback_flags"], 0x85);
+        assert_eq!(document["animation"]["frames"][1]["event_timing_flag"], 3);
+        assert!(
+            document["animation"]["frames"][1]
+                .get("event_marker")
+                .is_none()
+        );
 
         let actual = pack_sprite_animation_file(&json_path, &payload_path).unwrap();
         assert_eq!(actual, expected);
@@ -169,7 +175,22 @@ mod tests {
         .unwrap();
         assert!(pack_sprite_animation_file(&json_path, &root.join("bad.bin")).is_err());
 
-        let frames = vec![json!({"sprite_frame_index": 0, "event_marker": 0}); 256];
+        fs::write(
+            &json_path,
+            json!({
+                "format": SPRITE_ANIMATION_DOCUMENT_FORMAT,
+                "version": SPRITE_ANIMATION_DOCUMENT_VERSION,
+                "animation": {
+                    "playback_flags": 0,
+                    "frames": [{"sprite_frame_index": 0, "event_marker": 1}],
+                },
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(pack_sprite_animation_file(&json_path, &root.join("bad.bin")).is_err());
+
+        let frames = vec![json!({"sprite_frame_index": 0, "event_timing_flag": 0}); 256];
         fs::write(
             &json_path,
             json!({
