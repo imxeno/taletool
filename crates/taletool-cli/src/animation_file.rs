@@ -1,4 +1,4 @@
-//! Strict JSON helpers for sprite-animation payloads.
+//! JSON helpers for sprite-animation payloads.
 
 use std::fs;
 use std::path::Path;
@@ -34,7 +34,7 @@ pub(crate) fn unpack_sprite_animation_file(
     Ok(())
 }
 
-/// Build and write native sprite-animation bytes from a strict JSON document.
+/// Build and write native sprite-animation bytes from a JSON document.
 pub(crate) fn pack_sprite_animation_file(
     input: &Path,
     out: &Path,
