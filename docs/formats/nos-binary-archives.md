@@ -25,7 +25,7 @@ observed binary archive families.
 | `NSgrdData*.NOS` | `NT Data 26` | raw                  | `file_id & 7`      | [Optimized map height grids](map-height-grids.md)     |
 | `NSmcData.NOS`   | `NT Data 16` | raw                  | single file        | [Monster/NPC sprite animations](sprite-animations.md) |
 | `NSmpData*.NOS`  | `NT Data 17` | zlib 1.1.2 (level 1) | low-byte, 16 files | [Monster/NPC sprite payloads](sprites.md)             |
-| `NSpcData.NOS`   | `NT Data 13` | raw                  | single file        | [Player sprite animations](sprite-animations.md)     |
+| `NSpcData.NOS`   | `NT Data 13` | raw                  | single file        | [Player sprite animations](sprite-animations.md)      |
 | `NSpmData.NOS`   | `NT Data 15` | raw                  | single file        | Player frame/resource remap tables                    |
 | `NSppData*.NOS`  | `NT Data 14` | zlib 1.1.2 (level 1) | low-byte, 32 files | [Player sprite payloads](sprites.md)                  |
 | `NSipData.NOS`   | `NT Data 24` | zlib 1.1.2 (level 1) | single file        | [Map-object sprite payloads](sprites.md)              |
