@@ -1,9 +1,12 @@
 //! Typed support for CCINF `.NOS` files.
 //!
 //! `NSmnData.NOS` and `NSpnData.NOS` store a compact GBFC index behind a
-//! 25-byte wrapper. Even though they are `.NOS` files, they are modeled as single
-//! structured files, not multi-entry containers. Known files are always raw:
-//! the wrapper's unpacked and stored sizes are equal and its compression flag is zero.
+//! 25-byte wrapper. NSmn indexes the monster/NPC resource family, while NSpn
+//! indexes the player resource family; players can also borrow NSm
+//! resources. Even though they are `.NOS` files,
+//! they are modeled as single structured files, not multi-entry containers.
+//! Known files are always raw: the wrapper's unpacked and stored sizes are equal
+//! and its compression flag is zero.
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -1,8 +1,11 @@
 # CCINF `.NOS` Files
 
 `NSmnData.NOS` and `NSpnData.NOS` are structured map-object GBFC index assets.
-They use the `.NOS` extension, but they are not multi-entry containers and do
-not use the numeric-ID binary `.NOS` archive layout.
+`NSmnData.NOS` indexes the monster/NPC resource family, while `NSpnData.NOS`
+indexes the player resource family. The player renderer can explicitly borrow
+the NSm family for an icon representation. Both files use the `.NOS` extension,
+but they are not multi-entry containers and do not use the numeric-ID binary
+`.NOS` archive layout.
 
 The client loads both files with `TGBFCIndexList.Create` rather than
 `TEWMultiFileStreamMemory`/`TEWMultiFileStreamSimple`. The file starts with a

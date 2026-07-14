@@ -7,29 +7,29 @@ Binary `.NOS` archives are the standard NosTale table/chunk container format.
 Several unrelated NosTale containers use the `.NOS` extension. These are the
 observed binary archive families.
 
-| Family           | Header       | Compression          | Split layout       | Content                                              |
-| ---------------- | ------------ | -------------------- | ------------------ | ---------------------------------------------------- |
-| `NStgData*.NOS`  | `NT Data 06` | raw                  | low-byte, 4 files  | [Geometry payloads](geometry.md)                     |
-| `NStgeData.NOS`  | `NT Data 10` | raw                  | single file        | [Effect geometry payloads](geometry.md)              |
-| `NStpData*.NOS`  | `NT Data 07` | raw                  | low-byte, 32 files | [Texture payloads](textures.md)                      |
-| `NStpeData*.NOS` | `NT Data 11` | raw                  | low-byte, 8 files  | [Effect texture payloads](textures.md)               |
-| `NStpuData*.NOS` | `NT Data 12` | raw                  | low-byte, 4 files  | [UI/widget texture payloads](textures.md)            |
-| `NSedData.NOS`   | `NT Data 20` | raw                  | single file        | [Effect color animations](effects.md)                |
-| `NSeffData.NOS`  | `NT Data 23` | raw                  | single file        | [Effect definitions](effects.md)                     |
-| `NSemData.NOS`   | `NT Data 21` | raw                  | single file        | [Effect transform animations](effects.md)            |
-| `NSesData.NOS`   | `NT Data 22` | raw                  | single file        | [Effect texture animations](effects.md)              |
-| `NStcData.NOS`   | `NT Data 05` | zlib 1.1.2 (level 9) | single file        | [Map cell flags](map-cell-flags.md)                  |
-| `NStuData*.NOS`  | `NT Data 02` | zlib 1.1.2 (level 9) | single file        | [Map payloads](maps.md)                              |
-| `NStkData*.NOS`  | `NT Data 03` | raw                  | single file        | [Map neighborhoods](map-neighborhoods.md)            |
-| `NStsData.NOS`   | `NT Data 09` | raw                  | single file        | Unknown and unused map-related data                  |
-| `NSgrdData*.NOS` | `NT Data 26` | raw                  | `file_id & 7`      | [Optimized map height grids](map-height-grids.md)    |
-| `NSmcData.NOS`   | `NT Data 16` | raw                  | single file        | [Map-object sprite animations](sprite-animations.md) |
-| `NSmpData*.NOS`  | `NT Data 17` | zlib 1.1.2 (level 1) | low-byte, 16 files | [Map-object sprite payloads](sprites.md)             |
-| `NSpcData.NOS`   | `NT Data 13` | raw                  | single file        | [Player sprite animations](sprite-animations.md)     |
-| `NSpmData.NOS`   | `NT Data 15` | raw                  | single file        | TBD                                                  |
-| `NSppData*.NOS`  | `NT Data 14` | zlib 1.1.2 (level 1) | low-byte, 32 files | [Map-object sprite payloads](sprites.md)             |
-| `NSipData.NOS`   | `NT Data 24` | zlib 1.1.2 (level 1) | single file        | [Map-object sprite payloads](sprites.md)             |
-| `NS4BbData.NOS`  | `32GBS V1.0` | zlib 1.1.2 (level 9) | single file        | [Free-size sprite payloads](sprites.md)              |
+| Family           | Header       | Compression          | Split layout       | Content                                               |
+| ---------------- | ------------ | -------------------- | ------------------ | ----------------------------------------------------- |
+| `NStgData*.NOS`  | `NT Data 06` | raw                  | low-byte, 4 files  | [Geometry payloads](geometry.md)                      |
+| `NStgeData.NOS`  | `NT Data 10` | raw                  | single file        | [Effect geometry payloads](geometry.md)               |
+| `NStpData*.NOS`  | `NT Data 07` | raw                  | low-byte, 32 files | [Texture payloads](textures.md)                       |
+| `NStpeData*.NOS` | `NT Data 11` | raw                  | low-byte, 8 files  | [Effect texture payloads](textures.md)                |
+| `NStpuData*.NOS` | `NT Data 12` | raw                  | low-byte, 4 files  | [UI/widget texture payloads](textures.md)             |
+| `NSedData.NOS`   | `NT Data 20` | raw                  | single file        | [Effect color animations](effects.md)                 |
+| `NSeffData.NOS`  | `NT Data 23` | raw                  | single file        | [Effect definitions](effects.md)                      |
+| `NSemData.NOS`   | `NT Data 21` | raw                  | single file        | [Effect transform animations](effects.md)             |
+| `NSesData.NOS`   | `NT Data 22` | raw                  | single file        | [Effect texture animations](effects.md)               |
+| `NStcData.NOS`   | `NT Data 05` | zlib 1.1.2 (level 9) | single file        | [Map cell flags](map-cell-flags.md)                   |
+| `NStuData.NOS`   | `NT Data 02` | zlib 1.1.2 (level 9) | single file        | [Map payloads](maps.md)                               |
+| `NStkData.NOS`   | `NT Data 03` | raw                  | single file        | [Map neighborhoods](map-neighborhoods.md)             |
+| `NStsData.NOS`   | `NT Data 09` | raw                  | single file        | Unknown and unused map-related data                   |
+| `NSgrdData*.NOS` | `NT Data 26` | raw                  | `file_id & 7`      | [Optimized map height grids](map-height-grids.md)     |
+| `NSmcData.NOS`   | `NT Data 16` | raw                  | single file        | [Monster/NPC sprite animations](sprite-animations.md) |
+| `NSmpData*.NOS`  | `NT Data 17` | zlib 1.1.2 (level 1) | low-byte, 16 files | [Monster/NPC sprite payloads](sprites.md)             |
+| `NSpcData.NOS`   | `NT Data 13` | raw                  | single file        | [Player sprite animations](sprite-animations.md)      |
+| `NSpmData.NOS`   | `NT Data 15` | raw                  | single file        | Player frame/resource remap tables                    |
+| `NSppData*.NOS`  | `NT Data 14` | zlib 1.1.2 (level 1) | low-byte, 32 files | [Player sprite payloads](sprites.md)                  |
+| `NSipData.NOS`   | `NT Data 24` | zlib 1.1.2 (level 1) | single file        | [Map-object sprite payloads](sprites.md)              |
+| `NS4BbData.NOS`  | `32GBS V1.0` | zlib 1.1.2 (level 9) | single file        | [Free-size sprite payloads](sprites.md)               |
 
 `*` means the archive family may appear as an older single archive name such as
 `NStgData.NOS` or as a chunked name such as `NStgData00.NOS`.
