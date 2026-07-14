@@ -7,9 +7,10 @@ resource id; the containing binary `.NOS` archive supplies the id.
 
 ## Map-Object Sprites
 
-Entries in `NSmpData*.NOS`, `NSppData*.NOS`, and `NSipData.NOS` files use the
-map-object format. The first byte is a frame count, followed by one 12-byte
-descriptor per frame and the referenced pixel blocks.
+Entries in `NSmpData*.NOS` (monster/NPC), `NSppData*.NOS` (player), and
+`NSipData.NOS` (items) files use the map-object format. The first byte is a
+frame count, followed by one 12-byte descriptor per frame and the referenced
+pixel blocks.
 
 All integer fields and pixels are little-endian.
 
