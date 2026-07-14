@@ -143,17 +143,22 @@ Use `taletool --help`, `taletool <COMMAND> --help`, or
 ### Scanning a Data Directory
 
 ```text
-taletool scan --data-dir <DATA_DIR> [--json] [-v]
+taletool scan --data-dir <DATA_DIR> [--no-recursive] [--show-unsupported]
+  [--json] [-v]
 ```
 
-`scan` examines immediate `.NOS` and `.pck` files; it does not recurse. It
-classifies each file as a binary archive, text archive, sound pack, CCINF asset,
-or unknown. Add `-v` to include entry, record, and chunk counts. Combine `-v`
-with `--json` to include those details in each JSON result.
+`scan` recursively examines a client data directory and reports paths relative
+to that directory. By default, it shows recognized `.NOS` and `.pck` files and
+identifies Ogg, MP3, RIFF/WAVE, and MPEG media from their header bytes,
+regardless of the filename or extension. Media files are reported as
+`type=audio` or `type=video`. Add `--no-recursive` to examine only immediate
+files. Add `--show-unsupported` to include every other regular file with
+`type=unsupported`. Add `-v` to include archive counts and media format details.
+Combine `-v` with `--json` to include those details in each JSON result.
 
 ```console
 taletool scan --data-dir "C:\NosTale\NostaleData"
-taletool scan --data-dir "C:\NosTale\NostaleData" -v --json
+taletool scan --data-dir "C:\NosTale\NostaleData" --show-unsupported -v --json
 ```
 
 ### Archive Containers

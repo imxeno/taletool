@@ -38,7 +38,18 @@ async fn main() -> anyhow::Result<()> {
     init_tracing(cli.verbose)?;
 
     match cli.command {
-        Command::Scan { data_dir, json } => run_scan(data_dir, cli.verbose > 0, json),
+        Command::Scan {
+            data_dir,
+            json,
+            show_unsupported,
+            no_recursive,
+        } => run_scan(
+            data_dir,
+            cli.verbose > 0,
+            json,
+            show_unsupported,
+            !no_recursive,
+        ),
         Command::Archive { command } => run_archive(command),
         Command::Animation { command } => run_animation(command),
         Command::Map { command } => run_map(command),

@@ -32,6 +32,12 @@ pub(crate) enum Command {
         data_dir: PathBuf,
         #[arg(long)]
         json: bool,
+        /// Include files that do not match a supported data format.
+        #[arg(long)]
+        show_unsupported: bool,
+        /// Scan only the immediate files in the data directory.
+        #[arg(long)]
+        no_recursive: bool,
     },
     /// Inspect, unpack, or pack full archive containers.
     Archive {
@@ -664,6 +670,41 @@ pub(crate) enum TextFormatArg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_scan_options() {
+        let default =
+            Cli::try_parse_from(["taletool", "scan", "--data-dir", "NostaleData"]).unwrap();
+        assert!(matches!(
+            default.command,
+            Command::Scan {
+                json: false,
+                show_unsupported: false,
+                no_recursive: false,
+                ..
+            }
+        ));
+
+        let expanded = Cli::try_parse_from([
+            "taletool",
+            "scan",
+            "--data-dir",
+            "NostaleData",
+            "--json",
+            "--show-unsupported",
+            "--no-recursive",
+        ])
+        .unwrap();
+        assert!(matches!(
+            expanded.command,
+            Command::Scan {
+                json: true,
+                show_unsupported: true,
+                no_recursive: true,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn parses_dedicated_map_commands() {
