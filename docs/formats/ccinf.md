@@ -95,3 +95,8 @@ the CCINF file does not encode that distinction.
 The animation file id selects a
 [`NSmcData` or `NSpcData` sprite-animation payload](sprite-animations.md).
 `NSmnData` entries use `NSmcData`, while `NSpnData` entries use `NSpcData`.
+
+For player entries, a nonnegative remap table file id selects an individual
+[`NSpmData` sprite-resource remap payload](sprite-resource-remaps.md). The
+active `NSpcData` sprite frame chooses a remap row. If no table or matching row
+is available, the renderer keeps the identity resource ordering.

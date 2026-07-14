@@ -193,6 +193,16 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunk_format: "NSpcData.NOS",
     },
     BinaryPreset {
+        name: "NSpmData",
+        header: *b"NT Data 15\0\0\x15\x07\x04 ",
+        direct_index: 1,
+        compression: BinaryCompression::Raw,
+        zlib_profile: None,
+        chunking: ChunkingArg::Single,
+        chunk_count: 1,
+        chunk_format: "NSpmData.NOS",
+    },
+    BinaryPreset {
         name: "NStkData",
         header: *b"NT Data 03\0\0\x15\x07\x04 ",
         direct_index: 0,
@@ -489,10 +499,11 @@ mod tests {
     }
 
     #[test]
-    fn animation_presets_define_raw_single_file_archives() {
+    fn animation_and_remap_presets_define_raw_single_file_archives() {
         for (name, header) in [
             ("NSmcData", *b"NT Data 16\0\0\x15\x07\x04 "),
             ("NSpcData", *b"NT Data 13\0\0\x15\x07\x04 "),
+            ("NSpmData", *b"NT Data 15\0\0\x15\x07\x04 "),
         ] {
             let preset = resolve_binary_preset(&format!("{name}.NOS"), "auto").unwrap();
             assert_eq!(preset.header, header);

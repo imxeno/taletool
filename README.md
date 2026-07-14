@@ -22,7 +22,7 @@ client data formats.
 | `NSmnData.NOS`            | Monster/NPC GBFC index                             | N/A               | ✅            |
 | `NSmpData*.NOS`           | Monster/NPC sprites                                | ✅                | ✅            |
 | `NSpcData.NOS`            | Player animation definitions                       | ✅                | ✅            |
-| `NSpmData.NOS`            | Player frame/resource remap tables                 | ✅                | ❌            |
+| `NSpmData.NOS`            | Player frame/resource remap tables                 | ✅                | ✅            |
 | `NSpnData.NOS`            | Player GBFC index                                  | N/A               | ✅            |
 | `NSppData*.NOS`           | Player sprites                                     | ✅                | ✅            |
 | `NStcData.NOS`            | Map cell flags                                     | ✅                | ✅            |

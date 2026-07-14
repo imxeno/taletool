@@ -13,19 +13,20 @@ These pages document NosTale file formats that taletool knows about.
 
 ## Asset Formats
 
-| Page                                              | Covers                                                                    |
-| ------------------------------------------------- | ------------------------------------------------------------------------- |
-| [Text](formats/text.md)                           | `.dat`, `.lst`, `.txt`, and raw text record payloads.                     |
-| [CCINF `.NOS` files](formats/ccinf.md)            | Monster/NPC `NSmnData.NOS` and player `NSpnData.NOS` GBFC indexes.        |
-| [Textures](formats/textures.md)                   | Texture header and pixel formats.                                         |
-| [Sprites](formats/sprites.md)                     | Map-object descriptor sprites and block-interlaced free-size sprites.     |
-| [Sprite animations](formats/sprite-animations.md) | `NSmcData` and `NSpcData` sprite animation sequences.                     |
-| [Geometry](formats/geometry.md)                   | `NStgData` and `NStgeData` geometry, animation, and render-node payloads. |
-| [Effects](formats/effects.md)                     | `NSedData`, `NSeffData`, `NSemData`, and `NSesData` effect payloads.      |
-| [Maps](formats/maps.md)                           | `NStuData` map settings, geometry references, and object trees.           |
-| [Map cell flags](formats/map-cell-flags.md)       | Map cell flags.                                                           |
-| [Map neighborhoods](formats/map-neighborhoods.md) | `NStkData` map neighbor system data.                                      |
-| [Map height grids](formats/map-height-grids.md)   | `NSgrdData` optimized map height grid payloads.                           |
-| [Videos](formats/videos.md)                       | `.ntm` and `.nam` intro/act video files.                                  |
-| [Audio](formats/audio.md)                         | `snd.pck`, `sndinfo.lst`, and loose `BGM*` audio files in `wave`.         |
-| TBD                                               | `NStsData` and `NSpmData` payload families.                               |
+| Page                                                        | Covers                                                                    |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [Text](formats/text.md)                                     | `.dat`, `.lst`, `.txt`, and raw text record payloads.                     |
+| [CCINF `.NOS` files](formats/ccinf.md)                      | Monster/NPC `NSmnData.NOS` and player `NSpnData.NOS` GBFC indexes.        |
+| [Textures](formats/textures.md)                             | Texture header and pixel formats.                                         |
+| [Sprites](formats/sprites.md)                               | Map-object descriptor sprites and block-interlaced free-size sprites.     |
+| [Sprite animations](formats/sprite-animations.md)           | `NSmcData` and `NSpcData` sprite animation sequences.                     |
+| [Sprite resource remaps](formats/sprite-resource-remaps.md) | `NSpmData` player frame/resource ordering tables.                         |
+| [Geometry](formats/geometry.md)                             | `NStgData` and `NStgeData` geometry, animation, and render-node payloads. |
+| [Effects](formats/effects.md)                               | `NSedData`, `NSeffData`, `NSemData`, and `NSesData` effect payloads.      |
+| [Maps](formats/maps.md)                                     | `NStuData` map settings, geometry references, and object trees.           |
+| [Map cell flags](formats/map-cell-flags.md)                 | Map cell flags.                                                           |
+| [Map neighborhoods](formats/map-neighborhoods.md)           | `NStkData` map neighbor system data.                                      |
+| [Map height grids](formats/map-height-grids.md)             | `NSgrdData` optimized map height grid payloads.                           |
+| [Videos](formats/videos.md)                                 | `.ntm` and `.nam` intro/act video files.                                  |
+| [Audio](formats/audio.md)                                   | `snd.pck`, `sndinfo.lst`, and loose `BGM*` audio files in `wave`.         |
+| TBD                                                         | `NStsData` payload family.                                                |
