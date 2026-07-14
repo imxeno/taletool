@@ -76,6 +76,27 @@ additional tabs in the value. It then expands every `[n]` token in the value to
 CRLF. A nonblank, non-comment row without a tab produces a row whose key and
 value are both `0`.
 
+## NSetc String Lists
+
+`NSetcData.NOS` contains two ordered string lists:
+
+| Record                  | Payload kind | Contents                                  |
+| ----------------------- | ------------ | ----------------------------------------- |
+| `MiniGame6WordData.dat` | DAT          | Typewriter mini-game words and phrases.   |
+| `TabooStr.lst`          | LST          | An apparently unused blocked-string list. |
+
+Each stored row is one logical string. JSON conversion exposes both records as a
+plain ordered string array:
+
+```json
+["wolly", "sheep"]
+```
+
+Order, duplicate strings, and empty strings are preserved. A logical string
+cannot contain a carriage return or line feed. These records are not localized;
+structured conversion defaults to EUC-KR while permitting an explicit encoding
+override.
+
 ## DAT Compact Text
 
 DAT payloads are line-based. The byte `0xFF` ends a line. Other bytes describe

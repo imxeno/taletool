@@ -525,10 +525,10 @@ pub(crate) enum TextCommand {
         /// Select the logical structured-text format instead of inferring it.
         #[arg(long, value_enum, default_value_t = TextFormatArg::Auto)]
         format: TextFormatArg,
-        /// Write a structured NSlang key/value JSON document.
+        /// Write a structured text JSON document.
         #[arg(long)]
         json: bool,
-        /// Override the character encoding inferred from the NSlang locale suffix.
+        /// Override the character encoding inferred from the structured format.
         #[arg(long, requires = "json")]
         encoding: Option<String>,
     },
@@ -542,10 +542,10 @@ pub(crate) enum TextCommand {
         /// Select the logical structured-text format instead of inferring it.
         #[arg(long, value_enum, default_value_t = TextFormatArg::Auto)]
         format: TextFormatArg,
-        /// Read a structured NSlang key/value JSON document.
+        /// Read a structured text JSON document.
         #[arg(long)]
         json: bool,
-        /// Override the character encoding inferred from the NSlang output name.
+        /// Override the character encoding inferred from the structured format.
         #[arg(long, requires = "json")]
         encoding: Option<String>,
     },
@@ -657,6 +657,8 @@ pub(crate) enum TextFormatArg {
     Lang,
     /// Parse or write an NScli numeric constant-string table.
     Cli,
+    /// Parse or write an NSetc ordered string list.
+    Etc,
 }
 
 #[cfg(test)]
@@ -1305,6 +1307,29 @@ mod tests {
                 command: TextCommand::Unpack {
                     json: true,
                     format: TextFormatArg::Cli,
+                    ..
+                }
+            }
+        ));
+
+        let nsetc = Cli::try_parse_from([
+            "taletool",
+            "text",
+            "unpack",
+            "renamed.lst",
+            "--out",
+            "strings.json",
+            "--json",
+            "--format",
+            "etc",
+        ])
+        .unwrap();
+        assert!(matches!(
+            nsetc.command,
+            Command::Text {
+                command: TextCommand::Unpack {
+                    json: true,
+                    format: TextFormatArg::Etc,
                     ..
                 }
             }
