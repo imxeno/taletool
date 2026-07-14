@@ -8,9 +8,9 @@ use std::path::Path;
 
 use anyhow::{Context, bail};
 use taletool_text::{
-    ConstStringTable, LanguageTable, MalformedConstStringRowKind, TextEncoding, TextPayloadKind,
-    decode_const_string_table, decode_language_table, encode_const_string_table,
-    encode_language_table,
+    ConstStringTable, LanguageTable, MalformedConstStringRowKind, NSetcStringList, TextEncoding,
+    TextPayloadKind, decode_const_string_table, decode_language_table, decode_nsetc_string_list,
+    encode_const_string_table, encode_language_table, encode_nsetc_string_list,
 };
 
 use crate::cli::{TextCommand, TextFormatArg};
@@ -80,6 +80,12 @@ pub(crate) fn run_text(command: TextCommand) -> anyhow::Result<()> {
                             "constant-string",
                         )
                     }
+                    TextFormatArg::Etc => {
+                        let encoding = resolve_etc_encoding(encoding.as_deref())?;
+                        let list = decode_nsetc_string_list(&data, kind, encoding)?;
+                        let count = list.0.len();
+                        (serde_json::to_vec_pretty(&list)?, count, "NSetc string")
+                    }
                     TextFormatArg::Auto => unreachable!("structured format is resolved"),
                 };
                 if let Some(parent) = out.parent()
@@ -132,6 +138,17 @@ pub(crate) fn run_text(command: TextCommand) -> anyhow::Result<()> {
                             "constant-string",
                         )
                     }
+                    TextFormatArg::Etc => {
+                        let encoding = resolve_etc_encoding(encoding.as_deref())?;
+                        let list: NSetcStringList = serde_json::from_slice(&document)
+                            .with_context(|| format!("parsing {}", input.display()))?;
+                        let count = list.0.len();
+                        (
+                            encode_nsetc_string_list(&list, kind, encoding)?,
+                            count,
+                            "NSetc string",
+                        )
+                    }
                     TextFormatArg::Auto => unreachable!("structured format is resolved"),
                 };
                 if let Some(parent) = out.parent()
@@ -162,29 +179,37 @@ fn resolve_structured_format(
     kind: TextPayloadKind,
     format: TextFormatArg,
 ) -> anyhow::Result<TextFormatArg> {
-    if kind != TextPayloadKind::Dat {
-        bail!(
-            "structured text JSON requires a DAT payload, got {}",
-            path.display()
-        );
-    }
-    if format != TextFormatArg::Auto {
-        return Ok(format);
-    }
-    if language_locale(path).is_some() {
-        return Ok(TextFormatArg::Lang);
-    }
-    if path
+    let format = if format != TextFormatArg::Auto {
+        format
+    } else if language_locale(path).is_some() {
+        TextFormatArg::Lang
+    } else if path
         .file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.eq_ignore_ascii_case("conststring.dat"))
     {
-        return Ok(TextFormatArg::Cli);
+        TextFormatArg::Cli
+    } else if is_nsetc_payload_name(path) {
+        TextFormatArg::Etc
+    } else {
+        bail!(
+            "cannot infer a structured text format from {}; pass `--format lang`, `--format cli`, or `--format etc`",
+            path.display()
+        )
+    };
+
+    match format {
+        TextFormatArg::Lang | TextFormatArg::Cli if kind != TextPayloadKind::Dat => bail!(
+            "structured {format:?} JSON requires a DAT payload, got {}",
+            path.display()
+        ),
+        TextFormatArg::Etc if kind == TextPayloadKind::Raw => bail!(
+            "structured etc JSON requires a DAT or LST payload, got {}",
+            path.display()
+        ),
+        TextFormatArg::Auto => unreachable!("structured format is resolved"),
+        _ => Ok(format),
     }
-    bail!(
-        "cannot infer a structured text format from {}; pass `--format lang` or `--format cli`",
-        path.display()
-    )
 }
 
 fn require_json_for_explicit_format(format: TextFormatArg) -> anyhow::Result<()> {
@@ -229,6 +254,14 @@ fn resolve_cli_encoding(override_label: Option<&str>) -> anyhow::Result<TextEnco
         .ok_or_else(|| anyhow::anyhow!("unsupported text encoding: {label}"))
 }
 
+fn resolve_etc_encoding(override_label: Option<&str>) -> anyhow::Result<TextEncoding> {
+    let Some(label) = override_label else {
+        return Ok(TextEncoding::EucKr);
+    };
+    TextEncoding::for_label(label)
+        .ok_or_else(|| anyhow::anyhow!("unsupported text encoding: {label}"))
+}
+
 fn language_locale(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_str()?.to_ascii_lowercase();
     let rest = name.strip_prefix("_code_")?;
@@ -240,6 +273,15 @@ fn language_locale(path: &Path) -> Option<String> {
         return None;
     }
     Some(locale.to_owned())
+}
+
+fn is_nsetc_payload_name(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            name.eq_ignore_ascii_case("MiniGame6WordData.dat")
+                || name.eq_ignore_ascii_case("TabooStr.lst")
+        })
 }
 
 fn malformed_language_warning(path: &Path, row: usize) -> String {
@@ -352,6 +394,46 @@ mod tests {
             resolve_cli_encoding(Some("cp1250")).unwrap(),
             TextEncoding::Windows1250
         );
+    }
+
+    #[test]
+    fn resolves_nsetc_formats_and_encoding() {
+        for (name, kind) in [
+            ("MiniGame6WordData.dat", TextPayloadKind::Dat),
+            ("TABOOSTR.LST", TextPayloadKind::List),
+        ] {
+            assert_eq!(
+                resolve_structured_format(Path::new(name), kind, TextFormatArg::Auto).unwrap(),
+                TextFormatArg::Etc
+            );
+            assert!(is_nsetc_payload_name(Path::new(name)));
+        }
+
+        for (name, kind) in [
+            ("renamed.dat", TextPayloadKind::Dat),
+            ("renamed.lst", TextPayloadKind::List),
+        ] {
+            assert_eq!(
+                resolve_structured_format(Path::new(name), kind, TextFormatArg::Etc).unwrap(),
+                TextFormatArg::Etc
+            );
+        }
+
+        assert!(
+            resolve_structured_format(
+                Path::new("renamed.bin"),
+                TextPayloadKind::Raw,
+                TextFormatArg::Etc,
+            )
+            .is_err()
+        );
+        assert!(!is_nsetc_payload_name(Path::new("other.dat")));
+        assert_eq!(resolve_etc_encoding(None).unwrap(), TextEncoding::EucKr);
+        assert_eq!(
+            resolve_etc_encoding(Some("windows-1252")).unwrap(),
+            TextEncoding::Windows1252
+        );
+        assert!(resolve_etc_encoding(Some("utf-8")).is_err());
     }
 
     #[test]

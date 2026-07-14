@@ -51,6 +51,10 @@ pub enum TextError {
     InvalidLanguageValueLineBreak { entry: usize },
     #[error("constant-string entry {entry} value contains a bare carriage return or line feed")]
     InvalidConstStringValueLineBreak { entry: usize },
+    #[error("NSetc entry {entry} contains a carriage return or line feed")]
+    InvalidNSetcEntryLineBreak { entry: usize },
+    #[error("NSetc structured strings require a DAT or LST payload")]
+    UnsupportedNSetcPayloadKind,
 }
 
 pub type Result<T> = std::result::Result<T, TextError>;
@@ -157,6 +161,11 @@ pub struct ParsedConstStringTable {
     pub malformed_rows: Vec<MalformedConstStringRow>,
 }
 
+/// Ordered strings exposed by the structured `NSetcData` JSON converter.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct NSetcStringList(pub Vec<String>);
+
 /// Decode an NSlang DAT payload using the valid-row behavior of the client.
 pub fn decode_language_table(data: &[u8], encoding: TextEncoding) -> Result<ParsedLanguageTable> {
     let decoded = decode_dat_payload(data)?;
@@ -259,6 +268,50 @@ pub fn encode_const_string_table(
     }
     let bytes = encode_legacy_text(&text, encoding)?;
     encode_dat_payload(&bytes)
+}
+
+/// Decode an `NSetcData` DAT or LST payload into its ordered strings.
+pub fn decode_nsetc_string_list(
+    data: &[u8],
+    kind: TextPayloadKind,
+    encoding: TextEncoding,
+) -> Result<NSetcStringList> {
+    let decoded = match kind {
+        TextPayloadKind::Dat => decode_dat_payload(data)?,
+        TextPayloadKind::List => decode_list_payload(data)?,
+        TextPayloadKind::Raw => return Err(TextError::UnsupportedNSetcPayloadKind),
+    };
+    let text = decode_legacy_text(&decoded, encoding)?;
+    if text.is_empty() {
+        return Ok(NSetcStringList::default());
+    }
+
+    let text = text.strip_suffix('\n').unwrap_or(&text);
+    Ok(NSetcStringList(
+        text.split('\n').map(str::to_owned).collect(),
+    ))
+}
+
+/// Encode ordered `NSetcData` strings into a DAT or LST payload.
+pub fn encode_nsetc_string_list(
+    list: &NSetcStringList,
+    kind: TextPayloadKind,
+    encoding: TextEncoding,
+) -> Result<Vec<u8>> {
+    let mut text = String::new();
+    for (index, entry) in list.0.iter().enumerate() {
+        if entry.contains(['\r', '\n']) {
+            return Err(TextError::InvalidNSetcEntryLineBreak { entry: index });
+        }
+        text.push_str(entry);
+        text.push('\n');
+    }
+    let bytes = encode_legacy_text(&text, encoding)?;
+    match kind {
+        TextPayloadKind::Dat => encode_dat_payload(&bytes),
+        TextPayloadKind::List => encode_list_payload(&bytes),
+        TextPayloadKind::Raw => Err(TextError::UnsupportedNSetcPayloadKind),
+    }
 }
 
 fn decode_legacy_text(data: &[u8], encoding: TextEncoding) -> Result<Cow<'_, str>> {
@@ -725,6 +778,64 @@ mod tests {
         assert!(serde_json::from_str::<ConstStringTable>(r#"[["7","text"]]"#).is_err());
         assert!(serde_json::from_str::<ConstStringTable>(r#"[[7]]"#).is_err());
         assert!(serde_json::from_str::<ConstStringTable>(r#"[[2147483648,"text"]]"#).is_err());
+    }
+
+    #[test]
+    fn nsetc_string_list_round_trips_dat_and_list_payloads() {
+        let expected = NSetcStringList(vec![
+            "wolly".into(),
+            "금지어".into(),
+            "wolly".into(),
+            String::new(),
+        ]);
+
+        for kind in [TextPayloadKind::Dat, TextPayloadKind::List] {
+            let encoded = encode_nsetc_string_list(&expected, kind, TextEncoding::EucKr).unwrap();
+            assert_eq!(
+                decode_nsetc_string_list(&encoded, kind, TextEncoding::EucKr).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn nsetc_string_list_json_shape_is_an_array_of_strings() {
+        let list = NSetcStringList(vec!["wolly".into(), "sheep".into()]);
+        assert_eq!(
+            serde_json::to_string(&list).unwrap(),
+            r#"["wolly","sheep"]"#
+        );
+        assert!(serde_json::from_str::<NSetcStringList>(r#"["wolly",7]"#).is_err());
+    }
+
+    #[test]
+    fn nsetc_string_list_rejects_multiline_unrepresentable_and_raw_entries() {
+        for value in ["bad\nvalue", "bad\r\nvalue"] {
+            let list = NSetcStringList(vec![value.into()]);
+            assert!(matches!(
+                encode_nsetc_string_list(&list, TextPayloadKind::Dat, TextEncoding::EucKr),
+                Err(TextError::InvalidNSetcEntryLineBreak { entry: 0 })
+            ));
+        }
+
+        let unrepresentable = NSetcStringList(vec!["😀".into()]);
+        assert!(matches!(
+            encode_nsetc_string_list(&unrepresentable, TextPayloadKind::Dat, TextEncoding::EucKr,),
+            Err(TextError::UnrepresentableText { .. })
+        ));
+
+        assert!(matches!(
+            encode_nsetc_string_list(
+                &NSetcStringList::default(),
+                TextPayloadKind::Raw,
+                TextEncoding::EucKr,
+            ),
+            Err(TextError::UnsupportedNSetcPayloadKind)
+        ));
+        assert!(matches!(
+            decode_nsetc_string_list(&[], TextPayloadKind::Raw, TextEncoding::EucKr),
+            Err(TextError::UnsupportedNSetcPayloadKind)
+        ));
     }
 
     fn push_list_line(out: &mut Vec<u8>, line: &[u8]) {

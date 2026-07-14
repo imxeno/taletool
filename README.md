@@ -46,7 +46,7 @@ All examples below assume that `taletool` is installed and available on `PATH`.
 | `NSeffData.NOS`           | Effect definitions                                 | ✅                | ✅            |
 | `NSemData.NOS`            | Effect transform animation keyframes               | ✅                | ✅            |
 | `NSesData.NOS`            | Effect texture animation frame keys                | ✅                | ✅            |
-| `NSetcData.NOS`           | Typewriter mini-game and unused “taboo” word lists | ✅                | ⚠️             |
+| `NSetcData.NOS`           | Typewriter mini-game and unused “taboo” word lists | ✅                | ✅            |
 | `NSgrdData*.NOS`          | Optimized map height grid data                     | ✅                | ✅            |
 | `NSgtdData.NOS`           | Game data files                                    | ✅                | ⚠️             |
 | `NSipData.NOS`            | Map-item sprite resources                          | ✅                | ✅            |
@@ -383,11 +383,12 @@ taletool text unpack work/lang/_code_uk_Item.txt --out work/text/Item.txt
 taletool text pack work/text/Item.txt --out work/lang/_code_uk_Item.txt
 ```
 
-Add `--json` for structured language and constant-string tables. `--format`
-accepts `auto`, `lang`, or `cli`, may only be used with `--json`, and requires a
-DAT payload. Language and constant-string documents both use an ordered
-`[[key, value], ...]` JSON shape; language keys are strings and constant-string
-keys are signed integers.
+Add `--json` for structured language, constant-string, and NSetc string data.
+`--format` accepts `auto`, `lang`, `cli`, or `etc` and may only be used with
+`--json`. Language and constant-string documents require DAT payloads and use an
+ordered `[[key, value], ...]` JSON shape; language keys are strings and
+constant-string keys are signed integers. NSetc documents accept DAT or LST
+payloads and use an ordered `[value, ...]` string array.
 
 ```console
 taletool text unpack work/lang/_code_uk_Item.txt --out work/Item.json --json
@@ -397,6 +398,14 @@ taletool text unpack work/cli/conststring.dat --out work/conststring.json \
   --json --encoding windows-1252
 taletool text pack work/conststring.json --out work/cli/conststring.dat \
   --json --encoding windows-1252
+
+taletool text unpack work/etc/MiniGame6WordData.dat \
+  --out work/MiniGame6WordData.json --json
+taletool text pack work/MiniGame6WordData.json \
+  --out work/etc/MiniGame6WordData.dat --json
+
+taletool text unpack work/etc/TabooStr.lst --out work/TabooStr.json --json
+taletool text pack work/TabooStr.json --out work/etc/TabooStr.lst --json
 ```
 
 `lang` is inferred from native `_code_<locale>_<table>.txt` names. Its encoding
@@ -411,7 +420,9 @@ is inferred as follows:
 | `hk`, `tw`              | Big5         |
 
 Use `--encoding` for an unknown or renamed locale. `cli` is inferred from
-`conststring.dat` but always requires `--encoding`. Accepted labels are `big5`,
+`conststring.dat` but always requires `--encoding`. `etc` is inferred from
+`MiniGame6WordData.dat` and `TabooStr.lst`; it defaults to EUC-KR and accepts an
+encoding override. Accepted labels are `big5`,
 `euc-kr`/`euckr`/`windows-949`/`cp949`, and `windows-1250` through
 `windows-1254` (or the corresponding `cp1250`, `cp1251`, `cp1252`, and `cp1254`
 aliases).
