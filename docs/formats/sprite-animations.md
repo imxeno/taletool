@@ -34,6 +34,11 @@ time. All nonzero values have the same behavior. The marked time is
 `(frame_index + 1) * 60` game ticks from the start of the animation. The JSON
 representation exposes the raw byte as `event_timing_flag`.
 
+For player sprites with an associated
+[`NSpmData` resource-remap payload](sprite-resource-remaps.md), the same
+`NSpcData` sprite frame index selects the row that reorders the eight rendering
+resource slots.
+
 ## Playback
 
 Each animation frame lasts 60 game ticks. Playback advances through the records

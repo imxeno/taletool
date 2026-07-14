@@ -78,6 +78,11 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: SpriteCommand,
     },
+    /// Inspect, decode, or encode sprite-resource remap payloads.
+    SpriteRemap {
+        #[command(subcommand)]
+        command: SpriteRemapCommand,
+    },
     /// Inspect or apply original NosTale patch packages.
     #[command(visible_alias = "pak")]
     Patch {
@@ -124,6 +129,31 @@ pub(crate) enum AnimationCommand {
         out: PathBuf,
     },
     /// Encode a versioned JSON document into a sprite-animation payload.
+    Pack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+}
+
+/// Operations for individual `NSpmData` sprite-resource remap payloads.
+#[derive(Debug, Subcommand)]
+pub(crate) enum SpriteRemapCommand {
+    /// Print frame, identity-ordering, and skipped-slot counts.
+    Inspect {
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        checksum: bool,
+    },
+    /// Decode a sprite-resource remap payload into a JSON document.
+    Unpack {
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Encode a JSON document into a sprite-resource remap payload.
     Pack {
         input: PathBuf,
         #[arg(long)]
@@ -909,6 +939,61 @@ mod tests {
             pack.command,
             Command::Animation {
                 command: AnimationCommand::Pack { .. }
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_dedicated_sprite_remap_commands() {
+        let inspect = Cli::try_parse_from([
+            "taletool",
+            "sprite-remap",
+            "inspect",
+            "42.bin",
+            "--json",
+            "--checksum",
+        ])
+        .unwrap();
+        assert!(matches!(
+            inspect.command,
+            Command::SpriteRemap {
+                command: SpriteRemapCommand::Inspect {
+                    json: true,
+                    checksum: true,
+                    ..
+                }
+            }
+        ));
+
+        let unpack = Cli::try_parse_from([
+            "taletool",
+            "sprite-remap",
+            "unpack",
+            "42.bin",
+            "--out",
+            "42.json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            unpack.command,
+            Command::SpriteRemap {
+                command: SpriteRemapCommand::Unpack { .. }
+            }
+        ));
+
+        let pack = Cli::try_parse_from([
+            "taletool",
+            "sprite-remap",
+            "pack",
+            "42.json",
+            "--out",
+            "42.bin",
+        ])
+        .unwrap();
+        assert!(matches!(
+            pack.command,
+            Command::SpriteRemap {
+                command: SpriteRemapCommand::Pack { .. }
             }
         ));
     }

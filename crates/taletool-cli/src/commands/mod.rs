@@ -26,6 +26,8 @@ pub(crate) mod patch;
 pub(crate) mod scan;
 /// Sprite payload command handlers.
 pub(crate) mod sprite;
+/// Sprite-resource remap payload command handlers.
+pub(crate) mod sprite_remap;
 /// Text payload command handler.
 pub(crate) mod text;
 /// Texture payload command handlers.

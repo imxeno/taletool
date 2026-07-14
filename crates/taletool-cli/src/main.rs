@@ -16,6 +16,7 @@ mod paths;
 mod sound_info;
 mod sound_pack;
 mod sprite_file;
+mod sprite_remap_file;
 mod text_payload;
 mod texture_file;
 mod util;
@@ -26,7 +27,8 @@ use commands::{
     animation::run_animation, archive::run_archive, audio::run_audio, ccinf::run_ccinf,
     cell_flag::run_cell_flag, effect::run_effect, geometry::run_geometry,
     height_grid::run_height_grid, map::run_map, map_neighborhood::run_map_neighborhood,
-    patch::run_patch, scan::run_scan, sprite::run_sprite, text::run_text, texture::run_texture,
+    patch::run_patch, scan::run_scan, sprite::run_sprite, sprite_remap::run_sprite_remap,
+    text::run_text, texture::run_texture,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -46,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
         Command::HeightGrid { command } => run_height_grid(command),
         Command::MapNeighborhood { command } => run_map_neighborhood(command),
         Command::Sprite { command } => run_sprite(command),
+        Command::SpriteRemap { command } => run_sprite_remap(command),
         Command::Patch { command } => run_patch(command).await,
         Command::Text { command } => run_text(command),
         Command::Texture { command } => run_texture(command),
