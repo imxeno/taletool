@@ -9,7 +9,7 @@ observed text archive families. Text archives are not chunked.
 
 | Family            | Record order    | Record IDs        | Packed flag convention          | Content                                 |
 | ----------------- | --------------- | ----------------- | ------------------------------- | --------------------------------------- |
-| `NSgtdData.NOS`   | file name order | stored per record | `.dat` and `.txt` records use 1 | [Game data files](text.md)              |
+| `NSgtdData.NOS`   | file name order | stored per record | `.dat` and `.txt` records use 1 | [Game data files](nsgtd.md)             |
 | `NSlangData*.NOS` | file name order | stored per record | `.dat` and `.txt` records use 1 | [Language files](text.md)               |
 | `NScliData*.NOS`  | file name order | stored per record | `.dat` records use 1            | [Client const strings](text.md)         |
 | `NSetcData.NOS`   | file name order | stored per record | `.dat` records use 1            | Typewriter word list and `TabooStr.lst` |

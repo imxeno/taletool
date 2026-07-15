@@ -11,6 +11,7 @@ use taletool_text::{
     ConstStringTable, LanguageTable, MalformedConstStringRowKind, NSetcStringList, TextEncoding,
     TextPayloadKind, decode_const_string_table, decode_language_table, decode_nsetc_string_list,
     encode_const_string_table, encode_language_table, encode_nsetc_string_list,
+    gtd::{GtdDocument, GtdFileKind, decode_gtd_document, encode_gtd_document},
 };
 
 use crate::cli::{TextCommand, TextFormatArg};
@@ -86,6 +87,29 @@ pub(crate) fn run_text(command: TextCommand) -> anyhow::Result<()> {
                         let count = list.0.len();
                         (serde_json::to_vec_pretty(&list)?, count, "NSetc string")
                     }
+                    TextFormatArg::Gtd => {
+                        let gtd_kind = GtdFileKind::for_path(&payload).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "cannot infer an NSgtdData grammar from {}",
+                                payload.display()
+                            )
+                        })?;
+                        let encoding = resolve_optional_encoding(encoding.as_deref())?;
+                        let parsed = decode_gtd_document(gtd_kind, &data, encoding)?;
+                        for warning in &parsed.warnings {
+                            eprintln!(
+                                "warning: {}:{}: {}",
+                                payload.display(),
+                                warning.row,
+                                warning.message
+                            );
+                        }
+                        (
+                            serde_json::to_vec_pretty(&parsed.document)?,
+                            parsed.document.entry_count(),
+                            "NSgtdData",
+                        )
+                    }
                     TextFormatArg::Auto => unreachable!("structured format is resolved"),
                 };
                 if let Some(parent) = out.parent()
@@ -149,6 +173,23 @@ pub(crate) fn run_text(command: TextCommand) -> anyhow::Result<()> {
                             "NSetc string",
                         )
                     }
+                    TextFormatArg::Gtd => {
+                        let gtd_kind = GtdFileKind::for_path(&out).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "cannot infer an NSgtdData grammar from {}",
+                                out.display()
+                            )
+                        })?;
+                        let encoding = resolve_optional_encoding(encoding.as_deref())?;
+                        let document: GtdDocument = serde_json::from_slice(&document)
+                            .with_context(|| format!("parsing {}", input.display()))?;
+                        let count = document.entry_count();
+                        (
+                            encode_gtd_document(gtd_kind, &document, encoding)?,
+                            count,
+                            "NSgtdData",
+                        )
+                    }
                     TextFormatArg::Auto => unreachable!("structured format is resolved"),
                 };
                 if let Some(parent) = out.parent()
@@ -191,9 +232,11 @@ fn resolve_structured_format(
         TextFormatArg::Cli
     } else if is_nsetc_payload_name(path) {
         TextFormatArg::Etc
+    } else if GtdFileKind::for_path(path).is_some() {
+        TextFormatArg::Gtd
     } else {
         bail!(
-            "cannot infer a structured text format from {}; pass `--format lang`, `--format cli`, or `--format etc`",
+            "cannot infer a structured text format from {}; pass `--format lang`, `--format cli`, `--format etc`, or `--format gtd`",
             path.display()
         )
     };
@@ -207,9 +250,37 @@ fn resolve_structured_format(
             "structured etc JSON requires a DAT or LST payload, got {}",
             path.display()
         ),
+        TextFormatArg::Gtd => {
+            let gtd_kind = GtdFileKind::for_path(path).ok_or_else(|| {
+                anyhow::anyhow!("unsupported NSgtdData record name: {}", path.display())
+            })?;
+            match (gtd_kind, kind) {
+                (GtdFileKind::Abuse(_), TextPayloadKind::List) => {}
+                (GtdFileKind::Abuse(_), _) => bail!(
+                    "structured gtd abuse JSON requires an LST payload, got {}",
+                    payload_kind_label(kind)
+                ),
+                (_, TextPayloadKind::Dat) => {}
+                (_, _) => bail!(
+                    "structured gtd JSON requires a DAT payload, got {}",
+                    payload_kind_label(kind)
+                ),
+            }
+        }
         TextFormatArg::Auto => unreachable!("structured format is resolved"),
-        _ => Ok(format),
+        _ => {}
     }
+
+    Ok(format)
+}
+
+fn resolve_optional_encoding(label: Option<&str>) -> anyhow::Result<Option<TextEncoding>> {
+    label
+        .map(|label| {
+            TextEncoding::for_label(label)
+                .ok_or_else(|| anyhow::anyhow!("unsupported text encoding: {label}"))
+        })
+        .transpose()
 }
 
 fn require_json_for_explicit_format(format: TextFormatArg) -> anyhow::Result<()> {
@@ -236,10 +307,11 @@ fn resolve_language_encoding(
     })?;
     let encoding = match locale.as_str() {
         "cz" | "de" | "it" | "pl" => TextEncoding::Windows1250,
-        "es" | "fr" | "uk" | "gsp" => TextEncoding::Windows1252,
+        "es" | "fr" | "gsp" | "in" | "my" | "uk" => TextEncoding::Windows1252,
         "ru" => TextEncoding::Windows1251,
         "tr" => TextEncoding::Windows1254,
         "hk" | "tw" => TextEncoding::Big5,
+        "jp" => TextEncoding::ShiftJis,
         _ => {
             bail!("cannot infer encoding for NSlang locale {locale:?}; pass --encoding explicitly")
         }
@@ -315,6 +387,8 @@ mod tests {
         let cases = [
             ("_code_cz_Item.txt", TextEncoding::Windows1250),
             ("_code_gsp_Item.txt", TextEncoding::Windows1252),
+            ("_code_in_Item.txt", TextEncoding::Windows1252),
+            ("_code_jp_Item.txt", TextEncoding::ShiftJis),
             ("_code_ru_Item.txt", TextEncoding::Windows1251),
             ("_code_tr_Item.txt", TextEncoding::Windows1254),
             ("_code_tw_Item.txt", TextEncoding::Big5),
@@ -434,6 +508,38 @@ mod tests {
             TextEncoding::Windows1252
         );
         assert!(resolve_etc_encoding(Some("utf-8")).is_err());
+    }
+
+    #[test]
+    fn resolves_gtd_formats_from_native_names() {
+        for (name, kind) in [
+            ("Item.dat", TextPayloadKind::Dat),
+            ("MAPPOINTDATA.DAT", TextPayloadKind::Dat),
+            ("uk_nosmall.dat", TextPayloadKind::Dat),
+            ("HK_ABUSE.LST", TextPayloadKind::List),
+        ] {
+            assert_eq!(
+                resolve_structured_format(Path::new(name), kind, TextFormatArg::Auto).unwrap(),
+                TextFormatArg::Gtd
+            );
+        }
+
+        assert!(
+            resolve_structured_format(
+                Path::new("uk_abuse.dat"),
+                TextPayloadKind::Dat,
+                TextFormatArg::Gtd,
+            )
+            .is_err()
+        );
+        assert!(
+            resolve_structured_format(
+                Path::new("renamed.dat"),
+                TextPayloadKind::Dat,
+                TextFormatArg::Gtd,
+            )
+            .is_err()
+        );
     }
 
     #[test]

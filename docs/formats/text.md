@@ -4,13 +4,13 @@ Text files are stored inside `NSgtdData`, `NSlangData`, `NScliData`, and
 `NSetcData` archives. Their record payloads use a few simple text-oriented
 formats.
 
-| Archive                   | Contents                                                              |
-| ------------------------- | --------------------------------------------------------------------- |
-| `NSgtdData.NOS`           | Game data text records, such as item, quest, skill, and monster data. |
-| `NSlangData_<locale>.NOS` | Localized language text records (`_code_<locale>_*.txt` files).       |
-| `NScliData.NOS`           | Client const strings (`conststring.dat`).                             |
-| `NScliData_<locale>.NOS`  | Localized client const string (`conststring.dat`).                    |
-| `NSetcData.NOS`           | Typewriter mini-game and unused “taboo” word lists.                   |
+| Archive                   | Contents                                                        |
+| ------------------------- | --------------------------------------------------------------- |
+| `NSgtdData.NOS`           | [Game-data record grammars](nsgtd.md).                          |
+| `NSlangData_<locale>.NOS` | Localized language text records (`_code_<locale>_*.txt` files). |
+| `NScliData.NOS`           | Client const strings (`conststring.dat`).                       |
+| `NScliData_<locale>.NOS`  | Localized client const string (`conststring.dat`).              |
+| `NSetcData.NOS`           | Typewriter mini-game and unused “taboo” word lists.             |
 
 | Payload kind     | Typical extension | Contents                                               |
 | ---------------- | ----------------- | ------------------------------------------------------ |
@@ -21,27 +21,37 @@ formats.
 Plain `.txt` records do not declare their character encoding. The encoding
 depends on the locale/archive the record came from, so localized files should be
 decoded with the matching client locale in mind. For `_code_<locale>_*.txt`
-records, the two-letter locale code in the record name identifies the expected
-encoding.
+records, the locale code in the record name identifies the expected encoding.
 
 Known locale encodings:
 
-| Suffix | Locale    | Encoding     |
-| ------ | --------- | ------------ |
-| `CZ`   | Czech     | Windows-1250 |
-| `DE`   | German    | Windows-1250 |
-| `ES`   | Spanish   | Windows-1252 |
-| `FR`   | French    | Windows-1252 |
-| `IT`   | Italian   | Windows-1250 |
-| `PL`   | Polish    | Windows-1250 |
-| `RU`   | Russian   | Windows-1251 |
-| `TR`   | Turkish   | Windows-1254 |
-| `UK`   | English   | Windows-1252 |
-| `HK`   | Hong Kong | Big5         |
-| `TW`   | Taiwan    | Big5         |
+| Suffix | Locale     | Encoding     |
+| ------ | ---------- | ------------ |
+| `CZ`   | Czech      | Windows-1250 |
+| `DE`   | German     | Windows-1250 |
+| `ES`   | Spanish    | Windows-1252 |
+| `FR`   | French     | Windows-1252 |
+| `GSP`  | Spanish    | Windows-1252 |
+| `HK`   | Hong Kong  | Big5         |
+| `IN`   | Indonesian | Windows-1252 |
+| `IT`   | Italian    | Windows-1250 |
+| `JP`   | Japanese   | Shift_JIS    |
+| `KR`   | Korean     | EUC-KR       |
+| `MY`   | Malay      | Windows-1252 |
+| `PL`   | Polish     | Windows-1250 |
+| `RU`   | Russian    | Windows-1251 |
+| `TR`   | Turkish    | Windows-1254 |
+| `TW`   | Taiwan     | Big5         |
+| `UK`   | English    | Windows-1252 |
 
-Non-localized text records should be treated as EUC-KR (they may contain
-comments in Korean)
+Non-localized text records should be treated as EUC-KR; they may contain
+comments in Korean.
+
+## NSgtdData Game Data
+
+`NSgtdData.NOS` combines several independent files with different grammars.
+Their native row layouts, entry boundaries, terminators, and declared counts are
+documented in [NSgtdData record formats](nsgtd.md).
 
 ## NScli Constant Strings
 
@@ -85,17 +95,9 @@ value are both `0`.
 | `MiniGame6WordData.dat` | DAT          | Typewriter mini-game words and phrases.   |
 | `TabooStr.lst`          | LST          | An apparently unused blocked-string list. |
 
-Each stored row is one logical string. JSON conversion exposes both records as a
-plain ordered string array:
-
-```json
-["wolly", "sheep"]
-```
-
-Order, duplicate strings, and empty strings are preserved. A logical string
-cannot contain a carriage return or line feed. These records are not localized;
-structured conversion defaults to EUC-KR while permitting an explicit encoding
-override.
+Each stored row is one logical string. Row order, duplicate strings, and empty
+strings are significant. A logical string cannot contain a carriage return or
+line feed. These records are not localized; text uses EUC-KR.
 
 ## DAT Compact Text
 

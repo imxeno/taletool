@@ -388,12 +388,40 @@ taletool text unpack work/lang/_code_uk_Item.txt --out work/text/Item.txt
 taletool text pack work/text/Item.txt --out work/lang/_code_uk_Item.txt
 ```
 
-Add `--json` for structured language, constant-string, and NSetc string data.
-`--format` accepts `auto`, `lang`, `cli`, or `etc` and may only be used with
-`--json`. Language and constant-string documents require DAT payloads and use an
-ordered `[[key, value], ...]` JSON shape; language keys are strings and
-constant-string keys are signed integers. NSetc documents accept DAT or LST
-payloads and use an ordered `[value, ...]` string array.
+Add `--json` for structured NSgtdData, language, constant-string, and NSetc
+string data. `--format` accepts `auto`, `gtd`, `lang`, `cli`, or `etc` and may
+only be used with `--json`. NSgtdData documents are versioned, source-oriented
+objects selected by their native record name. Language and constant-string
+documents require DAT payloads and use an ordered `[[key, value], ...]` JSON
+shape; language keys are strings and constant-string keys are signed integers.
+NSetc documents accept DAT or LST payloads and use an ordered `[value, ...]`
+string array.
+
+NSgtdData JSON retains source order, duplicate entries, repeated fields, signed
+values, opaque ZTS keys, and independently declared counts. Each document has a
+`schema_version` and a filename-selected `kind`. Item documents keep
+`line_desc_count` independent from their optional singular `description`,
+including historical rows whose physical description exists with a non-positive
+declaration. Abuse documents distinguish a zero-byte payload from a counted
+empty list; undecodable legacy text uses a reversible `bytes_base64` entry
+instead.
+
+Rows whose field counts vary between data revisions retain their complete token
+sequences in JSON. Packing writes those sequences unchanged, including empty,
+shorter, longer, and partially grouped rows.
+
+Decorative `END`, `end`, `E`, and `~` rows are not exposed as JSON framing.
+Reader-visible exceptions are normalized semantically: tutorial `~` becomes a
+step `-1` command, shop-type `~` becomes a vnum `-1` row, and Skill output adds
+the leading-`#` boundary required to keep a positive description from consuming
+the following skill.
+
+The recognized core filenames are `act_desc.dat`, `BCard.dat`, `Card.dat`,
+`Item.dat`, `monster.dat`, `npctalk.dat`, `Skill.dat`, `quest.dat`,
+`qstprize.dat`, `tutorial.dat`, `shoptype.dat`, `MapIDData.dat`,
+`MapPointData.dat`, `qstnpc.dat`, `team.dat`, and `fish.dat`. Locale records use
+`<locale>_nosmall.dat` and `<locale>_abuse.lst` for `cz`, `de`, `es`, `fr`,
+`gsp`, `hk`, `in`, `it`, `jp`, `kr`, `my`, `pl`, `ru`, `tr`, `tw`, and `uk`.
 
 ```console
 taletool text unpack work/lang/_code_uk_Item.txt --out work/Item.json --json
@@ -411,24 +439,29 @@ taletool text pack work/MiniGame6WordData.json \
 
 taletool text unpack work/etc/TabooStr.lst --out work/TabooStr.json --json
 taletool text pack work/TabooStr.json --out work/etc/TabooStr.lst --json
+
+taletool text unpack work/gtd/Item.dat --out work/Item.json --json
+taletool text pack work/Item.json --out work/gtd/Item.dat --json
 ```
 
 `lang` is inferred from native `_code_<locale>_<table>.txt` names. Its encoding
 is inferred as follows:
 
-| Locales                 | Encoding     |
-| ----------------------- | ------------ |
-| `cz`, `de`, `it`, `pl`  | Windows-1250 |
-| `ru`                    | Windows-1251 |
-| `es`, `fr`, `uk`, `gsp` | Windows-1252 |
-| `tr`                    | Windows-1254 |
-| `hk`, `tw`              | Big5         |
+| Locales                             | Encoding     |
+| ----------------------------------- | ------------ |
+| `cz`, `de`, `it`, `pl`              | Windows-1250 |
+| `ru`                                | Windows-1251 |
+| `es`, `fr`, `gsp`, `in`, `my`, `uk` | Windows-1252 |
+| `tr`                                | Windows-1254 |
+| `hk`, `tw`                          | Big5         |
+| `jp`                                | Shift_JIS    |
 
 Use `--encoding` for an unknown or renamed locale. `cli` is inferred from
 `conststring.dat` but always requires `--encoding`. `etc` is inferred from
 `MiniGame6WordData.dat` and `TabooStr.lst`; it defaults to EUC-KR and accepts an
 encoding override. Accepted labels are `big5`,
-`euc-kr`/`euckr`/`windows-949`/`cp949`, and `windows-1250` through
+`euc-kr`/`euckr`/`windows-949`/`cp949`,
+`shift-jis`/`shiftjis`/`sjis`/`windows-932`/`cp932`, and `windows-1250` through
 `windows-1254` (or the corresponding `cp1250`, `cp1251`, `cp1252`, and `cp1254`
 aliases).
 

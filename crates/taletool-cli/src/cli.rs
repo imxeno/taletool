@@ -665,6 +665,8 @@ pub(crate) enum TextFormatArg {
     Cli,
     /// Parse or write an NSetc ordered string list.
     Etc,
+    /// Parse or write a source-oriented NSgtdData record.
+    Gtd,
 }
 
 #[cfg(test)]
@@ -1371,6 +1373,29 @@ mod tests {
                 command: TextCommand::Unpack {
                     json: true,
                     format: TextFormatArg::Etc,
+                    ..
+                }
+            }
+        ));
+
+        let gtd = Cli::try_parse_from([
+            "taletool",
+            "text",
+            "unpack",
+            "Item.dat",
+            "--out",
+            "Item.json",
+            "--json",
+            "--format",
+            "gtd",
+        ])
+        .unwrap();
+        assert!(matches!(
+            gtd.command,
+            Command::Text {
+                command: TextCommand::Unpack {
+                    json: true,
+                    format: TextFormatArg::Gtd,
                     ..
                 }
             }
