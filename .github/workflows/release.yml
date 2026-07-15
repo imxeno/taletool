@@ -195,7 +195,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          options=(--verify-tag --generate-notes)
+          options=(--repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes)
           if [[ "${IS_PRERELEASE}" == "true" ]]; then
             options+=(--prerelease)
           fi
