@@ -97,6 +97,14 @@ jobs:
             target: x86_64-pc-windows-msvc
             binary: target/x86_64-pc-windows-msvc/release/taletool.exe
             extension: zip
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            binary: target/x86_64-apple-darwin/release/taletool
+            extension: tar.gz
+          - os: macos-15
+            target: aarch64-apple-darwin
+            binary: target/aarch64-apple-darwin/release/taletool
+            extension: tar.gz
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -125,8 +133,8 @@ jobs:
         shell: bash
         run: '"./${{ matrix.binary }}" --help'
 
-      - name: Package Linux release
-        if: runner.os == 'Linux'
+      - name: Package Unix release
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
