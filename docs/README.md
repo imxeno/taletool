@@ -16,6 +16,7 @@ These pages document NosTale file formats that taletool knows about.
 | Page                                                        | Covers                                                                    |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------- |
 | [Text](formats/text.md)                                     | `.dat`, `.lst`, `.txt`, and raw text record payloads.                     |
+| [NSgtdData records](formats/nsgtd.md)                       | Game-data table, script, map, shop, fish, and localized record grammars.  |
 | [CCINF `.NOS` files](formats/ccinf.md)                      | Monster/NPC `NSmnData.NOS` and player `NSpnData.NOS` GBFC indexes.        |
 | [Textures](formats/textures.md)                             | Texture header and pixel formats.                                         |
 | [Sprites](formats/sprites.md)                               | Map-object descriptor sprites and block-interlaced free-size sprites.     |

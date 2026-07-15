@@ -1,9 +1,13 @@
 use std::borrow::Cow;
 
-use encoding_rs::{BIG5, EUC_KR, Encoding, WINDOWS_1250, WINDOWS_1251, WINDOWS_1252, WINDOWS_1254};
+use encoding_rs::{
+    BIG5, EUC_KR, Encoding, SHIFT_JIS, WINDOWS_1250, WINDOWS_1251, WINDOWS_1252, WINDOWS_1254,
+};
 use serde::{Deserialize, Serialize};
 use taletool_core::ByteReader;
 use thiserror::Error;
+
+pub mod gtd;
 
 const COMPACT_DATA_CHARS: [u8; 16] = [
     0, b' ', b'-', b'.', b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'\n', 0,
@@ -55,6 +59,12 @@ pub enum TextError {
     InvalidNSetcEntryLineBreak { entry: usize },
     #[error("NSetc structured strings require a DAT or LST payload")]
     UnsupportedNSetcPayloadKind,
+    #[error("invalid NSgtdData document: {message}")]
+    InvalidGtdDocument { message: String },
+    #[error("unsupported NSgtdData record name: {name}")]
+    UnsupportedGtdRecord { name: String },
+    #[error("NSgtdData document kind does not match {expected}")]
+    GtdDocumentKindMismatch { expected: String },
 }
 
 pub type Result<T> = std::result::Result<T, TextError>;
@@ -71,6 +81,7 @@ pub enum TextPayloadKind {
 pub enum TextEncoding {
     Big5,
     EucKr,
+    ShiftJis,
     Windows1250,
     Windows1251,
     Windows1252,
@@ -83,6 +94,7 @@ impl TextEncoding {
         match label.to_ascii_lowercase().replace('_', "-").as_str() {
             "big5" => Some(Self::Big5),
             "euc-kr" | "euckr" | "windows-949" | "cp949" => Some(Self::EucKr),
+            "shift-jis" | "shiftjis" | "sjis" | "windows-932" | "cp932" => Some(Self::ShiftJis),
             "windows-1250" | "cp1250" => Some(Self::Windows1250),
             "windows-1251" | "cp1251" => Some(Self::Windows1251),
             "windows-1252" | "cp1252" => Some(Self::Windows1252),
@@ -100,6 +112,7 @@ impl TextEncoding {
         match self {
             Self::Big5 => BIG5,
             Self::EucKr => EUC_KR,
+            Self::ShiftJis => SHIFT_JIS,
             Self::Windows1250 => WINDOWS_1250,
             Self::Windows1251 => WINDOWS_1251,
             Self::Windows1252 => WINDOWS_1252,
@@ -529,6 +542,18 @@ fn read_i32_at(data: &[u8], offset: usize) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shift_jis_labels_and_text_round_trip() {
+        for label in ["shift-jis", "shiftjis", "sjis", "windows-932", "cp932"] {
+            assert_eq!(TextEncoding::for_label(label), Some(TextEncoding::ShiftJis));
+        }
+        let encoded = encode_legacy_text("ノーステイル", TextEncoding::ShiftJis).unwrap();
+        assert_eq!(
+            decode_legacy_text(&encoded, TextEncoding::ShiftJis).unwrap(),
+            "ノーステイル"
+        );
+    }
 
     #[test]
     fn decodes_dat_raw_runs() {
