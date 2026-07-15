@@ -18,19 +18,34 @@
 
 ## Installation
 
-Building requires Rust 1.97.0 or newer and a C compiler for the vendored zlib
-implementation.
+### Prebuilt binaries
+
+Prebuilt CLI archives for Windows, Linux, and macOS are available from
+[GitHub Releases](https://github.com/imxeno/taletool/releases). Download the
+archive for your platform, extract it, and place the `taletool` executable
+somewhere on your `PATH`.
+
+```console
+taletool --help
+```
+
+### Install from source with Cargo
+
+Building from source requires Rust 1.97.0 or newer and a C compiler for the
+vendored zlib implementation. Cargo can build and install Taletool directly from
+the Git repository:
+
+```console
+cargo install --locked --git https://github.com/imxeno/taletool.git taletool
+taletool --help
+```
+
+For a development checkout, clone the repository and run the CLI without
+installing it by putting arguments after `--`:
 
 ```console
 git clone https://github.com/imxeno/taletool.git
 cd taletool
-cargo install --path crates/taletool-cli
-taletool --help
-```
-
-To run the CLI from a checkout without installing it, put arguments after `--`:
-
-```console
 cargo run -p taletool -- scan --data-dir "C:\GameforgeLive\Nostale\NostaleData"
 ```
 
