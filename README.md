@@ -48,7 +48,7 @@ All examples below assume that `taletool` is installed and available on `PATH`.
 | `NSesData.NOS`            | Effect texture animation frame keys                | ✅                | ✅            |
 | `NSetcData.NOS`           | Typewriter mini-game and unused “taboo” word lists | ✅                | ✅            |
 | `NSgrdData*.NOS`          | Optimized map height grid data                     | ✅                | ✅            |
-| `NSgtdData.NOS`           | Game data files                                    | ✅                | ⚠️             |
+| `NSgtdData.NOS`           | Game data files                                    | ✅                | ✅            |
 | `NSipData.NOS`            | Map-item sprite resources                          | ✅                | ✅            |
 | `NSlangData_<locale>.NOS` | Language files                                     | ✅                | ✅            |
 | `NSmcData.NOS`            | Monster/NPC animation definitions                  | ✅                | ✅            |
@@ -92,7 +92,7 @@ modding tools, graphical editors, and other NosTale utilities.
 
 **The CLI and library APIs are not stable yet.** This is also why the project
 has not been published to crates.io. Expect breaking changes and pin an exact
-version or revision when consuming Taletool from another project.
+commit when consuming Taletool from another project.
 
 The command tree follows the data hierarchy: `archive` handles full `.NOS` and
 `.pck` containers, while commands such as `map`, `texture`, and `text` handle
