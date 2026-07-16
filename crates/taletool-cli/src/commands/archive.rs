@@ -14,6 +14,11 @@ use taletool_archive::{
     TextNosRecordInput, write_text_nos_archive_bytes,
 };
 
+use anyhow::Context;
+use taletool_texture::decode_texture;
+use taletool_texture::sprite::decode_sprite;
+use taletool_texture::sprite::free_size::decode_free_size_sprite;
+
 use crate::archive_detect::{DetectedArchive, detect_archive_paths, has_ccinf_header};
 use crate::binary_payloads::{
     BinaryPayloadInput, binary_payload_output_name, explicit_indexes_for_binary_ids,
@@ -23,12 +28,14 @@ use crate::binary_preset::{
     binary_nos_archive_default_compression, format_chunk_pattern, output_pattern, parse_header_hex,
     resolve_binary_preset, resolve_zlib_profile,
 };
-use crate::cli::{ArchiveCommand, ArchiveType, ChunkingArg, CompressionArg};
+use crate::cli::{ArchiveCommand, ArchiveType, ChunkingArg, CompressionArg, ConvertKind};
 use crate::paths::{escape_archive_name, immediate_files, resolve_inputs, unescape_archive_name};
 use crate::sound_pack::{
     pack_sound_pack_dir as build_sound_pack_dir, sound_pack_manifest_exists, unpack_sound_pack,
 };
+use crate::sprite_file::{unpack_free_size_sprite_png, unpack_sprite_file};
 use crate::text_payload::{packed_flag_for_text_record, payload_kind_label};
+use crate::texture_file::unpack_texture_file;
 use crate::util::{duplicate_id_counts, fnv1a64, warn_duplicate_archive_ids};
 
 /// Dispatch an `archive` subcommand.
@@ -55,14 +62,27 @@ pub(crate) fn run_archive(command: ArchiveCommand) -> anyhow::Result<()> {
             input,
             out,
             archive_type,
+            convert,
         } => {
             let paths = resolve_inputs(&input)?;
             reject_ccinf_inputs(&paths, "unpack")?;
             let detected = detect_archive_paths(&paths, archive_type)?;
             match detected {
-                DetectedArchive::Binary(archives) => unpack_binary_archives(&archives, &out),
-                DetectedArchive::Text(archive) => unpack_text_archive(&archive, &out),
-                DetectedArchive::Sound(archive) => unpack_sound_pack_archive(&archive, &out),
+                DetectedArchive::Binary(archives) => {
+                    unpack_binary_archives(&archives, &out, convert)
+                }
+                DetectedArchive::Text(archive) => {
+                    if let Some(kind) = convert {
+                        eprintln!("warning: --convert {kind} is not supported for text archives, extracting raw records");
+                    }
+                    unpack_text_archive(&archive, &out)
+                }
+                DetectedArchive::Sound(archive) => {
+                    if let Some(kind) = convert {
+                        eprintln!("warning: --convert {kind} is not supported for sound pack archives, extracting raw entries");
+                    }
+                    unpack_sound_pack_archive(&archive, &out)
+                }
             }
         }
         ArchiveCommand::Pack {
@@ -306,7 +326,11 @@ fn inspect_sound_pack(
 }
 
 /// Extract binary archive payloads with stable filenames.
-fn unpack_binary_archives(archives: &[BinaryNosArchive], out: &Path) -> anyhow::Result<()> {
+fn unpack_binary_archives(
+    archives: &[BinaryNosArchive],
+    out: &Path,
+    convert: Option<ConvertKind>,
+) -> anyhow::Result<()> {
     let duplicates = duplicate_id_counts(
         archives
             .iter()
@@ -347,14 +371,156 @@ fn unpack_binary_archives(archives: &[BinaryNosArchive], out: &Path) -> anyhow::
                 compression,
                 &mut used_names,
             )?;
-            let path = out.join(file_name);
-            fs::write(&path, payload.data)?;
-            println!("unpacked {:<12} {}", entry.file_id, path.display());
+
+            if let Some(convert_kind) = convert {
+                let result = convert_payload(&payload.data, convert_kind, out, &file_name)
+                    .with_context(|| format!("converting file id {}", entry.file_id))?;
+                println!("{}", result.log_line(entry.file_id));
+            } else {
+                let path = out.join(&file_name);
+                fs::write(&path, payload.data)?;
+                println!("unpacked {:<12} {}", entry.file_id, path.display());
+            }
             count += 1;
         }
     }
-    println!("unpacked {count} payloads into {}", out.display());
+    if convert.is_some() {
+        println!("converted {count} payloads into {}", out.display());
+    } else {
+        println!("unpacked {count} payloads into {}", out.display());
+    }
     Ok(())
+}
+
+/// Outcome of converting a single binary archive entry.
+enum ConvertedPayload {
+    /// Entry decoded as a texture; mip PNGs written inside `dir`.
+    Texture {
+        dir: PathBuf,
+        mip_count: usize,
+    },
+    /// Entry decoded as a map-object sprite; frame PNGs written inside `dir`.
+    MapObjectSprite {
+        dir: PathBuf,
+        frame_count: usize,
+    },
+    /// Entry decoded as a free-size sprite; single PNG written to `path`.
+    FreeSizeSprite {
+        path: PathBuf,
+        width: u32,
+        height: u32,
+    },
+    /// Entry could not be decoded; raw bytes written to `path`.
+    Raw {
+        path: PathBuf,
+    },
+}
+
+impl ConvertedPayload {
+    fn log_line(&self, file_id: i32) -> String {
+        match self {
+            Self::Texture { dir, mip_count } => {
+                format!(
+                    "unpacked {:<12} {} (texture, {mip_count} mips)",
+                    file_id,
+                    dir.display()
+                )
+            }
+            Self::MapObjectSprite { dir, frame_count } => {
+                format!(
+                    "unpacked {:<12} {} (sprite, {frame_count} frames)",
+                    file_id,
+                    dir.display()
+                )
+            }
+            Self::FreeSizeSprite {
+                path,
+                width,
+                height,
+            } => {
+                format!(
+                    "unpacked {:<12} {} (free-size sprite, {width}x{height})",
+                    file_id,
+                    path.display()
+                )
+            }
+            Self::Raw { path } => {
+                format!("unpacked {:<12} {} (raw)", file_id, path.display())
+            }
+        }
+    }
+}
+
+/// Reject filenames that could escape the output directory.
+fn sanitize_file_name(name: &str) -> anyhow::Result<&str> {
+    if name.contains("..") || name.contains('/') || name.contains('\\') {
+        anyhow::bail!("invalid file name component in output name: {name:?}");
+    }
+    Ok(name)
+}
+
+/// Decode a raw archive payload according to `kind` and write PNG output.
+fn convert_payload(
+    data: &[u8],
+    kind: ConvertKind,
+    out_dir: &Path,
+    file_name: &str,
+) -> anyhow::Result<ConvertedPayload> {
+    let stem = sanitize_file_name(file_name.strip_suffix(".bin").unwrap_or(file_name))?;
+    fs::create_dir_all(out_dir)?;
+
+    match kind {
+        ConvertKind::Texture => {
+            let texture = decode_texture(data)?;
+            let dir = out_dir.join(stem);
+            let mip_count = unpack_texture_file(&texture, &dir)
+                .with_context(|| format!("writing texture output to {}", dir.display()))?;
+            Ok(ConvertedPayload::Texture { dir, mip_count })
+        }
+        ConvertKind::Sprite => {
+            if let Ok(sprite) = decode_sprite(data) {
+                let dir = out_dir.join(stem);
+                let frame_count = unpack_sprite_file(&sprite, &dir)
+                    .with_context(|| format!("writing sprite output to {}", dir.display()))?;
+                Ok(ConvertedPayload::MapObjectSprite { dir, frame_count })
+            } else {
+                let free_sprite = decode_free_size_sprite(data)
+                    .with_context(|| "data is not a valid map-object sprite either")?;
+                let path = out_dir.join(format!("{stem}.png"));
+                unpack_free_size_sprite_png(&free_sprite, &path)
+                    .with_context(|| format!("writing free-size sprite to {}", path.display()))?;
+                Ok(ConvertedPayload::FreeSizeSprite {
+                    width: free_sprite.width(),
+                    height: free_sprite.height(),
+                    path,
+                })
+            }
+        }
+        ConvertKind::Auto => {
+            if let Ok(texture) = decode_texture(data) {
+                let dir = out_dir.join(stem);
+                let mip_count = unpack_texture_file(&texture, &dir)?;
+                return Ok(ConvertedPayload::Texture { dir, mip_count });
+            }
+            if let Ok(sprite) = decode_sprite(data) {
+                let dir = out_dir.join(stem);
+                let frame_count = unpack_sprite_file(&sprite, &dir)?;
+                return Ok(ConvertedPayload::MapObjectSprite { dir, frame_count });
+            }
+            if let Ok(free_sprite) = decode_free_size_sprite(data) {
+                let path = out_dir.join(format!("{stem}.png"));
+                unpack_free_size_sprite_png(&free_sprite, &path)?;
+                return Ok(ConvertedPayload::FreeSizeSprite {
+                    width: free_sprite.width(),
+                    height: free_sprite.height(),
+                    path,
+                });
+            }
+            let path = out_dir.join(stem);
+            fs::write(&path, data)?;
+            Ok(ConvertedPayload::Raw { path })
+        }
+    }
 }
 
 /// Extract text archive records using escaped archive names.
@@ -624,7 +790,15 @@ fn output_is_text(out: &str) -> bool {
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use image::GenericImageView;
+    use image::RgbaImage;
+    use taletool_archive::BinaryNosArchiveWriteEntry;
     use taletool_ccinf::CCINF_HEADER;
+    use taletool_texture::{TextureFormat, TextureHeader, write_texture_bytes};
+    use taletool_zlib::{ZlibProfile, ZlibStrategy};
+
+    use crate::cli::ConvertKind;
+    use crate::texture_file::TEXTURE_MANIFEST_FILE;
 
     use super::*;
 
@@ -634,6 +808,36 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("taletool-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    fn make_texture_payload(width: u16, height: u16) -> Vec<u8> {
+        let header = TextureHeader {
+            width,
+            height,
+            format: TextureFormat::A8R8G8B8,
+            filter_flag: 0,
+            unknown_06: 0,
+            mip_level_count: 1,
+        };
+        let mip_levels = vec![RgbaImage::new(width.into(), height.into())];
+        write_texture_bytes(&header, &mip_levels).unwrap()
+    }
+
+    fn make_binary_archive(entries: Vec<BinaryNosArchiveWriteEntry>) -> BinaryNosArchive {
+        BinaryNosArchive::from_entries(
+            PathBuf::from("<test>"),
+            entries,
+            &BinaryNosArchiveWriteOptions::new(
+                [0; 16],
+                0,
+                BinaryCompression::Raw,
+                ZlibProfile {
+                    level: 0,
+                    strategy: ZlibStrategy::Default,
+                },
+            ),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -664,6 +868,207 @@ mod tests {
                     .contains(&format!("taletool ccinf {operation}"))
             );
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unpack_binary_archive_with_texture_convert() {
+        let root = temp_dir("binary-texture-convert");
+        let output = root.join("output");
+
+        let archive = make_binary_archive(vec![BinaryNosArchiveWriteEntry::new(
+            42,
+            make_texture_payload(4, 4),
+        )]);
+        unpack_binary_archives(&[archive], &output, Some(ConvertKind::Texture)).unwrap();
+
+        let tex_dir = output.join("42");
+        assert!(tex_dir.is_dir(), "texture output directory should exist");
+        assert!(
+            tex_dir.join("mip-000.png").is_file(),
+            "mip-000.png should exist"
+        );
+        assert!(
+            tex_dir.join(TEXTURE_MANIFEST_FILE).is_file(),
+            "texture.json should exist"
+        );
+
+        let img = image::open(tex_dir.join("mip-000.png")).unwrap();
+        assert_eq!(img.dimensions(), (4, 4));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unpack_binary_archive_with_texture_auto_convert() {
+        let root = temp_dir("binary-texture-auto");
+        let output = root.join("output");
+
+        let archive = make_binary_archive(vec![BinaryNosArchiveWriteEntry::new(
+            7,
+            make_texture_payload(2, 2),
+        )]);
+        unpack_binary_archives(&[archive], &output, Some(ConvertKind::Auto)).unwrap();
+
+        let tex_dir = output.join("7");
+        assert!(tex_dir.is_dir());
+        assert!(tex_dir.join("mip-000.png").is_file());
+        assert!(tex_dir.join(TEXTURE_MANIFEST_FILE).is_file());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unpack_binary_archive_without_convert_writes_raw() {
+        let root = temp_dir("binary-no-convert");
+        let output = root.join("output");
+
+        let archive = make_binary_archive(vec![BinaryNosArchiveWriteEntry::new(
+            99,
+            b"hello world".to_vec(),
+        )]);
+        unpack_binary_archives(&[archive], &output, None).unwrap();
+
+        let raw = output.join("99.bin");
+        assert!(raw.is_file());
+        assert_eq!(fs::read(&raw).unwrap(), b"hello world");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unpack_binary_archive_auto_convert_falls_back_to_raw() {
+        let root = temp_dir("binary-auto-fallback");
+        let output = root.join("output");
+
+        let archive = make_binary_archive(vec![BinaryNosArchiveWriteEntry::new(
+            1,
+            b"not a valid texture or sprite".to_vec(),
+        )]);
+        unpack_binary_archives(&[archive], &output, Some(ConvertKind::Auto)).unwrap();
+
+        let raw = output.join("1");
+        assert!(raw.is_file(), "raw fallback should use stem, not .bin extension");
+        assert_eq!(fs::read(&raw).unwrap(), b"not a valid texture or sprite");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn make_map_object_sprite_payload() -> Vec<u8> {
+        use taletool_texture::sprite::{SpriteFrame, write_sprite_bytes};
+        let image = RgbaImage::new(4, 4);
+        write_sprite_bytes(&[SpriteFrame::new(0, 0, image)]).unwrap()
+    }
+
+    fn make_free_size_sprite_payload() -> Vec<u8> {
+        use taletool_texture::sprite::free_size::write_free_size_sprite_bytes;
+        write_free_size_sprite_bytes(&RgbaImage::new(8, 8)).unwrap()
+    }
+
+    #[test]
+    fn unpack_binary_archive_with_sprite_map_object_convert() {
+        let root = temp_dir("binary-sprite-map-object");
+        let output = root.join("output");
+
+        let archive = make_binary_archive(vec![BinaryNosArchiveWriteEntry::new(
+            5,
+            make_map_object_sprite_payload(),
+        )]);
+        unpack_binary_archives(&[archive], &output, Some(ConvertKind::Sprite)).unwrap();
+
+        let dir = output.join("5");
+        assert!(dir.is_dir());
+        assert!(dir.join("frame-000.png").is_file());
+        assert!(dir.join("sprite.json").is_file());
+        let img = image::open(dir.join("frame-000.png")).unwrap();
+        assert_eq!(img.dimensions(), (4, 4));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unpack_binary_archive_with_sprite_free_size_convert() {
+        let root = temp_dir("binary-sprite-free-size");
+        let output = root.join("output");
+
+        let archive = make_binary_archive(vec![BinaryNosArchiveWriteEntry::new(
+            3,
+            make_free_size_sprite_payload(),
+        )]);
+        unpack_binary_archives(&[archive], &output, Some(ConvertKind::Sprite)).unwrap();
+
+        let png = output.join("3.png");
+        assert!(png.is_file());
+        let img = image::open(&png).unwrap();
+        assert_eq!(img.dimensions(), (8, 8));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unpack_binary_archive_with_auto_sprite_convert() {
+        let root = temp_dir("binary-auto-sprite");
+        let output = root.join("output");
+
+        let archive = make_binary_archive(vec![
+            BinaryNosArchiveWriteEntry::new(1, make_map_object_sprite_payload()),
+            BinaryNosArchiveWriteEntry::new(2, make_free_size_sprite_payload()),
+        ]);
+        unpack_binary_archives(&[archive], &output, Some(ConvertKind::Auto)).unwrap();
+
+        assert!(output.join("1").join("frame-000.png").is_file());
+        assert!(output.join("2.png").is_file());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unpack_binary_archive_with_texture_convert_error() {
+        let root = temp_dir("binary-texture-convert-error");
+        let output = root.join("output");
+
+        let archive = make_binary_archive(vec![BinaryNosArchiveWriteEntry::new(
+            1,
+            b"not a texture".to_vec(),
+        )]);
+        let result = unpack_binary_archives(&[archive], &output, Some(ConvertKind::Texture));
+        assert!(result.is_err(), "texture convert should error on invalid data");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unpack_binary_archive_with_sprite_convert_error() {
+        let root = temp_dir("binary-sprite-convert-error");
+        let output = root.join("output");
+
+        let archive = make_binary_archive(vec![BinaryNosArchiveWriteEntry::new(
+            1,
+            b"not a sprite".to_vec(),
+        )]);
+        let result = unpack_binary_archives(&[archive], &output, Some(ConvertKind::Sprite));
+        assert!(result.is_err(), "sprite convert should error on invalid data");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unpack_binary_archive_with_mixed_entries() {
+        let root = temp_dir("binary-mixed-entries");
+        let output = root.join("output");
+
+        let archive = make_binary_archive(vec![
+            BinaryNosArchiveWriteEntry::new(10, make_texture_payload(2, 2)),
+            BinaryNosArchiveWriteEntry::new(20, make_free_size_sprite_payload()),
+            BinaryNosArchiveWriteEntry::new(30, b"raw data".to_vec()),
+        ]);
+        unpack_binary_archives(&[archive], &output, Some(ConvertKind::Auto)).unwrap();
+
+        assert!(output.join("10").join("mip-000.png").is_file());
+        assert!(output.join("20.png").is_file());
+        assert!(output.join("30").is_file());
+        assert_eq!(fs::read(output.join("30")).unwrap(), b"raw data");
+
         fs::remove_dir_all(root).unwrap();
     }
 }

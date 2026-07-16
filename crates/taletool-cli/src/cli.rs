@@ -403,6 +403,10 @@ pub(crate) enum ArchiveCommand {
         out: PathBuf,
         #[arg(long = "type", value_enum, default_value_t = ArchiveType::Auto)]
         archive_type: ArchiveType,
+        /// Decode payloads to PNG instead of writing raw binary. Auto detects
+        /// texture, sprite map-object, and sprite free-size formats.
+        #[arg(long, value_enum)]
+        convert: Option<ConvertKind>,
     },
     /// Build a binary, text, or sound archive from an unpacked directory.
     Pack {
@@ -639,6 +643,27 @@ pub(crate) enum ChunkingArg {
     Single,
     /// Route payloads by the low byte of the file ID.
     LowByte,
+}
+
+/// Payload format for automatic conversion during `archive unpack`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ConvertKind {
+    /// Decode each entry as a texture payload.
+    Texture,
+    /// Decode each entry as a sprite payload (map-object or free-size).
+    Sprite,
+    /// Try texture, then sprite, then fall back to raw binary.
+    Auto,
+}
+
+impl std::fmt::Display for ConvertKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Texture => write!(f, "texture"),
+            Self::Sprite => write!(f, "sprite"),
+            Self::Auto => write!(f, "auto"),
+        }
+    }
 }
 
 /// Text payload encoding selection.
