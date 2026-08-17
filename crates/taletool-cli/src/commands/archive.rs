@@ -33,6 +33,9 @@ use crate::paths::{escape_archive_name, immediate_files, resolve_inputs, unescap
 use crate::sound_pack::{
     pack_sound_pack_dir as build_sound_pack_dir, sound_pack_manifest_exists, unpack_sound_pack,
 };
+use crate::text_archive_convert::{
+    TextArchiveOutputMode, convert_text_archive, resolve_text_archive_conversion,
+};
 use crate::text_payload::{packed_flag_for_text_record, payload_kind_label};
 use crate::util::{duplicate_id_counts, fnv1a64, warn_duplicate_archive_ids};
 
@@ -61,12 +64,19 @@ pub(crate) fn run_archive(command: ArchiveCommand) -> anyhow::Result<()> {
             out,
             archive_type,
             convert,
+            encoding,
+            plain_text,
         } => {
             let paths = resolve_inputs(&input)?;
             reject_ccinf_inputs(&paths, "unpack")?;
             let detected = detect_archive_paths(&paths, archive_type)?;
             if convert {
-                unpack_converted_archive(detected, &out)
+                unpack_converted_archive_with_options(
+                    detected,
+                    &out,
+                    encoding.as_deref(),
+                    plain_text,
+                )
             } else {
                 match detected {
                     DetectedArchive::Binary(archives) => unpack_binary_archives(&archives, &out),
@@ -320,9 +330,35 @@ struct ConvertedArchiveEntry {
     payload: ConvertedPayload,
 }
 
+#[cfg(test)]
 fn unpack_converted_archive(detected: DetectedArchive, out: &Path) -> anyhow::Result<()> {
+    unpack_converted_archive_with_options(detected, out, None, false)
+}
+
+#[cfg(test)]
+fn unpack_converted_archive_with_encoding(
+    detected: DetectedArchive,
+    out: &Path,
+    encoding: Option<&str>,
+) -> anyhow::Result<()> {
+    unpack_converted_archive_with_options(detected, out, encoding, false)
+}
+
+#[cfg(test)]
+fn unpack_converted_plain_text(detected: DetectedArchive, out: &Path) -> anyhow::Result<()> {
+    unpack_converted_archive_with_options(detected, out, None, true)
+}
+
+fn unpack_converted_archive_with_options(
+    detected: DetectedArchive,
+    out: &Path,
+    encoding: Option<&str>,
+    plain_text: bool,
+) -> anyhow::Result<()> {
     match detected {
         DetectedArchive::Binary(archives) => {
+            reject_non_text_encoding(encoding, "binary archive")?;
+            reject_plain_text(plain_text, "binary archive")?;
             let preset = resolve_binary_nos_preset_for_archives(&archives)?;
             let converted = write_output_transactionally(out, |staging| {
                 unpack_converted_binary_archives(&archives, preset, staging)
@@ -344,26 +380,60 @@ fn unpack_converted_archive(detected: DetectedArchive, out: &Path) -> anyhow::Re
             Ok(())
         }
         DetectedArchive::Text(archive) => {
-            let records = write_output_transactionally(out, |staging| {
-                write_text_archive_records(&archive, staging)
+            let output_mode = if plain_text {
+                TextArchiveOutputMode::PlainText
+            } else {
+                TextArchiveOutputMode::Json
+            };
+            let plan = resolve_text_archive_conversion(&archive, output_mode, encoding)?;
+            let family = plan.family();
+            let converted = write_output_transactionally(out, |staging| {
+                convert_text_archive(&archive, &plan, staging)
             })?;
-            for (id, relative_path) in &records {
-                println!("unpacked {id:<4} {}", out.join(relative_path).display());
+            for record in &converted {
+                for warning in &record.warnings {
+                    eprintln!("{warning}");
+                }
+                println!(
+                    "converted {:<4} {} ({})",
+                    record.id,
+                    out.join(&record.relative_path).display(),
+                    record.description,
+                );
             }
             println!(
-                "unpacked {} text records into {}",
-                records.len(),
+                "converted {} {} records into {}",
+                converted.len(),
+                family.name(),
                 out.display()
             );
             Ok(())
         }
         DetectedArchive::Sound(archive) => {
+            reject_non_text_encoding(encoding, "sound pack")?;
+            reject_plain_text(plain_text, "sound pack")?;
             let count =
                 write_output_transactionally(out, |staging| unpack_sound_pack(&archive, staging))?;
             println!("unpacked {count} sound pack entries into {}", out.display());
             Ok(())
         }
     }
+}
+
+fn reject_plain_text(plain_text: bool, target: &str) -> anyhow::Result<()> {
+    if plain_text {
+        anyhow::bail!(
+            "--plain-text can only be used when converting a text archive, not a {target}"
+        );
+    }
+    Ok(())
+}
+
+fn reject_non_text_encoding(encoding: Option<&str>, target: &str) -> anyhow::Result<()> {
+    if encoding.is_some() {
+        anyhow::bail!("--encoding can only be used when converting a text archive, not a {target}");
+    }
+    Ok(())
 }
 
 fn unpack_converted_binary_archives(
@@ -789,6 +859,11 @@ mod tests {
         HeightGridBounds, HeightGridDimensions, HeightGridEncoding, MAP_HEADER_UNKNOWN_00_LEN,
         MAP_HEADER_UNKNOWN_79_LEN, Map, MapHeader, Rgba8, write_height_grid_bytes, write_map_bytes,
     };
+    use taletool_text::{
+        ConstStringEntry, ConstStringTable, LanguageEntry, LanguageTable, NSetcStringList,
+        TextEncoding, TextPayloadKind, encode_const_string_table, encode_dat_payload,
+        encode_language_table, encode_list_payload, encode_nsetc_string_list,
+    };
     use taletool_texture::sprite::free_size::{
         decode_free_size_sprite, write_free_size_sprite_bytes,
     };
@@ -827,6 +902,20 @@ mod tests {
             ),
         )
         .unwrap()
+    }
+
+    fn text_archive(archive_name: &str, records: Vec<(&str, i32, Vec<u8>)>) -> TextNosArchive {
+        let records = records
+            .into_iter()
+            .map(|(name, packed_flag, payload)| TextNosRecordInput {
+                name: name.to_owned(),
+                name_bytes: name.as_bytes().to_vec(),
+                packed_flag,
+                payload,
+            })
+            .collect::<Vec<_>>();
+        let bytes = write_text_nos_archive_bytes(&records).unwrap();
+        TextNosArchive::from_bytes(PathBuf::from(archive_name), bytes).unwrap()
     }
 
     fn sample_payload(kind: crate::binary_preset::BinaryAssetKind) -> Vec<u8> {
@@ -1211,23 +1300,598 @@ mod tests {
     }
 
     #[test]
-    fn converted_text_and_sound_archives_keep_their_canonical_layouts() {
-        let root = temp_dir("convert-text-sound");
+    fn converts_every_supported_text_archive_family() {
+        let root = temp_dir("convert-text-families");
         fs::create_dir_all(&root).unwrap();
-        let text_bytes = write_text_nos_archive_bytes(&[TextNosRecordInput {
-            packed_flag: 0,
-            name: "sample.dat".to_owned(),
-            name_bytes: b"sample.dat".to_vec(),
-            payload: b"encoded text".to_vec(),
-        }])
-        .unwrap();
-        let text = TextNosArchive::from_bytes(PathBuf::from("NSgtdData.NOS"), text_bytes).unwrap();
-        let text_out = root.join("text");
-        unpack_converted_archive(DetectedArchive::Text(text), &text_out).unwrap();
-        assert_eq!(
-            fs::read(text_out.join("sample.dat")).unwrap(),
-            b"encoded text"
+
+        let gtd = text_archive(
+            "NSgtdData.NOS",
+            vec![("Item.dat", 1, encode_dat_payload(b"").unwrap())],
         );
+        let gtd_out = root.join("gtd");
+        unpack_converted_archive(DetectedArchive::Text(gtd), &gtd_out).unwrap();
+        let gtd_json: serde_json::Value =
+            serde_json::from_slice(&fs::read(gtd_out.join("Item.json")).unwrap()).unwrap();
+        assert_eq!(gtd_json["kind"], "item");
+
+        let language = LanguageTable(vec![
+            LanguageEntry("FIRST".to_owned(), "First".to_owned()),
+            LanguageEntry("SECOND".to_owned(), "Second".to_owned()),
+        ]);
+        let lang = text_archive(
+            "NSlangData_UK.NOS",
+            vec![(
+                "_code_uk_Item.txt",
+                1,
+                encode_language_table(&language, TextEncoding::Windows1252).unwrap(),
+            )],
+        );
+        let lang_out = root.join("lang");
+        unpack_converted_archive(DetectedArchive::Text(lang), &lang_out).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<LanguageTable>(
+                &fs::read(lang_out.join("_code_uk_Item.json")).unwrap()
+            )
+            .unwrap(),
+            language
+        );
+
+        let constants = ConstStringTable(vec![
+            ConstStringEntry(2, "Second".to_owned()),
+            ConstStringEntry(1, "First".to_owned()),
+        ]);
+        let cli = text_archive(
+            "NScliData.NOS",
+            vec![(
+                "conststring.dat",
+                1,
+                encode_const_string_table(&constants, TextEncoding::EucKr).unwrap(),
+            )],
+        );
+        let cli_out = root.join("cli");
+        unpack_converted_archive(DetectedArchive::Text(cli), &cli_out).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<ConstStringTable>(
+                &fs::read(cli_out.join("conststring.json")).unwrap()
+            )
+            .unwrap(),
+            constants
+        );
+
+        let dat_strings = NSetcStringList(vec!["one".to_owned(), "two".to_owned()]);
+        let lst_strings = NSetcStringList(vec!["three".to_owned(), "four".to_owned()]);
+        let etc = text_archive(
+            "NSetcData.NOS",
+            vec![
+                (
+                    "MiniGame6WordData.dat",
+                    1,
+                    encode_nsetc_string_list(
+                        &dat_strings,
+                        TextPayloadKind::Dat,
+                        TextEncoding::EucKr,
+                    )
+                    .unwrap(),
+                ),
+                (
+                    "TabooStr.lst",
+                    0,
+                    encode_nsetc_string_list(
+                        &lst_strings,
+                        TextPayloadKind::List,
+                        TextEncoding::EucKr,
+                    )
+                    .unwrap(),
+                ),
+            ],
+        );
+        let etc_out = root.join("etc");
+        unpack_converted_archive(DetectedArchive::Text(etc), &etc_out).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<NSetcStringList>(
+                &fs::read(etc_out.join("MiniGame6WordData.json")).unwrap()
+            )
+            .unwrap(),
+            dat_strings
+        );
+        assert_eq!(
+            serde_json::from_slice::<NSetcStringList>(
+                &fs::read(etc_out.join("TabooStr.json")).unwrap()
+            )
+            .unwrap(),
+            lst_strings
+        );
+
+        assert_no_staging_directories(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plain_text_conversion_decodes_every_supported_text_family_exactly() {
+        let root = temp_dir("convert-plain-text-families");
+        fs::create_dir_all(&root).unwrap();
+
+        let gtd_text = b"# header\n% not-a-vnum\n~\n".to_vec();
+        let gtd = text_archive(
+            "NSgtdData.NOS",
+            vec![
+                ("kr_abuse.lst", 0, Vec::new()),
+                ("npctalk.dat", 1, encode_dat_payload(&gtd_text).unwrap()),
+            ],
+        );
+        let gtd_out = root.join("gtd");
+        unpack_converted_plain_text(DetectedArchive::Text(gtd), &gtd_out).unwrap();
+        assert_eq!(fs::read(gtd_out.join("kr_abuse.lst")).unwrap(), b"");
+        assert_eq!(fs::read(gtd_out.join("npctalk.dat")).unwrap(), gtd_text);
+        assert!(!gtd_out.join("npctalk.json").exists());
+
+        let mut language_text = b"KEY\tCaf".to_vec();
+        language_text.extend_from_slice(&[0xe9, b'\n']);
+        let language = text_archive(
+            "NSlangData_UK.NOS",
+            vec![(
+                "_code_uk_Item name.txt",
+                1,
+                encode_dat_payload(&language_text).unwrap(),
+            )],
+        );
+        let language_out = root.join("language");
+        unpack_converted_plain_text(DetectedArchive::Text(language), &language_out).unwrap();
+        assert_eq!(
+            fs::read(language_out.join("_code_uk_Item%20name.txt")).unwrap(),
+            language_text
+        );
+
+        let mut cli_text = b"1\x0bCaf".to_vec();
+        cli_text.extend_from_slice(&[0xe9, b'\n']);
+        let cli = text_archive(
+            "renamed-cli.NOS",
+            vec![("conststring.dat", 1, encode_dat_payload(&cli_text).unwrap())],
+        );
+        let cli_out = root.join("cli");
+        unpack_converted_plain_text(DetectedArchive::Text(cli), &cli_out).unwrap();
+        assert_eq!(fs::read(cli_out.join("conststring.dat")).unwrap(), cli_text);
+
+        let etc_dat_text = b"one\ntwo\n".to_vec();
+        let etc_list_text = b"three\nfour\n".to_vec();
+        let etc = text_archive(
+            "NSetcData.NOS",
+            vec![
+                (
+                    "MiniGame6WordData.dat",
+                    1,
+                    encode_dat_payload(&etc_dat_text).unwrap(),
+                ),
+                (
+                    "TabooStr.lst",
+                    0,
+                    encode_list_payload(&etc_list_text).unwrap(),
+                ),
+            ],
+        );
+        let etc_out = root.join("etc");
+        unpack_converted_plain_text(DetectedArchive::Text(etc), &etc_out).unwrap();
+        assert_eq!(
+            fs::read(etc_out.join("MiniGame6WordData.dat")).unwrap(),
+            etc_dat_text
+        );
+        assert_eq!(
+            fs::read(etc_out.join("TabooStr.lst")).unwrap(),
+            etc_list_text
+        );
+
+        assert_no_staging_directories(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plain_text_conversion_has_no_semantic_warnings() {
+        let root = temp_dir("convert-plain-text-no-warnings");
+        fs::create_dir_all(&root).unwrap();
+        let source = b"# header\n% invalid production row\n";
+        let archive = text_archive(
+            "NSgtdData.NOS",
+            vec![("npctalk.dat", 1, encode_dat_payload(source).unwrap())],
+        );
+        let plan =
+            resolve_text_archive_conversion(&archive, TextArchiveOutputMode::PlainText, None)
+                .unwrap();
+        let converted = convert_text_archive(&archive, &plan, &root).unwrap();
+        assert_eq!(converted.len(), 1);
+        assert!(converted[0].warnings.is_empty());
+        assert_eq!(fs::read(root.join("npctalk.dat")).unwrap(), source);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plain_text_conversion_preserves_strict_and_transactional_failures() {
+        let root = temp_dir("convert-plain-text-failures");
+        fs::create_dir_all(&root).unwrap();
+
+        let strict = text_archive(
+            "NSgtdData.NOS",
+            vec![("unknown.dat", 1, encode_dat_payload(b"text").unwrap())],
+        );
+        let strict_out = root.join("strict");
+        assert!(unpack_converted_plain_text(DetectedArchive::Text(strict), &strict_out).is_err());
+        assert!(!strict_out.exists());
+
+        let collision = text_archive(
+            "NSgtdData.NOS",
+            vec![
+                ("Item.dat", 1, encode_dat_payload(b"one").unwrap()),
+                ("ITEM.DAT", 1, encode_dat_payload(b"two").unwrap()),
+            ],
+        );
+        let collision_out = root.join("collision");
+        let error = unpack_converted_plain_text(DetectedArchive::Text(collision), &collision_out)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("both convert to"));
+        assert!(!collision_out.exists());
+
+        let malformed = text_archive(
+            "NSgtdData.NOS",
+            vec![("Item.dat", 1, b"not a DAT payload".to_vec())],
+        );
+        let malformed_out = root.join("malformed");
+        let error = unpack_converted_plain_text(DetectedArchive::Text(malformed), &malformed_out)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("NSgtdData record at index 0 with id 1"));
+        assert!(!malformed_out.exists());
+
+        let malformed_list = text_archive("NSetcData.NOS", vec![("TabooStr.lst", 0, Vec::new())]);
+        let malformed_list_out = root.join("malformed-list");
+        let error =
+            unpack_converted_plain_text(DetectedArchive::Text(malformed_list), &malformed_list_out)
+                .unwrap_err();
+        let error = format!("{error:#}");
+        assert!(error.contains("LST payload is too small"));
+        assert!(!malformed_list_out.exists());
+
+        let existing = text_archive(
+            "NSgtdData.NOS",
+            vec![("Item.dat", 1, encode_dat_payload(b"text").unwrap())],
+        );
+        let existing_out = root.join("existing");
+        fs::create_dir_all(&existing_out).unwrap();
+        fs::write(existing_out.join("keep.txt"), b"keep").unwrap();
+        let error = unpack_converted_plain_text(DetectedArchive::Text(existing), &existing_out)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("output already exists"));
+        assert_eq!(fs::read(existing_out.join("keep.txt")).unwrap(), b"keep");
+
+        assert_no_staging_directories(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn text_conversion_infers_renamed_families_and_applies_encoding_policy() {
+        let root = temp_dir("convert-text-encoding");
+        fs::create_dir_all(&root).unwrap();
+
+        let korean = LanguageTable(vec![LanguageEntry(
+            "GREETING".to_owned(),
+            "안녕하세요".to_owned(),
+        )]);
+        let lang = text_archive(
+            "renamed.NOS",
+            vec![(
+                "_code_kr_Item.txt",
+                1,
+                encode_language_table(&korean, TextEncoding::EucKr).unwrap(),
+            )],
+        );
+        let lang_out = root.join("renamed-lang");
+        unpack_converted_archive(DetectedArchive::Text(lang), &lang_out).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<LanguageTable>(
+                &fs::read(lang_out.join("_code_kr_Item.json")).unwrap()
+            )
+            .unwrap(),
+            korean
+        );
+
+        let unknown_language = LanguageTable(vec![LanguageEntry(
+            "GREETING".to_owned(),
+            "Café".to_owned(),
+        )]);
+        let unknown_lang = text_archive(
+            "NSlangData_ZZ.NOS",
+            vec![(
+                "_code_zz_Item.txt",
+                1,
+                encode_language_table(&unknown_language, TextEncoding::Windows1252).unwrap(),
+            )],
+        );
+        let unknown_lang_out = root.join("unknown-lang");
+        unpack_converted_archive_with_encoding(
+            DetectedArchive::Text(unknown_lang),
+            &unknown_lang_out,
+            Some("windows-1252"),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<LanguageTable>(
+                &fs::read(unknown_lang_out.join("_code_zz_Item.json")).unwrap()
+            )
+            .unwrap(),
+            unknown_language
+        );
+
+        let constants = ConstStringTable(vec![ConstStringEntry(1, "Café".to_owned())]);
+        let cli_payload = encode_const_string_table(&constants, TextEncoding::Windows1252).unwrap();
+        let localized_cli = text_archive(
+            "NScliData_UK.NOS",
+            vec![("conststring.dat", 1, cli_payload.clone())],
+        );
+        let localized_cli_out = root.join("localized-cli");
+        unpack_converted_archive(DetectedArchive::Text(localized_cli), &localized_cli_out).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<ConstStringTable>(
+                &fs::read(localized_cli_out.join("conststring.json")).unwrap()
+            )
+            .unwrap(),
+            constants
+        );
+
+        let unknown_cli = text_archive(
+            "NScliData_ZZ.NOS",
+            vec![("conststring.dat", 1, cli_payload.clone())],
+        );
+        let unknown_cli_out = root.join("unknown-cli");
+        unpack_converted_archive_with_encoding(
+            DetectedArchive::Text(unknown_cli),
+            &unknown_cli_out,
+            Some("windows-1252"),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<ConstStringTable>(
+                &fs::read(unknown_cli_out.join("conststring.json")).unwrap()
+            )
+            .unwrap(),
+            constants
+        );
+
+        let cli_without_encoding = text_archive(
+            "renamed-cli.NOS",
+            vec![("conststring.dat", 1, cli_payload.clone())],
+        );
+        let missing_out = root.join("missing-cli-encoding");
+        let error =
+            unpack_converted_archive(DetectedArchive::Text(cli_without_encoding), &missing_out)
+                .unwrap_err()
+                .to_string();
+        assert!(error.contains("renamed-cli.NOS"));
+        assert!(error.contains("--encoding"));
+        assert!(!missing_out.exists());
+
+        let cli = text_archive("renamed-cli.NOS", vec![("conststring.dat", 1, cli_payload)]);
+        let cli_out = root.join("renamed-cli");
+        unpack_converted_archive_with_encoding(
+            DetectedArchive::Text(cli),
+            &cli_out,
+            Some("windows-1252"),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<ConstStringTable>(
+                &fs::read(cli_out.join("conststring.json")).unwrap()
+            )
+            .unwrap(),
+            constants
+        );
+
+        let etc_strings = NSetcStringList(vec!["Café".to_owned()]);
+        let etc = text_archive(
+            "NSetcData.NOS",
+            vec![(
+                "MiniGame6WordData.dat",
+                1,
+                encode_nsetc_string_list(
+                    &etc_strings,
+                    TextPayloadKind::Dat,
+                    TextEncoding::Windows1252,
+                )
+                .unwrap(),
+            )],
+        );
+        let etc_out = root.join("etc-override");
+        unpack_converted_archive_with_encoding(
+            DetectedArchive::Text(etc),
+            &etc_out,
+            Some("windows-1252"),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<NSetcStringList>(
+                &fs::read(etc_out.join("MiniGame6WordData.json")).unwrap()
+            )
+            .unwrap(),
+            etc_strings
+        );
+
+        let gtd = text_archive(
+            "NSgtdData.NOS",
+            vec![("Item.dat", 1, encode_dat_payload(b"").unwrap())],
+        );
+        let gtd_out = root.join("gtd-override");
+        let error = unpack_converted_archive_with_encoding(
+            DetectedArchive::Text(gtd),
+            &gtd_out,
+            Some("windows-1252"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("cannot be used with NSgtdData"));
+        assert!(!gtd_out.exists());
+        assert_no_staging_directories(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn strict_text_resolution_applies_to_json_and_plain_text() {
+        let root = temp_dir("convert-text-resolution-errors");
+        fs::create_dir_all(&root).unwrap();
+        let language_payload =
+            encode_language_table(&LanguageTable::default(), TextEncoding::Windows1252).unwrap();
+        let etc_payload = encode_nsetc_string_list(
+            &NSetcStringList::default(),
+            TextPayloadKind::Dat,
+            TextEncoding::EucKr,
+        )
+        .unwrap();
+
+        let failures = [
+            (
+                "unknown",
+                text_archive(
+                    "NSgtdData.NOS",
+                    vec![("unknown.dat", 1, encode_dat_payload(b"").unwrap())],
+                ),
+                "unknown.dat",
+            ),
+            (
+                "mixed",
+                text_archive(
+                    "renamed.NOS",
+                    vec![
+                        ("_code_uk_Item.txt", 1, language_payload.clone()),
+                        ("MiniGame6WordData.dat", 1, etc_payload.clone()),
+                    ],
+                ),
+                "record identifies family",
+            ),
+            (
+                "family-conflict",
+                text_archive(
+                    "NSetcData.NOS",
+                    vec![("_code_uk_Item.txt", 1, language_payload.clone())],
+                ),
+                "archive identifies NSetcData",
+            ),
+            (
+                "locale-conflict",
+                text_archive(
+                    "NSlangData_DE.NOS",
+                    vec![("_code_uk_Item.txt", 1, language_payload.clone())],
+                ),
+                "records identify \"uk\"",
+            ),
+            (
+                "collision",
+                text_archive(
+                    "NSgtdData.NOS",
+                    vec![
+                        ("Item.dat", 1, encode_dat_payload(b"").unwrap()),
+                        ("ITEM.DAT", 1, encode_dat_payload(b"").unwrap()),
+                    ],
+                ),
+                "both convert to",
+            ),
+            (
+                "nsetc-kind-conflict",
+                text_archive("NSetcData.NOS", vec![("TabooStr.lst", 1, etc_payload)]),
+                "requires a LST payload",
+            ),
+            (
+                "renamed-empty",
+                text_archive("renamed.NOS", Vec::new()),
+                "empty renamed text archive",
+            ),
+        ];
+
+        for (name, archive, expected) in failures {
+            for (mode, plain_text) in [("json", false), ("plain", true)] {
+                let out = root.join(format!("{name}-{mode}"));
+                let error = unpack_converted_archive_with_options(
+                    DetectedArchive::Text(archive.clone()),
+                    &out,
+                    None,
+                    plain_text,
+                )
+                .unwrap_err();
+                let error = format!("{error:#}");
+                assert!(
+                    error.contains(expected),
+                    "missing {expected:?} from {error:?}"
+                );
+                assert!(!out.exists());
+                assert_no_staging_directories(&root);
+            }
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn malformed_text_conversion_is_transactional_and_errors_have_record_context() {
+        let root = temp_dir("convert-text-malformed");
+        fs::create_dir_all(&root).unwrap();
+        let archive = text_archive(
+            "NScliData.NOS",
+            vec![("conststring.dat", 1, b"not a DAT payload".to_vec())],
+        );
+        let out = root.join("out");
+        let error = unpack_converted_archive(DetectedArchive::Text(archive), &out)
+            .unwrap_err()
+            .to_string();
+        for expected in [
+            "NScliData",
+            "NScliData.NOS",
+            "index 0",
+            "id 1",
+            "conststring.dat",
+        ] {
+            assert!(
+                error.contains(expected),
+                "missing {expected:?} from {error:?}"
+            );
+        }
+        assert!(!out.exists());
+        assert_no_staging_directories(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn text_decoder_warnings_remain_nonfatal() {
+        let root = temp_dir("convert-text-warning");
+        fs::create_dir_all(&root).unwrap();
+        let archive = text_archive(
+            "NSlangData_UK.NOS",
+            vec![(
+                "_code_uk_Item.txt",
+                1,
+                encode_dat_payload(b"malformed row\nKEY\tvalue\n").unwrap(),
+            )],
+        );
+        let plan =
+            resolve_text_archive_conversion(&archive, TextArchiveOutputMode::Json, None).unwrap();
+        let converted = convert_text_archive(&archive, &plan, &root).unwrap();
+        assert_eq!(converted.len(), 1);
+        assert_eq!(converted[0].warnings.len(), 1);
+        assert!(converted[0].warnings[0].contains("skipping malformed NSlang row"));
+        assert_eq!(
+            serde_json::from_slice::<LanguageTable>(
+                &fs::read(root.join("_code_uk_Item.json")).unwrap()
+            )
+            .unwrap(),
+            LanguageTable(vec![LanguageEntry("KEY".to_owned(), "value".to_owned())])
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn raw_text_unpack_and_converted_sound_layout_are_unchanged() {
+        let root = temp_dir("raw-text-converted-sound");
+        fs::create_dir_all(&root).unwrap();
+        let payload = encode_dat_payload(b"encoded text").unwrap();
+        let text = text_archive("NSgtdData.NOS", vec![("Item.dat", 1, payload.clone())]);
+        let text_out = root.join("text");
+        unpack_text_archive(&text, &text_out).unwrap();
+        assert_eq!(fs::read(text_out.join("Item.dat")).unwrap(), payload);
 
         let mut sound_header = [0; DELDX_PACK_HEADER_LEN];
         sound_header[0] = 16;
@@ -1237,6 +1901,82 @@ mod tests {
         let sound_out = root.join("sound");
         unpack_converted_archive(DetectedArchive::Sound(sound), &sound_out).unwrap();
         assert!(sound_out.join(SOUND_PACK_MANIFEST_FILE).is_file());
+        assert_no_staging_directories(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn encoding_is_rejected_for_binary_and_sound_conversion() {
+        let root = temp_dir("convert-non-text-encoding");
+        fs::create_dir_all(&root).unwrap();
+        let preset = resolve_binary_preset("NStpData.NOS", "auto").unwrap();
+        let binary = archive_for_preset(
+            preset,
+            vec![BinaryNosArchiveWriteEntry::new(
+                1,
+                sample_payload(preset.asset_kind),
+            )],
+        );
+        let binary_out = root.join("binary");
+        let error = unpack_converted_archive_with_encoding(
+            DetectedArchive::Binary(vec![binary]),
+            &binary_out,
+            Some("windows-1252"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("not a binary archive"));
+        assert!(!binary_out.exists());
+
+        let mut sound_header = [0; DELDX_PACK_HEADER_LEN];
+        sound_header[0] = 16;
+        sound_header[1..17].copy_from_slice(b"DelDX Pack File ");
+        sound_header[0x14..0x18].copy_from_slice(&10_i32.to_le_bytes());
+        let sound = DelDxPack::empty("snd.pck", &DelDxPackWriteOptions::new(sound_header)).unwrap();
+        let sound_out = root.join("sound");
+        let error = unpack_converted_archive_with_encoding(
+            DetectedArchive::Sound(sound),
+            &sound_out,
+            Some("windows-1252"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("not a sound pack"));
+        assert!(!sound_out.exists());
+        assert_no_staging_directories(&root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plain_text_is_rejected_for_binary_and_sound_conversion() {
+        let root = temp_dir("convert-non-text-plain");
+        fs::create_dir_all(&root).unwrap();
+        let preset = resolve_binary_preset("NStpData.NOS", "auto").unwrap();
+        let binary = archive_for_preset(
+            preset,
+            vec![BinaryNosArchiveWriteEntry::new(
+                1,
+                sample_payload(preset.asset_kind),
+            )],
+        );
+        let binary_out = root.join("binary");
+        let error = unpack_converted_plain_text(DetectedArchive::Binary(vec![binary]), &binary_out)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not a binary archive"));
+        assert!(!binary_out.exists());
+
+        let mut sound_header = [0; DELDX_PACK_HEADER_LEN];
+        sound_header[0] = 16;
+        sound_header[1..17].copy_from_slice(b"DelDX Pack File ");
+        sound_header[0x14..0x18].copy_from_slice(&10_i32.to_le_bytes());
+        let sound = DelDxPack::empty("snd.pck", &DelDxPackWriteOptions::new(sound_header)).unwrap();
+        let sound_out = root.join("sound");
+        let error = unpack_converted_plain_text(DetectedArchive::Sound(sound), &sound_out)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not a sound pack"));
+        assert!(!sound_out.exists());
         assert_no_staging_directories(&root);
         fs::remove_dir_all(root).unwrap();
     }

@@ -19,6 +19,8 @@ mod sound_info;
 mod sound_pack;
 mod sprite_file;
 mod sprite_remap_file;
+mod structured_text_file;
+mod text_archive_convert;
 mod text_payload;
 mod texture_file;
 mod util;
