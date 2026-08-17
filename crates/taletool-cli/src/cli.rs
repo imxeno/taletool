@@ -382,6 +382,32 @@ pub(crate) enum MapNeighborhoodCommand {
 }
 
 /// Operations for full archive containers.
+const ARCHIVE_CONVERT_LONG_HELP: &str = r#"Decode recognized binary archives using their exact asset family.
+
+Binary families and converted output per stable entry stem:
+  NStgData, NStgeData: geometry JSON
+  NStpData, NStpeData, NStpuData: texture manifest directory and mip PNGs
+  NSedData: color-animation effect JSON
+  NSeffData: effect-definition JSON
+  NSemData: transform-animation effect JSON
+  NSesData: texture-animation effect JSON
+  NStcData: unfiltered cell-grid PNG
+  NStuData: map JSON
+  NStkData: map-neighborhood JSON
+  NSgrdData: height-grid JSON
+  NSmcData, NSpcData: sprite-animation JSON
+  NSpmData: sprite-resource-remap JSON
+  NSmpData, NSppData, NSipData: map-object sprite manifest directory and frame PNGs
+  NS4BbData: free-size sprite PNG
+
+A matching recognized filename and fixed header is accepted, as is a renamed archive with a recognized header. Conflicting filename/header identifiers, inconsistent chunks, NStsData, and custom or unknown headers fail before output is published.
+
+The output path must not already exist. Conversion uses a same-parent staging directory and publishes it only after every entry succeeds.
+
+Text archives retain their encoded named-record layout. snd.pck retains its original payloads and sound-pack.json manifest; audio is not transcoded.
+
+Converted binary output is export-only and cannot be passed to archive pack. Omit --convert for the lossless archive-level unpack/pack workflow."#;
+
 #[derive(Debug, Subcommand)]
 pub(crate) enum ArchiveCommand {
     /// Print archive metadata and optional checksums.
@@ -403,6 +429,9 @@ pub(crate) enum ArchiveCommand {
         out: PathBuf,
         #[arg(long = "type", value_enum, default_value_t = ArchiveType::Auto)]
         archive_type: ArchiveType,
+        /// Decode recognized archive payloads using their exact asset family.
+        #[arg(long, long_help = ARCHIVE_CONVERT_LONG_HELP)]
+        convert: bool,
     },
     /// Build a binary, text, or sound archive from an unpacked directory.
     Pack {
@@ -671,6 +700,8 @@ pub(crate) enum TextFormatArg {
 
 #[cfg(test)]
 mod tests {
+    use clap::CommandFactory;
+
     use super::*;
 
     #[test]
@@ -819,6 +850,89 @@ mod tests {
         ])
         .unwrap_err();
         assert!(error.to_string().contains("invalid value 'ccinf'"));
+    }
+
+    #[test]
+    fn parses_archive_unpack_convert_as_a_bare_flag() {
+        let converted = Cli::try_parse_from([
+            "taletool",
+            "archive",
+            "unpack",
+            "NStpData00.NOS",
+            "--out",
+            "converted",
+            "--convert",
+        ])
+        .unwrap();
+        assert!(matches!(
+            converted.command,
+            Command::Archive {
+                command: ArchiveCommand::Unpack { convert: true, .. }
+            }
+        ));
+
+        let raw = Cli::try_parse_from([
+            "taletool",
+            "archive",
+            "unpack",
+            "NStpData00.NOS",
+            "--out",
+            "raw",
+        ])
+        .unwrap();
+        assert!(matches!(
+            raw.command,
+            Command::Archive {
+                command: ArchiveCommand::Unpack { convert: false, .. }
+            }
+        ));
+    }
+
+    #[test]
+    fn archive_unpack_long_help_documents_complete_conversion_behavior() {
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut("archive")
+            .unwrap()
+            .find_subcommand_mut("unpack")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+
+        for expected in [
+            "NStgData",
+            "NStgeData",
+            "NStpData",
+            "NStpeData",
+            "NStpuData",
+            "NSedData",
+            "NSeffData",
+            "NSemData",
+            "NSesData",
+            "NStcData",
+            "NStuData",
+            "NStkData",
+            "NSgrdData",
+            "NSmcData",
+            "NSpcData",
+            "NSpmData",
+            "NSmpData",
+            "NSppData",
+            "NSipData",
+            "NS4BbData",
+            "NStsData",
+            "custom or unknown headers",
+            "output path must not already exist",
+            "Text archives retain",
+            "snd.pck retains",
+            "export-only",
+            "cannot be passed to archive pack",
+        ] {
+            assert!(
+                help.contains(expected),
+                "missing {expected:?} from:\n{help}"
+            );
+        }
     }
 
     #[test]

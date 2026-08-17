@@ -1,10 +1,12 @@
 //! Command-line interface for inspecting and transforming NosTale data files.
 
 mod animation_file;
+mod archive_convert;
 mod archive_detect;
 mod binary_payloads;
 mod binary_preset;
 mod ccinf_file;
+mod cell_flag_file;
 mod cli;
 mod commands;
 mod effect_file;

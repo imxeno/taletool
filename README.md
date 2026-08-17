@@ -183,7 +183,7 @@ and `snd.pck`.
 
 ```text
 taletool archive inspect <INPUT>... [--type <TYPE>] [--json] [--checksum]
-taletool archive unpack <INPUT>... --out <DIR> [--type <TYPE>]
+taletool archive unpack <INPUT>... --out <DIR> [--type <TYPE>] [--convert]
 taletool archive pack <DIR> --out <OUT> [OPTIONS]
 ```
 
@@ -218,6 +218,8 @@ can contain a duplicate ordinal (`42__2.bin`), an explicit table slot
 (`42__index7.bin`), and a per-entry compression override (`42__raw.bin` or
 `42__zlib.bin`). `archive pack` reads immediate files whose names begin with a
 decimal ID and ignores other files.
+
+Add `--convert` to decode every entry in a recognized binary archive directly to its editable asset representation.
 
 Text archive filenames use `%HH` escapes for characters that are not ASCII
 letters, digits, `.`, `-`, or `_`. Packing reverses these escapes. Archive
