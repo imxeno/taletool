@@ -30,4 +30,3 @@ These pages document NosTale file formats that taletool knows about.
 | [Map height grids](formats/map-height-grids.md)             | `NSgrdData` optimized map height grid payloads.                           |
 | [Videos](formats/videos.md)                                 | `.ntm` and `.nam` intro/act video files.                                  |
 | [Audio](formats/audio.md)                                   | `snd.pck`, `sndinfo.lst`, and loose `BGM*` audio files in `wave`.         |
-| TBD                                                         | `NStsData` payload family.                                                |
