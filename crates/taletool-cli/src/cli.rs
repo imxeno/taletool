@@ -382,6 +382,44 @@ pub(crate) enum MapNeighborhoodCommand {
 }
 
 /// Operations for full archive containers.
+const ARCHIVE_CONVERT_LONG_HELP: &str = r#"Decode recognized archives using their exact asset family.
+
+Binary families and converted output per stable entry stem:
+  NStgData, NStgeData: geometry JSON
+  NStpData, NStpeData, NStpuData: texture manifest directory and mip PNGs
+  NSedData: color-animation effect JSON
+  NSeffData: effect-definition JSON
+  NSemData: transform-animation effect JSON
+  NSesData: texture-animation effect JSON
+  NStcData: unfiltered cell-grid PNG
+  NStuData: map JSON
+  NStkData: map-neighborhood JSON
+  NSgrdData: height-grid JSON
+  NSmcData, NSpcData: sprite-animation JSON
+  NSpmData: sprite-resource-remap JSON
+  NSmpData, NSppData, NSipData: map-object sprite manifest directory and frame PNGs
+  NS4BbData: free-size sprite PNG
+
+Text families and converted output per escaped native record stem:
+  NSgtdData: grammar-specific JSON
+  NSlangData_<locale>: ordered language-table JSON
+  NScliData[_<locale>]: ordered constant-string JSON
+  NSetcData: ordered DAT/LST string-array JSON
+
+A matching recognized filename and fixed header is accepted, as is a renamed archive with a recognized header. Conflicting filename/header identifiers, inconsistent chunks, NStsData, and custom or unknown headers fail before output is published.
+
+The output path must not already exist. Conversion uses a same-parent staging directory and publishes it only after every entry succeeds.
+
+Text archive filenames and every record grammar must identify one consistent family. Renamed non-empty text archives are accepted when every record identifies that family. Canonical filename/locale conflicts, renamed empty archives, unknown or mixed records, and exact or case-insensitive output-name collisions fail without fallback. JSON output replaces the escaped native extension, for example Item.dat becomes Item.json and _code_uk_Item.txt becomes _code_uk_Item.json.
+
+Use --plain-text with --convert to decode only the DAT/LST envelope without structured semantic parsing. Plain-text output retains escaped native filenames and legacy character encodings, emits no semantic parser warnings, and remains export-only. --plain-text cannot be combined with --encoding.
+
+Canonical NSlangData and NScliData locale suffixes use the built-in locale table, including KR as EUC-KR. NScliData.NOS and NSetcData default to EUC-KR. --encoding overrides NSlangData, NScliData, and NSetcData, permits unknown NSlangData/NScliData locales, and is required for renamed NScliData archives. NSgtdData always uses each record grammar's own encoding; --encoding is rejected for NSgtdData, binary archives, and sound packs.
+
+snd.pck retains its original payloads and sound-pack.json manifest; audio is not transcoded.
+
+Converted output is export-only and cannot be passed to archive pack. Omit --convert for canonical encoded text extraction or the lossless archive-level unpack/pack workflow."#;
+
 #[derive(Debug, Subcommand)]
 pub(crate) enum ArchiveCommand {
     /// Print archive metadata and optional checksums.
@@ -403,6 +441,15 @@ pub(crate) enum ArchiveCommand {
         out: PathBuf,
         #[arg(long = "type", value_enum, default_value_t = ArchiveType::Auto)]
         archive_type: ArchiveType,
+        /// Decode recognized archive payloads using their exact asset family.
+        #[arg(long, long_help = ARCHIVE_CONVERT_LONG_HELP)]
+        convert: bool,
+        /// Override the encoding used for converted NSlang, NScli, or NSetc records.
+        #[arg(long, requires = "convert")]
+        encoding: Option<String>,
+        /// Decode text archive DAT/LST envelopes without producing structured JSON.
+        #[arg(long, requires = "convert", conflicts_with = "encoding")]
+        plain_text: bool,
     },
     /// Build a binary, text, or sound archive from an unpacked directory.
     Pack {
@@ -671,6 +718,8 @@ pub(crate) enum TextFormatArg {
 
 #[cfg(test)]
 mod tests {
+    use clap::CommandFactory;
+
     use super::*;
 
     #[test]
@@ -819,6 +868,191 @@ mod tests {
         ])
         .unwrap_err();
         assert!(error.to_string().contains("invalid value 'ccinf'"));
+    }
+
+    #[test]
+    fn parses_archive_unpack_convert_as_a_bare_flag() {
+        let converted = Cli::try_parse_from([
+            "taletool",
+            "archive",
+            "unpack",
+            "NStpData00.NOS",
+            "--out",
+            "converted",
+            "--convert",
+        ])
+        .unwrap();
+        assert!(matches!(
+            converted.command,
+            Command::Archive {
+                command: ArchiveCommand::Unpack { convert: true, .. }
+            }
+        ));
+
+        let raw = Cli::try_parse_from([
+            "taletool",
+            "archive",
+            "unpack",
+            "NStpData00.NOS",
+            "--out",
+            "raw",
+        ])
+        .unwrap();
+        assert!(matches!(
+            raw.command,
+            Command::Archive {
+                command: ArchiveCommand::Unpack { convert: false, .. }
+            }
+        ));
+
+        let encoded = Cli::try_parse_from([
+            "taletool",
+            "archive",
+            "unpack",
+            "NSlangData_ZZ.NOS",
+            "--out",
+            "converted",
+            "--convert",
+            "--encoding",
+            "windows-1252",
+        ])
+        .unwrap();
+        assert!(matches!(
+            encoded.command,
+            Command::Archive {
+                command: ArchiveCommand::Unpack {
+                    convert: true,
+                    encoding: Some(_),
+                    ..
+                }
+            }
+        ));
+
+        assert!(
+            Cli::try_parse_from([
+                "taletool",
+                "archive",
+                "unpack",
+                "NSlangData_ZZ.NOS",
+                "--out",
+                "raw",
+                "--encoding",
+                "windows-1252",
+            ])
+            .is_err()
+        );
+
+        let plain = Cli::try_parse_from([
+            "taletool",
+            "archive",
+            "unpack",
+            "NSgtdData.NOS",
+            "--out",
+            "plain",
+            "--convert",
+            "--plain-text",
+        ])
+        .unwrap();
+        assert!(matches!(
+            plain.command,
+            Command::Archive {
+                command: ArchiveCommand::Unpack {
+                    convert: true,
+                    plain_text: true,
+                    encoding: None,
+                    ..
+                }
+            }
+        ));
+
+        assert!(
+            Cli::try_parse_from([
+                "taletool",
+                "archive",
+                "unpack",
+                "NSgtdData.NOS",
+                "--out",
+                "plain",
+                "--plain-text",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "taletool",
+                "archive",
+                "unpack",
+                "NSlangData_UK.NOS",
+                "--out",
+                "plain",
+                "--convert",
+                "--plain-text",
+                "--encoding",
+                "windows-1252",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn archive_unpack_long_help_documents_complete_conversion_behavior() {
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut("archive")
+            .unwrap()
+            .find_subcommand_mut("unpack")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+
+        for expected in [
+            "NStgData",
+            "NStgeData",
+            "NStpData",
+            "NStpeData",
+            "NStpuData",
+            "NSedData",
+            "NSeffData",
+            "NSemData",
+            "NSesData",
+            "NStcData",
+            "NStuData",
+            "NStkData",
+            "NSgrdData",
+            "NSmcData",
+            "NSpcData",
+            "NSpmData",
+            "NSmpData",
+            "NSppData",
+            "NSipData",
+            "NS4BbData",
+            "NSgtdData",
+            "NSlangData_<locale>",
+            "NScliData[_<locale>]",
+            "NSetcData",
+            "NStsData",
+            "custom or unknown headers",
+            "output path must not already exist",
+            "renamed empty archives",
+            "case-insensitive output-name collisions",
+            "--plain-text",
+            "legacy character encodings",
+            "semantic parser warnings",
+            "cannot be combined with --encoding",
+            "KR as EUC-KR",
+            "NScliData.NOS and NSetcData default to EUC-KR",
+            "required for renamed NScliData archives",
+            "rejected for NSgtdData, binary archives, and sound packs",
+            "canonical encoded text extraction",
+            "snd.pck retains",
+            "export-only",
+            "cannot be passed to archive pack",
+        ] {
+            assert!(
+                help.contains(expected),
+                "missing {expected:?} from:\n{help}"
+            );
+        }
     }
 
     #[test]

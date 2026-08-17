@@ -6,9 +6,26 @@
 use std::path::Path;
 
 use taletool_archive::{BinaryCompression, BinaryNosArchive};
+use taletool_effect::EffectAssetKind;
 use taletool_zlib::ZlibProfile;
 
 use crate::cli::ChunkingArg;
+
+/// Semantic payload type stored by a recognized binary archive family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BinaryAssetKind {
+    Geometry,
+    Texture,
+    Effect(EffectAssetKind),
+    CellFlag,
+    Map,
+    MapObjectSprite,
+    SpriteAnimation,
+    SpriteRemap,
+    MapNeighborhood,
+    HeightGrid,
+    FreeSizeSprite,
+}
 
 /// CLI defaults for a known binary archive family.
 #[derive(Debug, Clone, Copy)]
@@ -29,6 +46,8 @@ pub(crate) struct BinaryPreset {
     pub(crate) chunk_count: usize,
     /// Default output filename or chunk filename pattern.
     pub(crate) chunk_format: &'static str,
+    /// Semantic payload decoder selected for converted archive unpacking.
+    pub(crate) asset_kind: BinaryAssetKind,
 }
 
 const BINARY_PRESETS: &[BinaryPreset] = &[
@@ -41,6 +60,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::LowByte,
         chunk_count: 4,
         chunk_format: "NStgData{chunk:02X}.NOS",
+        asset_kind: BinaryAssetKind::Geometry,
     },
     BinaryPreset {
         name: "NStgeData",
@@ -51,6 +71,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::Single,
         chunk_count: 1,
         chunk_format: "NStgeData.NOS",
+        asset_kind: BinaryAssetKind::Geometry,
     },
     BinaryPreset {
         name: "NStpData",
@@ -61,6 +82,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::LowByte,
         chunk_count: 32,
         chunk_format: "NStpData{chunk:02X}.NOS",
+        asset_kind: BinaryAssetKind::Texture,
     },
     BinaryPreset {
         name: "NStpeData",
@@ -71,6 +93,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::LowByte,
         chunk_count: 8,
         chunk_format: "NStpeData{chunk:02X}.NOS",
+        asset_kind: BinaryAssetKind::Texture,
     },
     BinaryPreset {
         name: "NStpuData",
@@ -81,6 +104,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::LowByte,
         chunk_count: 4,
         chunk_format: "NStpuData{chunk:02X}.NOS",
+        asset_kind: BinaryAssetKind::Texture,
     },
     BinaryPreset {
         name: "NSedData",
@@ -91,6 +115,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::Single,
         chunk_count: 1,
         chunk_format: "NSedData.NOS",
+        asset_kind: BinaryAssetKind::Effect(EffectAssetKind::ColorAnimation),
     },
     BinaryPreset {
         name: "NSemData",
@@ -101,6 +126,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::Single,
         chunk_count: 1,
         chunk_format: "NSemData.NOS",
+        asset_kind: BinaryAssetKind::Effect(EffectAssetKind::TransformAnimation),
     },
     BinaryPreset {
         name: "NSesData",
@@ -111,6 +137,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::Single,
         chunk_count: 1,
         chunk_format: "NSesData.NOS",
+        asset_kind: BinaryAssetKind::Effect(EffectAssetKind::TextureAnimation),
     },
     BinaryPreset {
         name: "NSeffData",
@@ -121,6 +148,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::Single,
         chunk_count: 1,
         chunk_format: "NSeffData.NOS",
+        asset_kind: BinaryAssetKind::Effect(EffectAssetKind::Definition),
     },
     BinaryPreset {
         name: "NStcData",
@@ -131,6 +159,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::Single,
         chunk_count: 1,
         chunk_format: "NStcData.NOS",
+        asset_kind: BinaryAssetKind::CellFlag,
     },
     BinaryPreset {
         name: "NStuData",
@@ -141,6 +170,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::Single,
         chunk_count: 1,
         chunk_format: "NStuData.NOS",
+        asset_kind: BinaryAssetKind::Map,
     },
     BinaryPreset {
         name: "NSipData",
@@ -151,6 +181,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::Single,
         chunk_count: 1,
         chunk_format: "NSipData.NOS",
+        asset_kind: BinaryAssetKind::MapObjectSprite,
     },
     BinaryPreset {
         name: "NSmcData",
@@ -161,6 +192,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::Single,
         chunk_count: 1,
         chunk_format: "NSmcData.NOS",
+        asset_kind: BinaryAssetKind::SpriteAnimation,
     },
     BinaryPreset {
         name: "NSmpData",
@@ -171,6 +203,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::LowByte,
         chunk_count: 16,
         chunk_format: "NSmpData{chunk:02X}.NOS",
+        asset_kind: BinaryAssetKind::MapObjectSprite,
     },
     BinaryPreset {
         name: "NSppData",
@@ -181,6 +214,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::LowByte,
         chunk_count: 32,
         chunk_format: "NSppData{chunk:02X}.NOS",
+        asset_kind: BinaryAssetKind::MapObjectSprite,
     },
     BinaryPreset {
         name: "NSpcData",
@@ -191,6 +225,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::Single,
         chunk_count: 1,
         chunk_format: "NSpcData.NOS",
+        asset_kind: BinaryAssetKind::SpriteAnimation,
     },
     BinaryPreset {
         name: "NSpmData",
@@ -201,6 +236,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::Single,
         chunk_count: 1,
         chunk_format: "NSpmData.NOS",
+        asset_kind: BinaryAssetKind::SpriteRemap,
     },
     BinaryPreset {
         name: "NStkData",
@@ -211,6 +247,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::Single,
         chunk_count: 1,
         chunk_format: "NStkData.NOS",
+        asset_kind: BinaryAssetKind::MapNeighborhood,
     },
     BinaryPreset {
         name: "NSgrdData",
@@ -221,6 +258,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::Single,
         chunk_count: 1,
         chunk_format: "NSgrdData.NOS",
+        asset_kind: BinaryAssetKind::HeightGrid,
     },
     BinaryPreset {
         name: "NS4BbData",
@@ -231,6 +269,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         chunking: ChunkingArg::Single,
         chunk_count: 1,
         chunk_format: "NS4BbData.NOS",
+        asset_kind: BinaryAssetKind::FreeSizeSprite,
     },
 ];
 
@@ -276,22 +315,76 @@ pub(crate) fn resolve_binary_preset(out: &str, preset_arg: &str) -> Option<Binar
 pub(crate) fn binary_nos_archive_default_compression(
     archive: &BinaryNosArchive,
 ) -> BinaryCompression {
-    if let Some(preset) = resolve_binary_nos_preset_for_archive(archive) {
+    if let Some(preset) = resolve_binary_nos_preset_for_archive_lenient(archive) {
         return preset.compression;
     }
     infer_default_compression(archive.entries().iter().map(|entry| entry.compression))
 }
 
+/// Resolve one semantic preset for every chunk in a converted binary archive set.
+pub(crate) fn resolve_binary_nos_preset_for_archives(
+    archives: &[BinaryNosArchive],
+) -> anyhow::Result<BinaryPreset> {
+    let Some((first, rest)) = archives.split_first() else {
+        anyhow::bail!("cannot identify an empty binary archive set");
+    };
+    let expected = resolve_binary_nos_preset_for_archive_strict(first)?;
+    for archive in rest {
+        let actual = resolve_binary_nos_preset_for_archive_strict(archive)?;
+        if actual.name != expected.name {
+            anyhow::bail!(
+                "archive chunk {} identifies family {}, but the archive set started as {}",
+                archive.path().display(),
+                actual.name,
+                expected.name,
+            );
+        }
+    }
+    Ok(expected)
+}
+
+/// Require a binary archive name and header to identify one consistent family.
+fn resolve_binary_nos_preset_for_archive_strict(
+    archive: &BinaryNosArchive,
+) -> anyhow::Result<BinaryPreset> {
+    let by_name = resolve_binary_preset(&archive.path().to_string_lossy(), "auto");
+    let by_header = binary_preset_for_header(archive.header(), archive.direct_index());
+    match (by_name, by_header) {
+        (Some(named), Some(header)) if named.name == header.name => Ok(named),
+        (Some(named), Some(header)) => anyhow::bail!(
+            "archive {} filename identifies family {}, but its header identifies {}",
+            archive.path().display(),
+            named.name,
+            header.name,
+        ),
+        (Some(named), None) => anyhow::bail!(
+            "archive {} filename identifies family {}, but header {} with direct index {} does not match it",
+            archive.path().display(),
+            named.name,
+            hex::encode(archive.header()),
+            archive.direct_index(),
+        ),
+        (None, Some(header)) => Ok(header),
+        (None, None) => anyhow::bail!(
+            "archive {} has no recognized binary family; --convert requires a supported family",
+            archive.path().display(),
+        ),
+    }
+}
+
+fn binary_preset_for_header(header: [u8; 16], direct_index: u8) -> Option<BinaryPreset> {
+    BINARY_PRESETS
+        .iter()
+        .find(|preset| preset.header == header && preset.direct_index == direct_index)
+        .copied()
+}
+
 /// Resolve a preset from archive path first, then from header/direct-index data.
-fn resolve_binary_nos_preset_for_archive(archive: &BinaryNosArchive) -> Option<BinaryPreset> {
-    resolve_binary_preset(&archive.path().to_string_lossy(), "auto").or_else(|| {
-        BINARY_PRESETS
-            .iter()
-            .find(|preset| {
-                preset.header == archive.header() && preset.direct_index == archive.direct_index()
-            })
-            .copied()
-    })
+fn resolve_binary_nos_preset_for_archive_lenient(
+    archive: &BinaryNosArchive,
+) -> Option<BinaryPreset> {
+    resolve_binary_preset(&archive.path().to_string_lossy(), "auto")
+        .or_else(|| binary_preset_for_header(archive.header(), archive.direct_index()))
 }
 
 /// Pick a default compression for unknown archives from observed entries.
@@ -432,6 +525,137 @@ mod tests {
         )
         .unwrap();
         BinaryNosArchive::from_bytes(PathBuf::from(path), data).unwrap()
+    }
+
+    fn empty_binary_nos_archive(
+        path: &str,
+        header: [u8; 16],
+        direct_index: u8,
+    ) -> BinaryNosArchive {
+        let data = write_binary_nos_archive_bytes(
+            &[],
+            &BinaryNosArchiveWriteOptions {
+                header,
+                direct_index,
+                compression: BinaryCompression::Raw,
+                zlib_profile: ZlibProfile::default_level(9),
+            },
+        )
+        .unwrap();
+        BinaryNosArchive::from_bytes(PathBuf::from(path), data).unwrap()
+    }
+
+    #[test]
+    fn strict_conversion_resolver_maps_every_supported_family() {
+        let expected = [
+            ("NStgData", BinaryAssetKind::Geometry),
+            ("NStgeData", BinaryAssetKind::Geometry),
+            ("NStpData", BinaryAssetKind::Texture),
+            ("NStpeData", BinaryAssetKind::Texture),
+            ("NStpuData", BinaryAssetKind::Texture),
+            (
+                "NSedData",
+                BinaryAssetKind::Effect(EffectAssetKind::ColorAnimation),
+            ),
+            (
+                "NSemData",
+                BinaryAssetKind::Effect(EffectAssetKind::TransformAnimation),
+            ),
+            (
+                "NSesData",
+                BinaryAssetKind::Effect(EffectAssetKind::TextureAnimation),
+            ),
+            (
+                "NSeffData",
+                BinaryAssetKind::Effect(EffectAssetKind::Definition),
+            ),
+            ("NStcData", BinaryAssetKind::CellFlag),
+            ("NStuData", BinaryAssetKind::Map),
+            ("NSipData", BinaryAssetKind::MapObjectSprite),
+            ("NSmcData", BinaryAssetKind::SpriteAnimation),
+            ("NSmpData", BinaryAssetKind::MapObjectSprite),
+            ("NSppData", BinaryAssetKind::MapObjectSprite),
+            ("NSpcData", BinaryAssetKind::SpriteAnimation),
+            ("NSpmData", BinaryAssetKind::SpriteRemap),
+            ("NStkData", BinaryAssetKind::MapNeighborhood),
+            ("NSgrdData", BinaryAssetKind::HeightGrid),
+            ("NS4BbData", BinaryAssetKind::FreeSizeSprite),
+        ];
+
+        assert_eq!(expected.len(), BINARY_PRESETS.len());
+        for (name, asset_kind) in expected {
+            let preset = resolve_binary_preset(&format!("{name}.NOS"), "auto").unwrap();
+            assert_eq!(preset.asset_kind, asset_kind, "{name}");
+            let named = empty_binary_nos_archive(
+                &format!("{name}.NOS"),
+                preset.header,
+                preset.direct_index,
+            );
+            let renamed =
+                empty_binary_nos_archive("renamed.NOS", preset.header, preset.direct_index);
+            assert_eq!(
+                resolve_binary_nos_preset_for_archives(&[named])
+                    .unwrap()
+                    .name,
+                name
+            );
+            assert_eq!(
+                resolve_binary_nos_preset_for_archives(&[renamed])
+                    .unwrap()
+                    .name,
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn strict_conversion_resolver_rejects_conflicts_and_unknown_families() {
+        let nstg = resolve_binary_preset("NStgData.NOS", "auto").unwrap();
+        let nstp = resolve_binary_preset("NStpData.NOS", "auto").unwrap();
+        let conflicting = empty_binary_nos_archive("NStpData.NOS", nstg.header, nstg.direct_index);
+        let error = resolve_binary_nos_preset_for_archives(&[conflicting])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("filename identifies family NStpData"));
+        assert!(error.contains("header identifies NStgData"));
+
+        let wrong_header =
+            empty_binary_nos_archive("NStpData.NOS", *b"Unknown NOS fmt!", nstp.direct_index);
+        assert!(
+            resolve_binary_nos_preset_for_archives(&[wrong_header])
+                .unwrap_err()
+                .to_string()
+                .contains("does not match it")
+        );
+
+        for (path, header) in [
+            ("NStsData.NOS", *b"NT Data 09\0\0\x15\x07\x04 "),
+            ("custom.NOS", *b"Unknown NOS fmt!"),
+        ] {
+            let archive = empty_binary_nos_archive(path, header, 0);
+            assert!(
+                resolve_binary_nos_preset_for_archives(&[archive])
+                    .unwrap_err()
+                    .to_string()
+                    .contains("no recognized binary family"),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn strict_conversion_resolver_rejects_inconsistent_chunks() {
+        let nstg = resolve_binary_preset("NStgData.NOS", "auto").unwrap();
+        let nstp = resolve_binary_preset("NStpData.NOS", "auto").unwrap();
+        let archives = [
+            empty_binary_nos_archive("renamed-a.NOS", nstg.header, nstg.direct_index),
+            empty_binary_nos_archive("renamed-b.NOS", nstp.header, nstp.direct_index),
+        ];
+        let error = resolve_binary_nos_preset_for_archives(&archives)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("identifies family NStpData"));
+        assert!(error.contains("started as NStgData"));
     }
 
     #[test]

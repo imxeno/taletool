@@ -183,7 +183,7 @@ and `snd.pck`.
 
 ```text
 taletool archive inspect <INPUT>... [--type <TYPE>] [--json] [--checksum]
-taletool archive unpack <INPUT>... --out <DIR> [--type <TYPE>]
+taletool archive unpack <INPUT>... --out <DIR> [--type <TYPE>] [--convert] [--encoding <ENCODING>] [--plain-text]
 taletool archive pack <DIR> --out <OUT> [OPTIONS]
 ```
 
@@ -221,8 +221,12 @@ decimal ID and ignores other files.
 
 Text archive filenames use `%HH` escapes for characters that are not ASCII
 letters, digits, `.`, `-`, or `_`. Packing reverses these escapes. Archive
-unpacking does not decode DAT or LST contents; use `taletool text unpack` on an
-extracted record.
+unpacking without `--convert` preserves the encoded DAT/LST payloads for a
+lossless archive-level unpack/pack workflow.
+
+Add `--convert` to export supported binary archives as JSON, PNGs, or manifests,
+and supported text archives as structured JSON. Use `--plain-text` to unwrap
+text DAT/LST records instead. Sound packs keep their unpacked layout.
 
 #### Packing
 
