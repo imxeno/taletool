@@ -1,6 +1,6 @@
 [package]
 name = "taletool-zlib"
-version = "0.1.0"
+version = "0.2.0"
 publish = false
 edition.workspace = true
 license = "AGPL-3.0-or-later AND Zlib"
