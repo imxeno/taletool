@@ -219,7 +219,8 @@ can contain a duplicate ordinal (`42__2.bin`), an explicit table slot
 `42__zlib.bin`). `archive pack` reads immediate files whose names begin with a
 decimal ID and ignores other files.
 
-Add `--convert` to decode every entry in a recognized binary archive directly to its editable asset representation.
+Add `--convert` to decode every entry in a recognized binary archive directly to
+its editable asset representation.
 
 Text archive filenames use `%HH` escapes for characters that are not ASCII
 letters, digits, `.`, `-`, or `_`. Packing reverses these escapes. Archive
