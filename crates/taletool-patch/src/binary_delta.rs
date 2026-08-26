@@ -60,7 +60,7 @@ fn rebuild_delta_chunk(source: &[u8], reader: &mut DeltaReader<'_>) -> Result<Ve
     let mut output_pos = 1usize;
     let mut output = Vec::new();
 
-    for (index, record) in table.chunks_exact(DELTA_RECORD_LEN).enumerate() {
+    for (index, record) in table.as_chunks::<DELTA_RECORD_LEN>().0.iter().enumerate() {
         let copy_len = read_u16_at(record, 0, "copy length")? as usize;
         let source_pos = read_u32_at(record, 4, "source position")? as usize;
         let target_pos = read_u32_at(record, 8, "target position")? as usize;

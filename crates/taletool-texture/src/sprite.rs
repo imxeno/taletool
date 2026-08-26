@@ -188,7 +188,7 @@ pub fn decode_sprite(data: &[u8]) -> SpriteResult<DecodedSprite> {
         };
 
         let mut image = RgbaImage::new(width.into(), height.into());
-        for (pixel, encoded) in image.pixels_mut().zip(pixels.chunks_exact(2)) {
+        for (pixel, encoded) in image.pixels_mut().zip(pixels.as_chunks::<2>().0) {
             *pixel = decode_a4r4g4b4(u16::from_le_bytes([encoded[0], encoded[1]]));
         }
         frames.push(DecodedSpriteFrame {

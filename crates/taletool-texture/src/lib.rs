@@ -343,17 +343,17 @@ fn decode_texture_level(
     let mut image = RgbaImage::new(width.into(), height.into());
     match format {
         TextureFormat::A4R4G4B4 => {
-            for (pixel, encoded) in image.pixels_mut().zip(pixels.chunks_exact(2)) {
+            for (pixel, encoded) in image.pixels_mut().zip(pixels.as_chunks::<2>().0) {
                 *pixel = decode_a4r4g4b4(u16::from_le_bytes([encoded[0], encoded[1]]));
             }
         }
         TextureFormat::A1R5G5B5 => {
-            for (pixel, encoded) in image.pixels_mut().zip(pixels.chunks_exact(2)) {
+            for (pixel, encoded) in image.pixels_mut().zip(pixels.as_chunks::<2>().0) {
                 *pixel = decode_a1r5g5b5(u16::from_le_bytes([encoded[0], encoded[1]]));
             }
         }
         TextureFormat::A8R8G8B8 => {
-            for (pixel, encoded) in image.pixels_mut().zip(pixels.chunks_exact(4)) {
+            for (pixel, encoded) in image.pixels_mut().zip(pixels.as_chunks::<4>().0) {
                 *pixel = Rgba([encoded[2], encoded[1], encoded[0], encoded[3]]);
             }
         }
