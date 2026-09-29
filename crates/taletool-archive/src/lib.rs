@@ -17,8 +17,8 @@ pub mod text;
 pub use binary::{
     BinaryCompression, BinaryEntryPayload, BinaryNosArchive, BinaryNosArchiveEntry,
     BinaryNosArchiveError, BinaryNosArchiveRecord, BinaryNosArchiveResult,
-    BinaryNosArchiveWriteEntry, BinaryNosArchiveWriteOptions, BinaryNosSplitArchive,
-    write_binary_nos_archive_bytes,
+    BinaryNosArchiveWriteEntry, BinaryNosArchiveWriteOptions, BinaryNosChunkRouting,
+    BinaryNosSplitArchive, write_binary_nos_archive_bytes,
 };
 pub use deldx::{
     DELDX_PACK_HEADER_LEN, DELDX_PACK_RESERVED_HEADER_LEN, DELDX_PACK_RESERVED_HEADER_OFFSET,

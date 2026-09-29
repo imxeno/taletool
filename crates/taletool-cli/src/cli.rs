@@ -684,6 +684,8 @@ pub(crate) enum CompressionArg {
 pub(crate) enum ChunkingArg {
     /// Write every payload to one archive file.
     Single,
+    /// Route payloads using the selected archive family's client selector.
+    Family,
     /// Route payloads by the low byte of the file ID.
     LowByte,
 }

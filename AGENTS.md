@@ -1,3 +1,8 @@
+## Client Naming
+
+Refer to the game client as "NosTale" or "the client" in code, tests,
+documentation, and CLI output. Describe client behavior directly.
+
 ## Rust Quality Gates
 
 ```bash

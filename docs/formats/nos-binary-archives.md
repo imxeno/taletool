@@ -7,29 +7,29 @@ Binary `.NOS` archives are the standard NosTale table/chunk container format.
 Several unrelated NosTale containers use the `.NOS` extension. These are the
 observed binary archive families.
 
-| Family           | Header       | Compression          | Split layout       | Content                                                    |
-| ---------------- | ------------ | -------------------- | ------------------ | ---------------------------------------------------------- |
-| `NStgData*.NOS`  | `NT Data 06` | raw                  | low-byte, 4 files  | [Geometry payloads](geometry.md)                           |
-| `NStgeData.NOS`  | `NT Data 10` | raw                  | single file        | [Effect geometry payloads](geometry.md)                    |
-| `NStpData*.NOS`  | `NT Data 07` | raw                  | low-byte, 32 files | [Texture payloads](textures.md)                            |
-| `NStpeData*.NOS` | `NT Data 11` | raw                  | low-byte, 8 files  | [Effect texture payloads](textures.md)                     |
-| `NStpuData*.NOS` | `NT Data 12` | raw                  | low-byte, 4 files  | [UI/widget texture payloads](textures.md)                  |
-| `NSedData.NOS`   | `NT Data 20` | raw                  | single file        | [Effect color animations](effects.md)                      |
-| `NSeffData.NOS`  | `NT Data 23` | raw                  | single file        | [Effect definitions](effects.md)                           |
-| `NSemData.NOS`   | `NT Data 21` | raw                  | single file        | [Effect transform animations](effects.md)                  |
-| `NSesData.NOS`   | `NT Data 22` | raw                  | single file        | [Effect texture animations](effects.md)                    |
-| `NStcData.NOS`   | `NT Data 05` | zlib 1.1.2 (level 9) | single file        | [Map cell flags](map-cell-flags.md)                        |
-| `NStuData.NOS`   | `NT Data 02` | zlib 1.1.2 (level 9) | single file        | [Map payloads](maps.md)                                    |
-| `NStkData.NOS`   | `NT Data 03` | raw                  | single file        | [Map neighborhoods](map-neighborhoods.md)                  |
-| `NStsData.NOS`   | `NT Data 09` | raw                  | single file        | Unknown and unused map-related data                        |
-| `NSgrdData*.NOS` | `NT Data 26` | raw                  | `file_id & 7`      | [Optimized map height grids](map-height-grids.md)          |
-| `NSmcData.NOS`   | `NT Data 16` | raw                  | single file        | [Monster/NPC sprite animations](sprite-animations.md)      |
-| `NSmpData*.NOS`  | `NT Data 17` | zlib 1.1.2 (level 1) | low-byte, 16 files | [Monster/NPC sprite payloads](sprites.md)                  |
-| `NSpcData.NOS`   | `NT Data 13` | raw                  | single file        | [Player sprite animations](sprite-animations.md)           |
-| `NSpmData.NOS`   | `NT Data 15` | raw                  | single file        | [Player sprite-resource remaps](sprite-resource-remaps.md) |
-| `NSppData*.NOS`  | `NT Data 14` | zlib 1.1.2 (level 1) | low-byte, 32 files | [Player sprite payloads](sprites.md)                       |
-| `NSipData.NOS`   | `NT Data 24` | zlib 1.1.2 (level 1) | single file        | [Map-object sprite payloads](sprites.md)                   |
-| `NS4BbData.NOS`  | `32GBS V1.0` | zlib 1.1.2 (level 9) | single file        | [Free-size sprite payloads](sprites.md)                    |
+| Family           | Header       | Compression          | Split layout         | Content                                                    |
+| ---------------- | ------------ | -------------------- | -------------------- | ---------------------------------------------------------- |
+| `NStgData*.NOS`  | `NT Data 06` | raw                  | `id & 3`, 4 files    | [Geometry payloads](geometry.md)                           |
+| `NStgeData.NOS`  | `NT Data 10` | raw                  | single file          | [Effect geometry payloads](geometry.md)                    |
+| `NStpData*.NOS`  | `NT Data 07` | raw                  | `id & 31`, 32 files  | [Texture payloads](textures.md)                            |
+| `NStpeData*.NOS` | `NT Data 11` | raw                  | `id & 7`, 8 files    | [Effect texture payloads](textures.md)                     |
+| `NStpuData*.NOS` | `NT Data 12` | raw                  | `id & 3`, 4 files    | [UI/widget texture payloads](textures.md)                  |
+| `NSedData.NOS`   | `NT Data 20` | raw                  | single file          | [Effect color animations](effects.md)                      |
+| `NSeffData.NOS`  | `NT Data 23` | raw                  | single file          | [Effect definitions](effects.md)                           |
+| `NSemData.NOS`   | `NT Data 21` | raw                  | single file          | [Effect transform animations](effects.md)                  |
+| `NSesData.NOS`   | `NT Data 22` | raw                  | single file          | [Effect texture animations](effects.md)                    |
+| `NStcData.NOS`   | `NT Data 05` | zlib 1.1.2 (level 9) | single file          | [Map cell flags](map-cell-flags.md)                        |
+| `NStuData.NOS`   | `NT Data 02` | zlib 1.1.2 (level 9) | single file          | [Map payloads](maps.md)                                    |
+| `NStkData.NOS`   | `NT Data 03` | raw                  | single file          | [Map neighborhoods](map-neighborhoods.md)                  |
+| `NStsData.NOS`   | `NT Data 09` | raw                  | single file          | Unknown and unused map-related data                        |
+| `NSgrdData*.NOS` | `NT Data 26` | raw                  | `file_id & 7`        | [Optimized map height grids](map-height-grids.md)          |
+| `NSmcData.NOS`   | `NT Data 16` | raw                  | single file          | [Monster/NPC sprite animations](sprite-animations.md)      |
+| `NSmpData*.NOS`  | `NT Data 17` | zlib 1.1.2 (level 1) | bits 10–13, 16 files | [Monster/NPC sprite payloads](sprites.md)                  |
+| `NSpcData.NOS`   | `NT Data 13` | raw                  | single file          | [Player sprite animations](sprite-animations.md)           |
+| `NSpmData.NOS`   | `NT Data 15` | raw                  | single file          | [Player sprite-resource remaps](sprite-resource-remaps.md) |
+| `NSppData*.NOS`  | `NT Data 14` | zlib 1.1.2 (level 1) | bits 11–15, 32 files | [Player sprite payloads](sprites.md)                       |
+| `NSipData.NOS`   | `NT Data 24` | zlib 1.1.2 (level 1) | single file          | [Map-object sprite payloads](sprites.md)                   |
+| `NS4BbData*.NOS` | `32GBS V1.0` | zlib 1.1.2 (level 9) | `id & 3`, 4 files    | [Free-size sprite payloads](sprites.md)                    |
 
 `*` means the archive family may appear as an older single archive name such as
 `NStgData.NOS` or as a chunked name such as `NStgData00.NOS`.
@@ -83,8 +83,25 @@ original Delphi 7 tooling used zlib 1.1.2.
 
 ## Split Archives
 
-Some archive families are split into several files. Low-byte split families
-route entries by the low byte of the table `file_id`; single-file families keep
-all entries in one archive. Missing numbered chunks are allowed; a lookup fails
-if its `file_id` routes to a missing chunk. `NSgrdData*.NOS` is a special case
-only in its routing rule, which uses `file_id & 7`.
+The client prefers an unsuffixed `<family>.NOS` file when present. Otherwise, it
+loads numbered `<family><XX>.NOS` files, where `XX` is exactly two hexadecimal
+digits (`00` through `FF`). Missing numbers remain empty slots; even a lone
+numbered file uses routing. Lookup reads only the selected slot and fails if
+that chunk or ID is missing. It never searches another chunk for the ID. Family
+discovery excludes similarly prefixed names and locale variants.
+
+Selectors operate on the unsigned bit pattern of the file ID:
+
+| Family                                                     | Chunk selector        | Addressable chunks |
+| ---------------------------------------------------------- | --------------------- | ------------------ |
+| `NStgData`, `NStpuData`, `NStpuData_<locale>`, `NS4BbData` | `id & 3`              | 4                  |
+| `NStpeData`, `NSgrdData`                                   | `id & 7`              | 8                  |
+| `NStpData`                                                 | `id & 31`             | 32                 |
+| `NSppData`                                                 | `(id & 0xf800) >> 11` | 32                 |
+| `NSmpData`                                                 | `(id & 0x3c00) >> 10` | 16                 |
+| Other families (generic selector)                          | `id & 0xff`           | 256                |
+
+CLI multi-chunk presets use these family selectors. `--chunking family` also
+allows splitting presets that default to one file, such as `NSgrdData` and
+`NS4BbData`. `--chunking single` bypasses routing, while explicit
+`--chunking low-byte` retains the generic selector for custom layouts.

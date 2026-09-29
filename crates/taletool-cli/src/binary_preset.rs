@@ -57,7 +57,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         direct_index: 0,
         compression: BinaryCompression::Raw,
         zlib_profile: None,
-        chunking: ChunkingArg::LowByte,
+        chunking: ChunkingArg::Family,
         chunk_count: 4,
         chunk_format: "NStgData{chunk:02X}.NOS",
         asset_kind: BinaryAssetKind::Geometry,
@@ -79,7 +79,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         direct_index: 0,
         compression: BinaryCompression::Raw,
         zlib_profile: None,
-        chunking: ChunkingArg::LowByte,
+        chunking: ChunkingArg::Family,
         chunk_count: 32,
         chunk_format: "NStpData{chunk:02X}.NOS",
         asset_kind: BinaryAssetKind::Texture,
@@ -90,7 +90,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         direct_index: 0,
         compression: BinaryCompression::Raw,
         zlib_profile: None,
-        chunking: ChunkingArg::LowByte,
+        chunking: ChunkingArg::Family,
         chunk_count: 8,
         chunk_format: "NStpeData{chunk:02X}.NOS",
         asset_kind: BinaryAssetKind::Texture,
@@ -101,7 +101,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         direct_index: 0,
         compression: BinaryCompression::Raw,
         zlib_profile: None,
-        chunking: ChunkingArg::LowByte,
+        chunking: ChunkingArg::Family,
         chunk_count: 4,
         chunk_format: "NStpuData{chunk:02X}.NOS",
         asset_kind: BinaryAssetKind::Texture,
@@ -200,7 +200,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         direct_index: 0,
         compression: BinaryCompression::Zlib,
         zlib_profile: Some(ZlibProfile::default_level(1)),
-        chunking: ChunkingArg::LowByte,
+        chunking: ChunkingArg::Family,
         chunk_count: 16,
         chunk_format: "NSmpData{chunk:02X}.NOS",
         asset_kind: BinaryAssetKind::MapObjectSprite,
@@ -211,7 +211,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         direct_index: 0,
         compression: BinaryCompression::Zlib,
         zlib_profile: Some(ZlibProfile::default_level(1)),
-        chunking: ChunkingArg::LowByte,
+        chunking: ChunkingArg::Family,
         chunk_count: 32,
         chunk_format: "NSppData{chunk:02X}.NOS",
         asset_kind: BinaryAssetKind::MapObjectSprite,
@@ -436,27 +436,29 @@ pub(crate) fn output_pattern(
     preset: Option<&BinaryPreset>,
     chunk_count: usize,
 ) -> anyhow::Result<String> {
-    if let Some(format) = chunk_format {
+    let pattern = if let Some(format) = chunk_format {
         let base = Path::new(out);
-        return Ok(base.join(format).to_string_lossy().into_owned());
-    }
-    if out.contains("{chunk") {
-        return Ok(out.to_owned());
-    }
-    let path = Path::new(out);
-    let looks_like_dir = path.extension().is_none();
-    if let (true, Some(preset)) = (looks_like_dir, preset) {
-        return Ok(path
-            .join(preset.chunk_format)
-            .to_string_lossy()
-            .into_owned());
-    }
-    if chunk_count > 1 && !out.contains("{chunk") {
+        base.join(format).to_string_lossy().into_owned()
+    } else if out.contains("{chunk") {
+        out.to_owned()
+    } else if let Some(preset) = preset.filter(|_| Path::new(out).extension().is_none()) {
+        let filename = if chunk_count == 1 {
+            format!("{}.NOS", preset.name)
+        } else if preset.chunk_count == 1 {
+            format!("{}{{chunk:02X}}.NOS", preset.name)
+        } else {
+            preset.chunk_format.to_owned()
+        };
+        Path::new(out).join(filename).to_string_lossy().into_owned()
+    } else {
+        out.to_owned()
+    };
+    if chunk_count > 1 && format_chunk_pattern(&pattern, 0) == pattern {
         anyhow::bail!(
             "split archive output needs --chunk-format or an --out pattern with {{chunk:02X}}"
         );
     }
-    Ok(out.to_owned())
+    Ok(pattern)
 }
 
 /// Substitute one chunk index into a chunk filename pattern.
@@ -737,6 +739,20 @@ mod tests {
             assert_eq!(preset.chunking, ChunkingArg::Single);
             assert_eq!(preset.chunk_count, 1);
             assert_eq!(preset.chunk_format, format!("{name}.NOS"));
+        }
+    }
+
+    #[test]
+    fn split_output_requires_a_supported_chunk_placeholder() {
+        let preset = resolve_binary_preset("", "NSgrdData").unwrap();
+        assert!(output_pattern("output", Some("same.NOS"), Some(&preset), 8).is_err());
+        assert!(output_pattern("output/{chunk:03X}.NOS", None, None, 8).is_err());
+        for token in ["{chunk}", "{chunk:02x}", "{chunk:02X}"] {
+            let pattern = output_pattern("output", Some(token), Some(&preset), 8).unwrap();
+            assert_ne!(
+                format_chunk_pattern(&pattern, 0),
+                format_chunk_pattern(&pattern, 7)
+            );
         }
     }
 

@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use serde_json::json;
 use taletool_archive::{
-    BinaryCompression, BinaryNosArchive, BinaryNosArchiveWriteOptions, DelDxPack, TextNosArchive,
-    TextNosRecordInput, write_text_nos_archive_bytes,
+    BinaryCompression, BinaryNosArchive, BinaryNosArchiveWriteOptions, BinaryNosChunkRouting,
+    DelDxPack, TextNosArchive, TextNosRecordInput, write_text_nos_archive_bytes,
 };
 
 use crate::archive_convert::{
@@ -708,11 +708,25 @@ fn pack_binary_archive_dir(
     let chunking = chunking_arg
         .or_else(|| preset.as_ref().map(|preset| preset.chunking))
         .unwrap_or(ChunkingArg::Single);
-    let chunk_count = chunk_count_arg
-        .or_else(|| preset.as_ref().map(|preset| preset.chunk_count))
-        .unwrap_or(1);
+    let routing = match chunking {
+        ChunkingArg::Family => BinaryNosChunkRouting::for_family(
+            preset
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("--chunking family needs a recognized preset"))?
+                .name,
+        ),
+        _ => BinaryNosChunkRouting::LOW_BYTE,
+    };
+    let chunk_count = chunk_count_arg.unwrap_or_else(|| match chunking {
+        ChunkingArg::Single => 1,
+        ChunkingArg::Family => routing.chunk_count(),
+        ChunkingArg::LowByte => preset.as_ref().map_or(1, |preset| preset.chunk_count),
+    });
     if chunk_count == 0 {
         anyhow::bail!("--chunk-count must be greater than zero");
+    }
+    if chunking == ChunkingArg::Single && chunk_count != 1 {
+        anyhow::bail!("--chunking single requires --chunk-count 1");
     }
     let direct_index =
         direct_index.unwrap_or_else(|| preset.as_ref().map_or(0, |preset| preset.direct_index));
@@ -723,9 +737,9 @@ fn pack_binary_archive_dir(
         ChunkingArg::Single => {
             chunks.insert(0, entries);
         }
-        ChunkingArg::LowByte => {
+        ChunkingArg::Family | ChunkingArg::LowByte => {
             for entry in entries {
-                let chunk = (entry.file_id as u32 & 0xff) as usize;
+                let chunk = routing.chunk_index(entry.file_id);
                 if chunk >= chunk_count {
                     anyhow::bail!(
                         "file id {} maps to chunk {}, but chunk count is {}",
@@ -745,11 +759,7 @@ fn pack_binary_archive_dir(
     let mut written = 0usize;
     for (chunk, entries) in chunks {
         let entries = order_binary_payload_entries(entries)?;
-        let path = if chunk_count == 1 {
-            PathBuf::from(&output_pattern)
-        } else {
-            PathBuf::from(format_chunk_pattern(&output_pattern, chunk))
-        };
+        let path = PathBuf::from(format_chunk_pattern(&output_pattern, chunk));
         if let Some(parent) = path.parent()
             && !parent.as_os_str().is_empty()
         {
@@ -883,6 +893,114 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("taletool-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn packs_family_chunks_using_client_selectors() {
+        for (name, expected_chunk, count, chunking) in [
+            ("NStgData", 1, 4, None),
+            ("NStpData", 5, 32, None),
+            ("NStpuData", 1, 4, None),
+            ("NStpeData", 5, 8, None),
+            ("NSppData", 2, 32, None),
+            ("NSmpData", 4, 16, None),
+            ("NSgrdData", 5, 8, Some(ChunkingArg::Family)),
+            ("NS4BbData", 1, 4, Some(ChunkingArg::Family)),
+        ] {
+            let root = temp_dir(name);
+            let input = root.join("input");
+            let output = root.join("output");
+            fs::create_dir_all(&input).unwrap();
+            fs::write(input.join("4133.bin"), b"routed payload").unwrap(); // 0x1025
+            pack_binary_archive_dir(
+                &input,
+                output.to_str().unwrap(),
+                name,
+                None,
+                None,
+                CompressionArg::Auto,
+                "auto",
+                chunking,
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(fs::read_dir(&output).unwrap().count(), count);
+            for chunk in 0..count {
+                let archive =
+                    BinaryNosArchive::open(output.join(format!("{name}{chunk:02X}.NOS"))).unwrap();
+                assert_eq!(
+                    archive.entries().len(),
+                    usize::from(chunk == expected_chunk),
+                    "{name} chunk {chunk}"
+                );
+            }
+            let family =
+                taletool_archive::BinaryNosSplitArchive::open_family(&output, name).unwrap();
+            assert_eq!(family.read_entry(0x1025).unwrap().data, b"routed payload");
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn single_override_and_single_defaults_write_unsuffixed_archives() {
+        for (name, chunking) in [
+            ("NStgData", Some(ChunkingArg::Single)),
+            ("NSgrdData", None),
+            ("NS4BbData", None),
+        ] {
+            let root = temp_dir(name);
+            let input = root.join("input");
+            let output = root.join("output");
+            fs::create_dir_all(&input).unwrap();
+            fs::write(input.join("4133.bin"), b"single payload").unwrap();
+            pack_binary_archive_dir(
+                &input,
+                output.to_str().unwrap(),
+                name,
+                None,
+                None,
+                CompressionArg::Auto,
+                "auto",
+                chunking,
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(fs::read_dir(&output).unwrap().count(), 1);
+            assert!(output.join(format!("{name}.NOS")).exists());
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn explicit_low_byte_routing_is_preserved() {
+        let root = temp_dir("low-byte");
+        let input = root.join("input");
+        let output = root.join("output");
+        fs::create_dir_all(&input).unwrap();
+        fs::write(input.join("8.bin"), b"low byte payload").unwrap();
+        pack_binary_archive_dir(
+            &input,
+            output.to_str().unwrap(),
+            "NStgData",
+            None,
+            None,
+            CompressionArg::Auto,
+            "auto",
+            Some(ChunkingArg::LowByte),
+            Some(9),
+            None,
+        )
+        .unwrap();
+        assert!(
+            BinaryNosArchive::open(output.join("NStgData08.NOS"))
+                .unwrap()
+                .read_entry(8)
+                .unwrap()
+                .is_some()
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn archive_for_preset(

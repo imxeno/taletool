@@ -70,6 +70,8 @@ pub enum BinaryNosArchiveError {
     },
     #[error("no archives found for family {family} in {data_dir}")]
     MissingFamily { data_dir: PathBuf, family: String },
+    #[error("archive family {family} has multiple files for chunk {chunk:02X}")]
+    DuplicateChunk { family: String, chunk: usize },
     #[error("archive has too many entries: {count}")]
     TooManyEntries { count: usize },
     #[error("archive entry {file_id} is too large: {size} bytes")]
@@ -663,23 +665,71 @@ pub fn write_binary_nos_archive_bytes(
     Ok(table)
 }
 
+/// The client's bit selector for a split binary archive family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BinaryNosChunkRouting {
+    mask: u32,
+    shift: u32,
+}
+
+impl BinaryNosChunkRouting {
+    /// Generic selector used when no family-specific callback is installed.
+    pub const LOW_BYTE: Self = Self {
+        mask: 0xff,
+        shift: 0,
+    };
+
+    /// Resolve a family selector, falling back to the generic low-byte selector.
+    pub fn for_family(family: &str) -> Self {
+        let family = family.to_ascii_lowercase();
+        let (mask, shift) = match family.as_str() {
+            "nstgdata" | "nstpudata" | "ns4bbdata" => (0x03, 0),
+            "nstpedata" | "nsgrddata" => (0x07, 0),
+            "nstpdata" => (0x1f, 0),
+            "nsppdata" => (0xf800, 11),
+            "nsmpdata" => (0x3c00, 10),
+            name if name.starts_with("nstpudata_") => (0x03, 0),
+            _ => return Self::LOW_BYTE,
+        };
+        Self { mask, shift }
+    }
+
+    /// Select a numbered chunk using the ID's unsigned bit pattern.
+    pub fn chunk_index(self, file_id: i32) -> usize {
+        ((file_id as u32 & self.mask) >> self.shift) as usize
+    }
+
+    /// Number of slots addressable by this selector.
+    pub fn chunk_count(self) -> usize {
+        ((self.mask >> self.shift) + 1) as usize
+    }
+}
+
 /// A family of split `.NOS` archives loaded together.
 #[derive(Debug, Clone)]
 pub struct BinaryNosSplitArchive {
     family: String,
     archives: Vec<BinaryNosArchive>,
+    // Indices into `archives`, retaining holes in numbered families. None means
+    // an unsuffixed archive, which bypasses the chunk selector entirely.
+    slots: Option<[Option<usize>; 256]>,
+    routing: BinaryNosChunkRouting,
 }
 
 impl BinaryNosSplitArchive {
     /// Open either a single archive family file or all split chunks for a family.
+    /// An unsuffixed file takes precedence; otherwise filenames must end in
+    /// exactly two hexadecimal chunk digits followed by `.NOS`.
     pub fn open_family(data_dir: impl AsRef<Path>, family: &str) -> BinaryNosArchiveResult<Self> {
         let data_dir = data_dir.as_ref();
         let exact = data_dir.join(format!("{family}.NOS"));
         let mut paths = Vec::new();
+        let mut slots = None;
 
         if exact.exists() {
             paths.push(exact);
         } else {
+            let mut numbered = std::collections::BTreeMap::new();
             let entries = fs::read_dir(data_dir).map_err(|source| BinaryNosArchiveError::Io {
                 path: data_dir.to_path_buf(),
                 source,
@@ -693,11 +743,28 @@ impl BinaryNosSplitArchive {
                 let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
                     continue;
                 };
-                if name.starts_with(family) && name.ends_with(".NOS") {
-                    paths.push(path);
+                let Some(suffix) = name
+                    .strip_prefix(family)
+                    .and_then(|s| s.strip_suffix(".NOS"))
+                else {
+                    continue;
+                };
+                if suffix.len() == 2 && suffix.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    let chunk = usize::from_str_radix(suffix, 16).expect("validated hex suffix");
+                    if numbered.insert(chunk, path).is_some() {
+                        return Err(BinaryNosArchiveError::DuplicateChunk {
+                            family: family.to_owned(),
+                            chunk,
+                        });
+                    }
                 }
             }
-            paths.sort();
+            let mut indices = [None; 256];
+            for (chunk, path) in numbered {
+                indices[chunk] = Some(paths.len());
+                paths.push(path);
+            }
+            slots = Some(indices);
         }
 
         if paths.is_empty() {
@@ -715,6 +782,8 @@ impl BinaryNosSplitArchive {
         Ok(Self {
             family: family.to_owned(),
             archives,
+            slots,
+            routing: BinaryNosChunkRouting::for_family(family),
         })
     }
 
@@ -722,6 +791,7 @@ impl BinaryNosSplitArchive {
         &self.family
     }
 
+    /// Existing archives in chunk-number order, omitting missing slots.
     pub fn archives(&self) -> &[BinaryNosArchive] {
         &self.archives
     }
@@ -732,20 +802,16 @@ impl BinaryNosSplitArchive {
             .flat_map(|archive| archive.entries().iter().map(move |entry| (archive, entry)))
     }
 
+    /// Read from the family-selected chunk only; missing chunks or IDs fail.
     pub fn read_entry(&self, file_id: i32) -> BinaryNosArchiveResult<BinaryEntryPayload> {
-        if self.archives.len() > 1 {
-            let selected = (file_id as u32 & 0xff) as usize;
-            if let Some(archive) = self.archives.get(selected)
-                && let Some(payload) = archive.read_entry(file_id)?
-            {
-                return Ok(payload);
-            }
-        }
-
-        for archive in &self.archives {
-            if let Some(payload) = archive.read_entry(file_id)? {
-                return Ok(payload);
-            }
+        let selected = match &self.slots {
+            Some(slots) => slots[self.routing.chunk_index(file_id)],
+            None => Some(0),
+        };
+        if let Some(index) = selected
+            && let Some(payload) = self.archives[index].read_entry(file_id)?
+        {
+            return Ok(payload);
         }
 
         Err(BinaryNosArchiveError::MissingFileId {
@@ -770,6 +836,159 @@ fn read_u32(data: &[u8], offset: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct SplitFixture(PathBuf);
+
+    impl SplitFixture {
+        fn new() -> Self {
+            static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "taletool-split-{}-{nanos}-{id}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn write(&self, name: &str, ids: &[i32]) {
+            let entries = ids
+                .iter()
+                .map(|&file_id| BinaryNosArchiveWriteEntry {
+                    file_id,
+                    compression: None,
+                    data: name.as_bytes().to_vec(),
+                })
+                .collect();
+            let path = self.0.join(name);
+            BinaryNosArchive::from_entries(
+                path.clone(),
+                entries,
+                &BinaryNosArchiveWriteOptions::new(
+                    [0; 16],
+                    0,
+                    BinaryCompression::Raw,
+                    ZlibProfile::default_level(9),
+                ),
+            )
+            .unwrap()
+            .write_to(&path)
+            .unwrap();
+        }
+    }
+
+    impl Drop for SplitFixture {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    #[test]
+    fn family_selectors_match_nostale() {
+        for (family, chunk, count) in [
+            ("NStgData", 1, 4),
+            ("NStpData", 5, 32),
+            ("NStpuData", 1, 4),
+            ("NStpuData_UK", 1, 4),
+            ("NStpeData", 5, 8),
+            ("NSgrdData", 5, 8),
+            ("NSppData", 2, 32),
+            ("NSmpData", 4, 16),
+            ("NS4BbData", 1, 4),
+            ("Custom", 0x25, 256),
+        ] {
+            let routing = BinaryNosChunkRouting::for_family(family);
+            assert_eq!(routing.chunk_index(0x1025), chunk, "{family}");
+            assert_eq!(routing.chunk_index(-1), count - 1, "{family}");
+            assert_eq!(routing.chunk_count(), count, "{family}");
+            assert_eq!(
+                routing,
+                BinaryNosChunkRouting::for_family(&family.to_lowercase())
+            );
+        }
+        assert_eq!(
+            BinaryNosChunkRouting::for_family("NSppData").chunk_index(0x800),
+            1
+        );
+        assert_eq!(
+            BinaryNosChunkRouting::for_family("NSmpData").chunk_index(0x800),
+            2
+        );
+    }
+
+    #[test]
+    fn split_lookup_preserves_holes_and_never_searches_other_chunks() {
+        let fixture = SplitFixture::new();
+        fixture.write("NStgData00.NOS", &[5]); // ID 5 belongs in missing slot 1.
+        fixture.write("NStgData02.NOS", &[6, 8]); // ID 8 belongs in slot 0.
+        let family = BinaryNosSplitArchive::open_family(&fixture.0, "NStgData").unwrap();
+        assert_eq!(family.archives().len(), 2);
+        assert_eq!(family.read_entry(6).unwrap().data, b"NStgData02.NOS");
+        for id in [5, 8] {
+            assert!(matches!(
+                family.read_entry(id),
+                Err(BinaryNosArchiveError::MissingFileId { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn lone_numbered_chunk_still_uses_family_routing() {
+        let fixture = SplitFixture::new();
+        fixture.write("NSmpData02.NOS", &[0x800, 0x400]);
+        let family = BinaryNosSplitArchive::open_family(&fixture.0, "NSmpData").unwrap();
+        assert!(family.read_entry(0x800).is_ok());
+        assert!(matches!(
+            family.read_entry(0x400),
+            Err(BinaryNosArchiveError::MissingFileId { .. })
+        ));
+    }
+
+    #[test]
+    fn unsuffixed_archive_takes_precedence_and_bypasses_routing() {
+        let fixture = SplitFixture::new();
+        fixture.write("NStgData.NOS", &[0x1025]);
+        fs::write(fixture.0.join("NStgData01.NOS"), b"invalid ignored chunk").unwrap();
+        let family = BinaryNosSplitArchive::open_family(&fixture.0, "NStgData").unwrap();
+        assert_eq!(family.archives().len(), 1);
+        assert_eq!(family.read_entry(0x1025).unwrap().data, b"NStgData.NOS");
+    }
+
+    #[test]
+    fn chunk_discovery_requires_exactly_two_hex_digits() {
+        let fixture = SplitFixture::new();
+        for name in [
+            "NStpuData_UK00.NOS",
+            "NStpuData0.NOS",
+            "NStpuData000.NOS",
+            "NStpuDataGG.NOS",
+            "NStpuData01.NOS.bak",
+        ] {
+            fs::write(fixture.0.join(name), b"invalid ignored file").unwrap();
+        }
+        assert!(matches!(
+            BinaryNosSplitArchive::open_family(&fixture.0, "NStpuData"),
+            Err(BinaryNosArchiveError::MissingFamily { .. })
+        ));
+        fixture.write("NStpuData03.NOS", &[7]);
+        fixture.write("Custom0a.NOS", &[0x10a]);
+        assert!(
+            BinaryNosSplitArchive::open_family(&fixture.0, "NStpuData")
+                .unwrap()
+                .read_entry(7)
+                .is_ok()
+        );
+        assert!(
+            BinaryNosSplitArchive::open_family(&fixture.0, "Custom")
+                .unwrap()
+                .read_entry(0x10a)
+                .is_ok()
+        );
+    }
 
     #[test]
     fn parses_raw_archive_entry() {
