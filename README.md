@@ -255,14 +255,16 @@ Binary packing options are:
 | `--direct-index <0..255>`  | Override the header's direct-index byte.                     |
 | `--compression <MODE>`     | `auto`, `raw`, or `zlib`; per-file suffixes can override it. |
 | `--zlib-profile <PROFILE>` | `auto` or `zlib112-levelN-STRATEGY`.                         |
-| `--chunking <MODE>`        | `single` or `low-byte`.                                      |
+| `--chunking <MODE>`        | `single`, `family`, or `low-byte`.                           |
 | `--chunk-count <COUNT>`    | Number of output chunks; must be greater than zero.          |
 | `--chunk-format <FORMAT>`  | Chunk filename pattern below the `--out` directory.          |
 
 `--header-hex` may contain whitespace and underscores. A zlib profile level is
-`0` through `9`, and its strategy is `default`, `filtered`, or `huffman`.
-Low-byte chunking routes each file ID using its low byte, which must be smaller
-than `--chunk-count`.
+`0` through `9`, and its strategy is `default`, `filtered`, or `huffman`. Family
+chunking uses the selected preset's client routing rule and defaults to its
+addressable chunk count. Low-byte chunking explicitly uses `file_id & 0xff`. The
+selected chunk must be smaller than `--chunk-count`. Single chunking writes one
+unsuffixed archive by default and requires a chunk count of one.
 
 Split output patterns may contain `{chunk}`, `{chunk:02x}`, or `{chunk:02X}`.
 Use the token directly in `--out`, or pass a base directory in `--out` and the
@@ -302,7 +304,16 @@ Known presets are:
 | `NStuData`  | zlib-9  |      1 | `NStuData.NOS`             |
 
 `zlib-1` and `zlib-9` mean the zlib 1.1.2 default strategy at the indicated
-level. All multi-chunk presets use low-byte routing.
+level. All multi-chunk presets use family routing: `NStgData` and `NStpuData`
+use `id & 3`; `NStpData` uses `id & 31`; `NStpeData` uses `id & 7`; `NSmpData`
+uses `(id & 0x3c00) >> 10`; and `NSppData` uses `(id & 0xf800) >> 11`.
+
+`NSgrdData` and `NS4BbData` retain single-file defaults. Select
+`--chunking
+family` to write their split layouts (8 chunks using `id & 7`, and 4
+chunks using `id & 3`, respectively). See
+[split archive rules](docs/formats/nos-binary-archives.md#split-archives) for
+loading behavior.
 
 ### JSON Payload Commands
 
