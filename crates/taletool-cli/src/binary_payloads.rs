@@ -50,19 +50,24 @@ pub(crate) fn parse_id_filename(path: &Path) -> Option<i32> {
 /// compression markers such as `__raw` or `__zlib`.
 pub(crate) fn parse_binary_payload_filename(path: &Path) -> Option<BinaryPayloadFilename> {
     let stem = path.file_stem()?.to_str()?;
-    let digits = stem
+    let unsigned_stem = stem.strip_prefix('-').unwrap_or(stem);
+    let digits = unsigned_stem
         .chars()
         .take_while(|ch| ch.is_ascii_digit())
         .collect::<String>();
     if digits.is_empty() {
         return None;
     }
-    let file_id = digits.parse().ok()?;
+    let id_text = &stem[..digits.len() + usize::from(stem.starts_with('-'))];
+    let file_id = id_text
+        .parse::<i32>()
+        .ok()
+        .or_else(|| id_text.parse::<u32>().ok().map(|id| id as i32))?;
     let mut duplicate_ordinal = None;
     let mut explicit_index = None;
     let mut compression = None;
     if let Some(rest) = stem
-        .strip_prefix(&digits)
+        .strip_prefix(id_text)
         .and_then(|rest| rest.strip_prefix("__"))
     {
         for token in rest.split("__") {
@@ -143,11 +148,11 @@ pub(crate) fn order_binary_payload_entries(
         .collect())
 }
 
-/// Sort unindexed payloads by ID, duplicate ordinal, then source filename.
+/// Sort unindexed payloads by unsigned ID, duplicate ordinal, then source filename.
 fn sort_binary_payload_entries(entries: &mut [BinaryPayloadInput]) {
     entries.sort_by(|left, right| {
-        left.file_id
-            .cmp(&right.file_id)
+        (left.file_id as u32)
+            .cmp(&(right.file_id as u32))
             .then_with(|| duplicate_sort_rank(left).cmp(&duplicate_sort_rank(right)))
             .then_with(|| left.source_name.cmp(&right.source_name))
     });
@@ -213,8 +218,8 @@ fn simulate_binary_pack_indexes(
         .copied()
         .collect::<Vec<_>>();
     unindexed.sort_by(|left, right| {
-        left.1
-            .cmp(&right.1)
+        (left.1 as u32)
+            .cmp(&(right.1 as u32))
             .then_with(|| left.2.cmp(&right.2))
             .then_with(|| left.0.cmp(&right.0))
     });
@@ -316,6 +321,80 @@ mod tests {
             source_name: source_name.to_owned(),
             data: vec![data_byte],
         }
+    }
+
+    #[test]
+    fn parses_full_unsigned_id_range_and_signed_output_names() {
+        for (name, id) in [
+            ("2147483647.bin", i32::MAX),
+            ("2147483648.bin", i32::MIN),
+            ("4294967295.bin", -1),
+            ("-2147483648__index2__raw.bin", i32::MIN),
+            ("-1__2.bin", -1),
+        ] {
+            assert_eq!(parse_id_filename(Path::new(name)), Some(id));
+        }
+        for name in ["4294967296.bin", "-2147483649.bin", "-.bin", "--1.bin"] {
+            assert!(parse_id_filename(Path::new(name)).is_none());
+        }
+        let parsed =
+            parse_binary_payload_filename(Path::new("-2147483648__index2__raw.bin")).unwrap();
+        assert_eq!(parsed.explicit_index, Some(2));
+        assert_eq!(parsed.compression, Some(BinaryCompression::Raw));
+    }
+
+    #[test]
+    fn unsigned_pack_order_and_index_preservation_agree() {
+        let ordered = order_binary_payload_entries(vec![
+            binary_input("-1.bin", 4, None),
+            binary_input("2147483648.bin", 3, None),
+            binary_input("2147483647.bin", 2, None),
+            binary_input("0.bin", 0, None),
+            binary_input("1.bin", 1, None),
+        ])
+        .unwrap();
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|entry| entry.file_id)
+                .collect::<Vec<_>>(),
+            [0, 1, i32::MAX, i32::MIN, -1]
+        );
+        assert!(explicit_indexes_for_binary_ids(&[0, 1, i32::MAX, i32::MIN, -1]).is_empty());
+
+        let ids = [-1, 1, i32::MIN, 1];
+        let indexes = explicit_indexes_for_binary_ids(&ids);
+        let mut names = BTreeSet::new();
+        let entries = ids
+            .iter()
+            .enumerate()
+            .map(|(index, &id)| {
+                let name = binary_payload_output_name(
+                    id,
+                    if index == 3 { 2 } else { 1 },
+                    indexes.contains(&index).then_some(index),
+                    None,
+                    &mut names,
+                )
+                .unwrap();
+                binary_input(&name, index as u8, None)
+            })
+            .collect();
+        let ordered = order_binary_payload_entries(entries).unwrap();
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|entry| entry.file_id)
+                .collect::<Vec<_>>(),
+            ids
+        );
+        assert_eq!(
+            ordered
+                .iter()
+                .map(|entry| entry.data[0])
+                .collect::<Vec<_>>(),
+            [0, 1, 2, 3]
+        );
     }
 
     #[test]

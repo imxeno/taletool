@@ -219,6 +219,11 @@ can contain a duplicate ordinal (`42__2.bin`), an explicit table slot
 `42__zlib.bin`). `archive pack` reads immediate files whose names begin with a
 decimal ID and ignores other files.
 
+IDs accept signed 32-bit decimal values or unsigned values through `4294967295`;
+for example, `-1.bin` and `4294967295.bin` represent the same ID bits. Unindexed
+payloads are sorted by unsigned ID. Explicit table slots preserve archive order,
+including direct-index layouts and duplicate rows.
+
 Text archive filenames use `%HH` escapes for characters that are not ASCII
 letters, digits, `.`, `-`, or `_`. Packing reverses these escapes. Archive
 unpacking without `--convert` preserves the encoded DAT/LST payloads for a
