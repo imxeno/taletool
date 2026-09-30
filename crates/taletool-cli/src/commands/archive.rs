@@ -896,6 +896,70 @@ mod tests {
     }
 
     #[test]
+    fn binary_round_trip_preserves_table_order_and_lookup_with_high_bit_ids() {
+        for direct_index in [0, 255] {
+            let root = temp_dir("binary-lookup");
+            let input = root.join("input");
+            let output = root.join("rebuilt.NOS");
+            let ids = [-1, 1, i32::MIN, 1];
+            let archive = BinaryNosArchive::from_entries(
+                "original.NOS",
+                ids.iter()
+                    .enumerate()
+                    .map(|(index, &id)| BinaryNosArchiveWriteEntry::new(id, vec![index as u8]))
+                    .collect(),
+                &BinaryNosArchiveWriteOptions::new(
+                    resolve_binary_preset("", "NStgData").unwrap().header,
+                    direct_index,
+                    BinaryCompression::Raw,
+                    ZlibProfile::default_level(9),
+                ),
+            )
+            .unwrap();
+            unpack_binary_archives(std::slice::from_ref(&archive), &input).unwrap();
+            pack_binary_archive_dir(
+                &input,
+                output.to_str().unwrap(),
+                "NStgData",
+                None,
+                Some(direct_index),
+                CompressionArg::Auto,
+                "auto",
+                Some(ChunkingArg::Single),
+                None,
+                None,
+            )
+            .unwrap();
+            let rebuilt = BinaryNosArchive::open(&output).unwrap();
+            assert_eq!(rebuilt.direct_index(), direct_index);
+            assert_eq!(
+                rebuilt
+                    .entries()
+                    .iter()
+                    .map(|entry| entry.file_id)
+                    .collect::<Vec<_>>(),
+                ids
+            );
+            assert_eq!(
+                rebuilt
+                    .records()
+                    .unwrap()
+                    .iter()
+                    .map(|record| record.data[0])
+                    .collect::<Vec<_>>(),
+                [0, 1, 2, 3]
+            );
+            for id in [0, 1, 4, i32::MIN, -1] {
+                assert_eq!(
+                    rebuilt.read_entry(id).unwrap().map(|payload| payload.data),
+                    archive.read_entry(id).unwrap().map(|payload| payload.data)
+                );
+            }
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
     fn packs_family_chunks_using_client_selectors() {
         for (name, expected_chunk, count, chunking) in [
             ("NStgData", 1, 4, None),

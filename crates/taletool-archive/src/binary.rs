@@ -364,20 +364,48 @@ impl BinaryNosArchive {
             .collect())
     }
 
-    /// Find the first entry-table index with the supplied file ID.
+    /// Find the table index selected by NosTale for this ID.
+    ///
+    /// Any nonzero direct-index flag selects an in-range ID as a table index,
+    /// regardless of the stored ID. Other IDs use unsigned binary search and
+    /// return the first midpoint match, which may not be the first duplicate.
+    /// The search does not repair or linearly scan an unsorted table.
     pub fn find_entry_index(&self, file_id: i32) -> Option<usize> {
+        let key = file_id as u32;
+        if self.direct_index != 0 && (key as usize) < self.entries.len() {
+            return Some(key as usize);
+        }
+
+        let mut low = 0;
+        let mut end = self.entries.len();
+        while low < end {
+            // Inclusive high bound is end - 1: choose the lower midpoint.
+            let middle = low + (end - low - 1) / 2;
+            match key.cmp(&(self.entries[middle].file_id as u32)) {
+                std::cmp::Ordering::Greater => low = middle + 1,
+                std::cmp::Ordering::Less => end = middle,
+                std::cmp::Ordering::Equal => return Some(middle),
+            }
+        }
+        None
+    }
+
+    /// Find the first row whose stored ID matches, independently of client lookup.
+    /// This linear search is intended for archive editing and inspection.
+    pub fn find_stored_entry_index(&self, file_id: i32) -> Option<usize> {
         self.entries
             .iter()
             .position(|entry| entry.file_id == file_id)
     }
 
-    /// Find the first entry-table entry with the supplied file ID.
+    /// Find the entry selected by NosTale for this ID.
     pub fn find_entry(&self, file_id: i32) -> Option<&BinaryNosArchiveEntry> {
         self.find_entry_index(file_id)
             .and_then(|index| self.entries.get(index))
     }
 
-    /// Read and decode the first payload with the supplied file ID.
+    /// Decode the payload selected by NosTale for this ID.
+    /// Payload provenance retains the selected row's stored ID.
     pub fn read_entry(&self, file_id: i32) -> BinaryNosArchiveResult<Option<BinaryEntryPayload>> {
         let Some(entry) = self.find_entry(file_id) else {
             return Ok(None);
@@ -499,7 +527,7 @@ impl BinaryNosArchive {
         compression: Option<BinaryCompression>,
         options: &BinaryNosArchiveWriteOptions,
     ) -> BinaryNosArchiveResult<Option<BinaryNosArchiveRecord>> {
-        let Some(index) = self.find_entry_index(file_id) else {
+        let Some(index) = self.find_stored_entry_index(file_id) else {
             return Ok(None);
         };
         self.replace_record_at(
@@ -541,7 +569,7 @@ impl BinaryNosArchive {
         file_id: i32,
         options: &BinaryNosArchiveWriteOptions,
     ) -> BinaryNosArchiveResult<Option<BinaryNosArchiveRecord>> {
-        let Some(index) = self.find_entry_index(file_id) else {
+        let Some(index) = self.find_stored_entry_index(file_id) else {
             return Ok(None);
         };
         self.remove_record_at(index, options).map(Some)
@@ -836,6 +864,117 @@ fn read_u32(data: &[u8], offset: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn lookup_archive(ids: &[i32], direct_index: u8) -> BinaryNosArchive {
+        BinaryNosArchive::from_entries(
+            "lookup.NOS",
+            ids.iter()
+                .enumerate()
+                .map(|(index, &id)| BinaryNosArchiveWriteEntry::new(id, vec![index as u8]))
+                .collect(),
+            &BinaryNosArchiveWriteOptions::new(
+                [0; 16],
+                direct_index,
+                BinaryCompression::Raw,
+                ZlibProfile::default_level(9),
+            ),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn direct_lookup_uses_table_positions_then_falls_back_to_id_search() {
+        for flag in [1, 2, 255] {
+            let archive = lookup_archive(&[42, 99], flag);
+            for (id, expected) in [
+                (0, Some(0)),
+                (1, Some(1)),
+                (2, None),
+                (42, Some(0)),
+                (99, Some(1)),
+                (-1, None),
+            ] {
+                assert_eq!(
+                    archive.find_entry_index(id),
+                    expected,
+                    "flag {flag}, ID {id}"
+                );
+            }
+            let payload = archive.read_entry(0).unwrap().unwrap();
+            assert_eq!(payload.data, [0]);
+            assert_eq!(payload.source.file_id, 42);
+            assert_eq!(archive.find_stored_entry_index(0), None);
+        }
+        assert_eq!(lookup_archive(&[], 1).find_entry_index(0), None);
+        assert_eq!(lookup_archive(&[42], 0).find_entry_index(0), None);
+    }
+
+    #[test]
+    fn binary_lookup_compares_unsigned_ids() {
+        for flag in [0, 1] {
+            let archive = lookup_archive(&[0, 1, i32::MAX, i32::MIN, -1], flag);
+            for (index, id) in [0, 1, i32::MAX, i32::MIN, -1].into_iter().enumerate() {
+                assert_eq!(archive.find_entry_index(id), Some(index));
+                assert_eq!(archive.read_entry(id).unwrap().unwrap().data, [index as u8]);
+            }
+            assert_eq!(archive.find_entry_index(-2), None);
+        }
+        let unsorted = lookup_archive(&[-1, 1], 0);
+        assert_eq!(unsorted.find_entry_index(1), None);
+        assert_eq!(unsorted.find_stored_entry_index(1), Some(1));
+    }
+
+    #[test]
+    fn duplicate_lookup_returns_first_lower_midpoint_match() {
+        for (ids, expected) in [
+            (vec![7, 7], 0),
+            (vec![7, 7, 7, 7], 1),
+            (vec![1, 7, 7, 7, 9], 2),
+            (vec![0, 1, 2, 3, 7, 7, 7, 8], 5),
+        ] {
+            let archive = lookup_archive(&ids, 0);
+            assert_eq!(archive.find_entry_index(7), Some(expected));
+            assert_eq!(
+                archive.read_entry(7).unwrap().unwrap().data,
+                [expected as u8]
+            );
+            assert_eq!(
+                archive
+                    .read_entry_payload(&archive.entries()[0])
+                    .unwrap()
+                    .data,
+                [0]
+            );
+        }
+    }
+
+    #[test]
+    fn editing_by_stored_id_is_independent_of_client_lookup() {
+        let mut archive = lookup_archive(&[2, 0, 2], 1);
+        let options = BinaryNosArchiveWriteOptions::new(
+            [0; 16],
+            1,
+            BinaryCompression::Raw,
+            ZlibProfile::default_level(9),
+        );
+        assert_eq!(archive.find_entry_index(0), Some(0));
+        let old = archive
+            .replace_record(0, vec![9], None, &options)
+            .unwrap()
+            .unwrap();
+        assert_eq!(old.data, [1]);
+        assert_eq!(archive.records().unwrap()[1].data, [9]);
+        let old = archive.remove_record(2, &options).unwrap().unwrap();
+        assert_eq!(old.data, [0]);
+        assert_eq!(
+            archive
+                .entries()
+                .iter()
+                .map(|entry| entry.file_id)
+                .collect::<Vec<_>>(),
+            [0, 2]
+        );
+    }
 
     struct SplitFixture(PathBuf);
 

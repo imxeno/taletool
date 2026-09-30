@@ -73,6 +73,31 @@ example, `NSgrdData` payloads contain the tag value inside and the game logic
 branches on it. Read [Map Height Grids docs](./map-height-grids.md) to learn
 more.
 
+## Entry Lookup
+
+NosTale interprets requested IDs as unsigned 32-bit values. When the
+direct-index byte is nonzero and the ID is less than the entry count, the ID
+selects that table position regardless of its stored `file_id`. For example,
+table IDs `[42, 99]` with direct indexing enabled resolve ID 0 to the first row.
+
+All other lookups, including out-of-range direct-index requests, use unsigned
+binary search. Each step selects the lower midpoint of the inclusive search
+range and returns immediately on equality. Duplicate IDs therefore resolve to
+the first midpoint match, not necessarily their first occurrence. An unsorted
+table can leave stored IDs unreachable; lookup does not scan other rows after
+the search fails.
+
+`BinaryNosArchive::find_entry_index`, `find_entry`, and `read_entry` implement
+this lookup. `find_stored_entry_index` linearly finds the first matching stored
+ID for editing and inspection. `replace_record` and `remove_record` retain that
+stored-ID behavior. Table enumeration and `read_entry_payload` provide access to
+individual rows, including duplicates and unreachable entries.
+
+The CLI sorts new unindexed payloads by unsigned ID and preserves explicit table
+slots during repacking. Library writers preserve the supplied row order; callers
+constructing new tables must arrange rows for their intended lookup mode. No
+implicit sorting is performed by record-editing methods.
+
 ## Compression
 
 Raw entries are stored unchanged with `stored_size` = `unpacked_size`.
