@@ -41,9 +41,9 @@ unlikely.
 
 ### Client Flow
 
-The client can resolve a row in two directions. Taletool calls the three key
-components `group`, `primary`, and `secondary`; the latter two names are
-intentionally neutral because their meaning depends on the group.
+The client can resolve a row by a three-part key or by sound ID. The key
+components are labeled `group`, `primary`, and `secondary` below; the meaning of
+the latter two depends on the group.
 
 | Lookup      | Behavior                                                                          |
 | ----------- | --------------------------------------------------------------------------------- |
@@ -56,8 +56,7 @@ exist, the client searches the stored filename for the literal `.wav` substring.
 When found, it tries the portion before `.wav`. This is how rows such as
 `BGM (1).30000.wav` resolve to the shipped loose file `BGM (1).30000`. If that
 also fails, the client scans loose `.wav` files and selects a filename
-containing the row's decimal sound id. Taletool reproduces these steps and sorts
-the final directory scan to make ambiguous matches deterministic.
+containing the row's decimal sound id.
 
 Observed groups in the client:
 

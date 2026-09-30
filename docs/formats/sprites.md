@@ -46,9 +46,7 @@ word stores four 4-bit channels:
 | `7..4`   | Green   |
 | `3..0`   | Blue    |
 
-Decoding expands a nibble by replication, so `0xA` becomes `0xAA`. Packing an
-edited PNG quantizes each 8-bit channel to the nearest 4-bit value. PNGs
-produced by Taletool therefore rebuild their source pixels exactly.
+The equivalent 8-bit channel value repeats the nibble, so `0xA` becomes `0xAA`.
 
 ## Free-Size Sprites
 

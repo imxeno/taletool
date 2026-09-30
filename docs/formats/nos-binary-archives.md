@@ -87,17 +87,6 @@ the first midpoint match, not necessarily their first occurrence. An unsorted
 table can leave stored IDs unreachable; lookup does not scan other rows after
 the search fails.
 
-`BinaryNosArchive::find_entry_index`, `find_entry`, and `read_entry` implement
-this lookup. `find_stored_entry_index` linearly finds the first matching stored
-ID for editing and inspection. `replace_record` and `remove_record` retain that
-stored-ID behavior. Table enumeration and `read_entry_payload` provide access to
-individual rows, including duplicates and unreachable entries.
-
-The CLI sorts new unindexed payloads by unsigned ID and preserves explicit table
-slots during repacking. Library writers preserve the supplied row order; callers
-constructing new tables must arrange rows for their intended lookup mode. No
-implicit sorting is performed by record-editing methods.
-
 ## Compression
 
 Raw entries are stored unchanged with `stored_size` = `unpacked_size`.
@@ -125,8 +114,3 @@ Selectors operate on the unsigned bit pattern of the file ID:
 | `NSppData`                                                 | `(id & 0xf800) >> 11` | 32                 |
 | `NSmpData`                                                 | `(id & 0x3c00) >> 10` | 16                 |
 | Other families (generic selector)                          | `id & 0xff`           | 256                |
-
-CLI multi-chunk presets use these family selectors. `--chunking family` also
-allows splitting presets that default to one file, such as `NSgrdData` and
-`NS4BbData`. `--chunking single` bypasses routing, while explicit
-`--chunking low-byte` retains the generic selector for custom layouts.

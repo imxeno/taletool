@@ -11,6 +11,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+## Docs Scope
+
+`docs/formats` describes only NosTale file formats and client behavior.
+
 ## Docs Format
 
 ```powershell

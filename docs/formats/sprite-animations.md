@@ -31,8 +31,7 @@ The sprite frame index selects the corresponding frame from the active layered
 sprite resources. The event-timing byte is treated as a boolean flag: zero
 leaves the frame unmarked, while any nonzero value marks its end as an event
 time. All nonzero values have the same behavior. The marked time is
-`(frame_index + 1) * 60` game ticks from the start of the animation. The JSON
-representation exposes the raw byte as `event_timing_flag`.
+`(frame_index + 1) * 60` game ticks from the start of the animation.
 
 For player sprites with an associated
 [`NSpmData` resource-remap payload](sprite-resource-remaps.md), the same
