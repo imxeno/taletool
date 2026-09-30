@@ -1231,7 +1231,6 @@ mod tests {
             }
             BinaryAssetKind::HeightGrid => write_height_grid_bytes(&HeightGrid {
                 encoding: HeightGridEncoding::Version1,
-                grid_id: 1,
                 map_id: 2,
                 bounds: HeightGridBounds {
                     minimum: [0.0; 3],
