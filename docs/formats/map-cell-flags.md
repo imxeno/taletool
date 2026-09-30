@@ -21,15 +21,14 @@ cell_index = y * width + x
 
 ## Cell Flags
 
-Only flags observed in current client data have named API constants. The client
-stores and copies the complete cell byte, but only WALKING_DISABLED and
-MONSTER_AGGRO_DISABLED are checked by the client - other names were implied from
-server behavior.
+The client stores and copies the complete cell byte. It checks `0x01` to block
+walking and `0x08` to disable monster aggro. Other observed bits have no
+identified client-side checks.
 
-| Mask   | API name                  |
-| ------ | ------------------------- |
-| `0x01` | `WALKING_DISABLED`        |
-| `0x02` | `ATTACK_THROUGH_DISABLED` |
-| `0x04` | `UNKNOWN_04`              |
-| `0x08` | `MONSTER_AGGRO_DISABLED`  |
-| `0x10` | `PVP_DISABLED`            |
+| Mask   | Client meaning          |
+| ------ | ----------------------- |
+| `0x01` | Walking disabled.       |
+| `0x02` | Unknown.                |
+| `0x04` | Unknown.                |
+| `0x08` | Monster aggro disabled. |
+| `0x10` | Unknown.                |

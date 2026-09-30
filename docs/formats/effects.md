@@ -168,8 +168,7 @@ creates either an actor-following effect or a fixed map/world effect.
 
 The packed 16-bit floats are not IEEE half-floats. Zero represents `0.0`; other
 values use bit 15 for the sign, bits 14..11 for a four-bit exponent with bias 7,
-and bits 10..0 for an eleven-bit mantissa. Taletool exposes the stored `u16`
-value and a conversion to `f32`.
+and bits 10..0 for an eleven-bit mantissa.
 
 For each axis, half the value at `0x33` selects the centered randomization
 bucket count. Rotation and scale randomization use the corresponding values as
@@ -264,9 +263,7 @@ Offsets are relative to the start of the payload. Each target begins with a
 
 Readers resolve the three offsets independently. Tables may appear in any
 physical order, multiple empty channels may share one zero-count table, and
-padding or unreferenced bytes may occur between or after tables. Taletool does
-not retain those layout-only bytes when editing an animation; packed output uses
-contiguous translation, rotation, and scale tables in that order.
+padding or unreferenced bytes may occur between or after tables.
 
 Quaternion components are ordered X, Y, Z, W. Rotation uses spherical
 interpolation; translation and scale use component-wise linear interpolation.

@@ -14,7 +14,7 @@ Every payload starts with a 133-byte header.
 
 | Offset | Type        | Field                                                         |
 | ------ | ----------- | ------------------------------------------------------------- |
-| `0x00` | `u8[30]`    | `unknown_00`; preserved data with no identified runtime use.  |
+| `0x00` | `u8[30]`    | Unidentified data with no identified runtime use.             |
 | `0x1E` | `u8`        | Resource group used with companion scene metadata.            |
 | `0x1F` | `aabb<f32>` | Scene bounds: minimum `vec3`, then maximum `vec3`.            |
 | `0x37` | `aabb<f32>` | Bounds consulted by the fallback ground-height path.          |
@@ -26,9 +26,9 @@ Every payload starts with a 133-byte header.
 | `0x71` | `i16[3]`    | Pitch angle, minimum offset, and maximum offset in degrees.   |
 | `0x77` | `u8`        | Normalized fog-start distance.                                |
 | `0x78` | `u8`        | Normalized fog-end distance.                                  |
-| `0x79` | `u8[10]`    | `unknown_79`; preserved data with no identified runtime use.  |
+| `0x79` | `u8[10]`    | Unidentified data with no identified runtime use.             |
 | `0x83` | `u8`        | Reset-yaw flag (`0` or `1`).                                  |
-| `0x84` | `u8`        | `unknown_84`; preserved byte with no identified runtime use.  |
+| `0x84` | `u8`        | Unidentified byte with no identified runtime use.             |
 
 The runtime maps each fog-distance byte from `0..=255` to `0..=150` world units.
 When the reset-yaw flag is set, the camera yaw is moved to the stored angle when
@@ -39,10 +39,6 @@ When optimized height-grid data is unavailable, the fallback query initializes Y
 to the ground sphere's bottom point (`center.y - radius`). It traces scene
 geometry from there and uses the ground bounds' minimum Y when deciding whether
 the result lies below the usable scene area.
-
-The typed API and JSON expose the known fields and retain all unidentified
-bytes. Writers require the preserved byte regions to keep their exact native
-lengths.
 
 ## Geometry Resource Table
 
@@ -126,24 +122,3 @@ A kind-3 node extends the same kind-2 fields with:
 The animation IDs address the corresponding effect-animation archive families.
 The frame offset is supplied when resolving color, transform, and texture
 animation data. Billboard nodes additionally apply the camera orientation.
-
-## Validation and Editing
-
-Taletool rejects truncated records, unknown node kinds, invalid booleans,
-non-finite floats, reversed bounds, negative sphere radii, out-of-range geometry
-indices, trailing bytes, and excessively deep trees. Node-list and geometry-key
-counts must fit their native `u16` fields.
-
-Use the archive and map commands together:
-
-```powershell
-taletool archive unpack NStuData.NOS --out nstu
-taletool map inspect nstu/42.bin --json --checksum
-taletool map unpack nstu/42.bin --out 42.json
-taletool map pack 42.json --out 42.bin
-taletool archive pack nstu --out NStuData.NOS
-```
-
-Map JSON documents use format name `map`, with the decoded map stored in the
-top-level `map` field. Uninterpreted native fields use `unknown_<hex offset>`
-names rather than inferred semantic names.
