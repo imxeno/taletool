@@ -210,7 +210,7 @@ The unpacked layout depends on the container:
 | Type     | Output layout                                                     |
 | -------- | ----------------------------------------------------------------- |
 | `binary` | Raw payloads named by numeric ID, for example `42.bin`.           |
-| `text`   | Still-encoded record payloads named after escaped archive names.  |
+| `text`   | Ordered raw payloads plus a `text-archive.json` manifest.         |
 | `sound`  | Ordered payload files plus a required `sound-pack.json` manifest. |
 
 Binary filenames preserve metadata needed for a stable round trip. A filename
@@ -224,10 +224,27 @@ for example, `-1.bin` and `4294967295.bin` represent the same ID bits. Unindexed
 payloads are sorted by unsigned ID. Explicit table slots preserve archive order,
 including direct-index layouts and duplicate rows.
 
-Text archive filenames use `%HH` escapes for characters that are not ASCII
-letters, digits, `.`, `-`, or `_`. Packing reverses these escapes. Archive
-unpacking without `--convert` preserves the encoded DAT/LST payloads for a
-lossless archive-level unpack/pack workflow.
+Raw text archive unpacking writes `text-archive.json` and payload files with
+native names such as `Item.dat`. Filename bytes other than ASCII letters,
+digits, `.`, `-`, and `_` use `%HH` escapes. Duplicate output names (including
+case differences), collisions with the manifest filename, and names that cannot
+be represented portably as local files cause unpacking to fail without
+publishing any output. Choose a new output directory.
+
+The manifest uses `format: "text"` and `version: 1`. Its ordered `entries` hold
+`id`, `packed_flag`, `name_hex` (the exact archived filename bytes), and `file`
+(the payload filename). `trailer_hex` holds every byte after the records,
+including the timestamp footer. Packing follows the manifest, preserving flags,
+IDs, filename bytes, record order, timestamps, and trailers. Unchanged raw
+unpack/pack output is byte-for-byte identical to the input archive.
+
+Edit the raw payload files in place, retaining their original encoding. To
+rename, add, remove, or reorder archive records, update the manifest; payload
+filenames do not determine archived names. Each entry must reference a distinct
+regular file in the same directory. Missing files or invalid manifests fail;
+unlisted files are ignored. Without a manifest, legacy text packing still
+unescapes filenames, sorts records by name, assigns sequential IDs, infers flags
+from extensions, and writes no trailer.
 
 Add `--convert` to export supported binary archives as JSON, PNGs, or manifests,
 and supported text archives as structured JSON. Use `--plain-text` to unwrap
@@ -246,10 +263,12 @@ taletool archive pack work/lang --out NSlangData_UK.NOS --type text
 taletool archive pack work/sound --out snd.pck --type sound
 ```
 
-With `--type auto`, a `sound-pack.json` manifest or `.pck` output selects
-`sound`; an `NSgtdData`/`NSlangData` preset or output name selects `text`; a
-directory containing only numeric payload filenames selects `binary`; and any
-other directory selects `text`.
+With `--type auto`, `text-archive.json` selects `text` before output-name
+heuristics. If both text and sound manifests exist, specify `--type`. Otherwise,
+a `sound-pack.json` manifest or `.pck` output selects `sound`; an
+`NSgtdData`/`NSlangData` preset or output name selects `text`; a directory
+containing only numeric payload filenames selects `binary`; and any other
+directory selects `text`.
 
 Binary packing options are:
 

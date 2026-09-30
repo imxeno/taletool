@@ -434,6 +434,9 @@ pub(crate) enum ArchiveCommand {
         checksum: bool,
     },
     /// Extract archive records or payloads to a directory.
+    ///
+    /// Raw text archives retain native payload names and write text-archive.json for lossless
+    /// repacking. Their output directory must not already exist.
     Unpack {
         #[arg(required = true)]
         input: Vec<String>,

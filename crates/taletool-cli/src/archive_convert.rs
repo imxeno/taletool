@@ -62,13 +62,13 @@ impl OutputTransaction {
     fn begin(out: &Path) -> anyhow::Result<Self> {
         match fs::symlink_metadata(out) {
             Ok(_) => anyhow::bail!(
-                "converted archive output already exists: {}; choose a new --out path",
+                "archive output already exists: {}; choose a new --out path",
                 out.display()
             ),
             Err(error) if error.kind() == ErrorKind::NotFound => {}
             Err(error) => {
                 return Err(error)
-                    .with_context(|| format!("checking converted output {}", out.display()));
+                    .with_context(|| format!("checking archive output {}", out.display()));
             }
         }
 
@@ -77,10 +77,7 @@ impl OutputTransaction {
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
         let file_name = out.file_name().ok_or_else(|| {
-            anyhow::anyhow!(
-                "converted archive --out must name a directory: {}",
-                out.display()
-            )
+            anyhow::anyhow!("archive --out must name a directory: {}", out.display())
         })?;
         fs::create_dir_all(parent)
             .with_context(|| format!("creating output parent directory {}", parent.display()))?;
@@ -119,12 +116,8 @@ impl OutputTransaction {
     }
 
     fn commit(&mut self) -> anyhow::Result<()> {
-        fs::rename(&self.staging_path, &self.final_path).with_context(|| {
-            format!(
-                "publishing converted archive output {}",
-                self.final_path.display()
-            )
-        })?;
+        fs::rename(&self.staging_path, &self.final_path)
+            .with_context(|| format!("publishing archive output {}", self.final_path.display()))?;
         self.active = false;
         Ok(())
     }
@@ -309,7 +302,7 @@ mod tests {
         .unwrap_err()
         .to_string();
 
-        assert!(error.contains("publishing converted archive output"));
+        assert!(error.contains("publishing archive output"));
         assert_eq!(fs::read(out.join("keep.txt")).unwrap(), b"keep");
         let staging = fs::read_dir(&root)
             .unwrap()
