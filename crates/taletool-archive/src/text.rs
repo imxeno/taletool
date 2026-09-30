@@ -107,6 +107,7 @@ pub struct TextNosArchive {
     records: Vec<TextNosRecord>,
     timestamp: Option<TextNosArchiveTimestamp>,
     trailing_bytes: usize,
+    trailer: Vec<u8>,
 }
 
 impl TextNosArchive {
@@ -160,17 +161,17 @@ impl TextNosArchive {
 
         let trailing = &data[reader.offset()..];
         let (timestamp, trailing_bytes) =
-            if trailing.len() == 12 && trailing[8..12] == TEXT_ARCHIVE_TRAILER_MARKER {
+            if trailing.len() >= 12 && trailing.ends_with(&TEXT_ARCHIVE_TRAILER_MARKER) {
                 let mut variant_bytes = [0_u8; 8];
-                variant_bytes.copy_from_slice(&trailing[0..8]);
+                variant_bytes.copy_from_slice(&trailing[trailing.len() - 12..trailing.len() - 4]);
                 let variant = f64::from_le_bytes(variant_bytes);
-                let unix_seconds = ((variant - 2.00001) * 86400.0 - 2_208_988_800.0).round() as i64;
+                let unix_seconds = ((variant - 25569.0) * 86400.0).round() as i64;
                 (
                     Some(TextNosArchiveTimestamp {
                         variant,
                         unix_seconds,
                     }),
-                    0,
+                    trailing.len() - 12,
                 )
             } else {
                 (None, trailing.len())
@@ -181,6 +182,7 @@ impl TextNosArchive {
             records,
             timestamp,
             trailing_bytes,
+            trailer: trailing.to_vec(),
         })
     }
 
@@ -199,46 +201,95 @@ impl TextNosArchive {
         self.timestamp
     }
 
+    /// Return all bytes after the records, including any timestamp footer.
+    pub fn trailer(&self) -> &[u8] {
+        &self.trailer
+    }
+
+    /// Rebuild the archive without changing record metadata or trailer bytes.
+    pub fn to_bytes(&self) -> TextNosArchiveResult<Vec<u8>> {
+        write_text_nos_archive_records(&self.records, &self.trailer)
+    }
+
     /// Return the number of unrecognized bytes left after the parsed records.
     pub fn trailing_bytes(&self) -> usize {
         self.trailing_bytes
     }
 }
 
-/// Rebuild text `.NOS` archive bytes from named record inputs.
+/// Build a new text archive with sequential IDs starting at one and no trailer.
 pub fn write_text_nos_archive_bytes(
     records: &[TextNosRecordInput],
 ) -> TextNosArchiveResult<Vec<u8>> {
-    let count = i32::try_from(records.len()).map_err(|_| TextNosArchiveError::TooManyRecords {
-        count: records.len(),
-    })?;
+    let count = record_count(records.len())?;
+    write_records(
+        count,
+        records.iter().enumerate().map(|(index, record)| {
+            (
+                index as i32 + 1,
+                record.name.as_str(),
+                record.name_bytes.as_slice(),
+                record.packed_flag,
+                record.payload.as_slice(),
+            )
+        }),
+        &[],
+    )
+}
+
+/// Write records in supplied order with explicit IDs, flags, name bytes, and trailer.
+/// Display names are used only in errors; stored names come from `name_bytes`.
+pub fn write_text_nos_archive_records(
+    records: &[TextNosRecord],
+    trailer: &[u8],
+) -> TextNosArchiveResult<Vec<u8>> {
+    write_records(
+        record_count(records.len())?,
+        records.iter().map(|record| {
+            (
+                record.id,
+                record.name.as_str(),
+                record.name_bytes.as_slice(),
+                record.packed_flag,
+                record.payload.as_slice(),
+            )
+        }),
+        trailer,
+    )
+}
+
+fn record_count(count: usize) -> TextNosArchiveResult<i32> {
+    i32::try_from(count).map_err(|_| TextNosArchiveError::TooManyRecords { count })
+}
+
+fn write_records<'a>(
+    count: i32,
+    records: impl Iterator<Item = (i32, &'a str, &'a [u8], i32, &'a [u8])>,
+    trailer: &[u8],
+) -> TextNosArchiveResult<Vec<u8>> {
     let mut out = Vec::new();
     out.extend_from_slice(&count.to_le_bytes());
-    for (index, record) in records.iter().enumerate() {
-        let id = i32::try_from(index + 1).map_err(|_| TextNosArchiveError::TooManyRecords {
-            count: records.len(),
-        })?;
-        let name_len = i32::try_from(record.name_bytes.len()).map_err(|_| {
-            TextNosArchiveError::RecordTooLarge {
-                name: record.name.clone(),
+    for (id, name, name_bytes, packed_flag, payload) in records {
+        let name_len =
+            i32::try_from(name_bytes.len()).map_err(|_| TextNosArchiveError::RecordTooLarge {
+                name: name.to_owned(),
                 field: "name",
-                size: record.name_bytes.len(),
-            }
-        })?;
-        let payload_len = i32::try_from(record.payload.len()).map_err(|_| {
-            TextNosArchiveError::RecordTooLarge {
-                name: record.name.clone(),
+                size: name_bytes.len(),
+            })?;
+        let payload_len =
+            i32::try_from(payload.len()).map_err(|_| TextNosArchiveError::RecordTooLarge {
+                name: name.to_owned(),
                 field: "payload",
-                size: record.payload.len(),
-            }
-        })?;
+                size: payload.len(),
+            })?;
         out.extend_from_slice(&id.to_le_bytes());
         out.extend_from_slice(&name_len.to_le_bytes());
-        out.extend_from_slice(&record.name_bytes);
-        out.extend_from_slice(&record.packed_flag.to_le_bytes());
+        out.extend_from_slice(name_bytes);
+        out.extend_from_slice(&packed_flag.to_le_bytes());
         out.extend_from_slice(&payload_len.to_le_bytes());
-        out.extend_from_slice(&record.payload);
+        out.extend_from_slice(payload);
     }
+    out.extend_from_slice(trailer);
     Ok(out)
 }
 
@@ -280,6 +331,25 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+
+    #[test]
+    fn preserves_records_and_trailer_and_reads_timestamp_at_eof() {
+        let mut bytes = 2i32.to_le_bytes().to_vec();
+        push_text_record(&mut bytes, -7, "same.dat", 0, b"plain");
+        push_text_record(&mut bytes, -7, "same.dat", -42, b"encoded");
+        bytes.extend_from_slice(b"opaque");
+        bytes.extend_from_slice(&(25569.0 + 1.0 / 86400.0_f64).to_le_bytes());
+        bytes.extend_from_slice(&TEXT_ARCHIVE_TRAILER_MARKER);
+        let archive = TextNosArchive::from_bytes("fixture.NOS".into(), bytes.clone()).unwrap();
+        assert_eq!(archive.timestamp().unwrap().unix_seconds, 1);
+        assert_eq!(archive.trailing_bytes(), 6);
+        assert_eq!(archive.trailer().len(), 18);
+        assert_eq!(archive.to_bytes().unwrap(), bytes);
+        assert_eq!(
+            write_text_nos_archive_records(archive.records(), archive.trailer()).unwrap(),
+            bytes
+        );
+    }
 
     #[test]
     fn parses_text_archive_fixture_with_timestamp() {

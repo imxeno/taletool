@@ -29,9 +29,13 @@ use crate::binary_preset::{
     resolve_zlib_profile,
 };
 use crate::cli::{ArchiveCommand, ArchiveType, ChunkingArg, CompressionArg};
-use crate::paths::{escape_archive_name, immediate_files, resolve_inputs, unescape_archive_name};
+use crate::paths::{immediate_files, resolve_inputs, unescape_archive_name};
 use crate::sound_pack::{
     pack_sound_pack_dir as build_sound_pack_dir, sound_pack_manifest_exists, unpack_sound_pack,
+};
+use crate::text_archive::{
+    pack_text_archive_manifest, text_archive_manifest_exists,
+    unpack_text_archive as write_text_archive_records,
 };
 use crate::text_archive_convert::{
     TextArchiveOutputMode, convert_text_archive, resolve_text_archive_conversion,
@@ -560,7 +564,7 @@ fn unpack_binary_archives(archives: &[BinaryNosArchive], out: &Path) -> anyhow::
     Ok(())
 }
 
-/// Extract text archive records using escaped archive names.
+/// Extract text archive records and a fidelity manifest.
 fn unpack_text_archive(archive: &TextNosArchive, out: &Path) -> anyhow::Result<()> {
     let records = write_text_archive_records(archive, out)?;
     for (id, relative_path) in &records {
@@ -574,29 +578,6 @@ fn unpack_text_archive(archive: &TextNosArchive, out: &Path) -> anyhow::Result<(
     Ok(())
 }
 
-fn write_text_archive_records(
-    archive: &TextNosArchive,
-    out: &Path,
-) -> anyhow::Result<Vec<(i32, PathBuf)>> {
-    let duplicates = duplicate_id_counts(archive.records().iter().map(|record| record.id));
-    warn_duplicate_archive_ids(
-        "unpacking",
-        "text",
-        &duplicates,
-        "IDs are ambiguous for id-based lookup; files are written by archived name.",
-    );
-
-    fs::create_dir_all(out)?;
-    let mut written = Vec::with_capacity(archive.records().len());
-    for record in archive.records() {
-        let relative_path = PathBuf::from(escape_archive_name(&record.name));
-        let path = out.join(&relative_path);
-        fs::write(&path, &record.payload)?;
-        written.push((record.id, relative_path));
-    }
-    Ok(written)
-}
-
 /// Extract a DelDX sound pack into a manifest-backed directory.
 fn unpack_sound_pack_archive(archive: &DelDxPack, out: &Path) -> anyhow::Result<()> {
     let count = unpack_sound_pack(archive, out)?;
@@ -606,29 +587,29 @@ fn unpack_sound_pack_archive(archive: &DelDxPack, out: &Path) -> anyhow::Result<
 
 /// Pack an unpacked text archive directory into a text archive.
 fn pack_text_archive_dir(dir: &Path, out: &Path) -> anyhow::Result<()> {
-    let mut records = Vec::new();
-    for path in immediate_files(dir)? {
-        let file_name = path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .ok_or_else(|| anyhow::anyhow!("invalid UTF-8 file name: {}", path.display()))?;
-        let name = unescape_archive_name(file_name)?;
-        let payload = fs::read(&path)?;
-        records.push(TextNosRecordInput {
-            packed_flag: packed_flag_for_text_record(&name),
-            name_bytes: name.as_bytes().to_vec(),
-            name,
-            payload,
-        });
-    }
-    records.sort_by_key(|record| record.name.to_lowercase());
-    let bytes = write_text_nos_archive_bytes(&records)?;
+    let (bytes, count) = if text_archive_manifest_exists(dir) {
+        pack_text_archive_manifest(dir)?
+    } else {
+        let mut records = Vec::new();
+        for path in immediate_files(dir)? {
+            let file_name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .ok_or_else(|| anyhow::anyhow!("invalid UTF-8 file name: {}", path.display()))?;
+            let name = unescape_archive_name(file_name)?;
+            let payload = fs::read(&path)?;
+            records.push(TextNosRecordInput {
+                packed_flag: packed_flag_for_text_record(&name),
+                name_bytes: name.as_bytes().to_vec(),
+                name,
+                payload,
+            });
+        }
+        records.sort_by_key(|record| record.name.to_lowercase());
+        (write_text_nos_archive_bytes(&records)?, records.len())
+    };
     fs::write(out, bytes)?;
-    println!(
-        "packed {} text records into {}",
-        records.len(),
-        out.display()
-    );
+    println!("packed {} text records into {}", count, out.display());
     Ok(())
 }
 
@@ -797,6 +778,14 @@ fn infer_pack_type(
     if archive_type != ArchiveType::Auto {
         return Ok(archive_type);
     }
+    if text_archive_manifest_exists(dir) {
+        if sound_pack_manifest_exists(dir) {
+            anyhow::bail!(
+                "directory contains both text and sound archive manifests; specify --type"
+            );
+        }
+        return Ok(ArchiveType::Text);
+    }
     if sound_pack_manifest_exists(dir) || output_is_sound(out) {
         return Ok(ArchiveType::Sound);
     }
@@ -893,6 +882,135 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("taletool-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn text_manifest_round_trip_and_auto_detection_override_output_name() {
+        let root = temp_dir("text-manifest-command");
+        let input = root.join("input");
+        let output = root.join("rebuilt.NOS");
+        let mut bytes = 1i32.to_le_bytes().to_vec();
+        bytes.extend((-500i32).to_le_bytes());
+        bytes.extend(8i32.to_le_bytes());
+        bytes.extend(b"Item.dat");
+        bytes.extend(0i32.to_le_bytes());
+        bytes.extend(5i32.to_le_bytes());
+        bytes.extend(b"plain");
+        bytes.extend(b"trailer");
+        let archive = TextNosArchive::from_bytes("original.NOS".into(), bytes.clone()).unwrap();
+        unpack_text_archive(&archive, &input).unwrap();
+        assert_eq!(
+            infer_pack_type(&input, "snd.pck", ArchiveType::Auto, "auto").unwrap(),
+            ArchiveType::Text
+        );
+        pack_text_archive_dir(&input, &output).unwrap();
+        assert_eq!(fs::read(&output).unwrap(), bytes);
+        fs::remove_file(input.join("Item.dat")).unwrap();
+        assert!(pack_text_archive_dir(&input, &output).is_err());
+        assert_eq!(fs::read(&output).unwrap(), bytes);
+
+        let empty = root.join("empty");
+        unpack_text_archive(
+            &TextNosArchive::from_bytes("empty.NOS".into(), 0i32.to_le_bytes().to_vec()).unwrap(),
+            &empty,
+        )
+        .unwrap();
+        assert_eq!(
+            infer_pack_type(&empty, "arbitrary.NOS", ArchiveType::Auto, "auto").unwrap(),
+            ArchiveType::Text
+        );
+        pack_text_archive_dir(&empty, &output).unwrap();
+        assert_eq!(fs::read(&output).unwrap(), 0i32.to_le_bytes());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn raw_text_payloads_support_structured_unpack_and_repack_by_native_name() {
+        use crate::cli::{TextCommand, TextFormatArg, TextPayloadKindArg};
+        use crate::commands::text::run_text;
+
+        let root = temp_dir("text-native-editing");
+        let input = root.join("input");
+        let output = root.join("rebuilt.NOS");
+        let language = LanguageTable(vec![LanguageEntry("KEY".to_owned(), "value".to_owned())]);
+        let archive = text_archive(
+            "fixture.NOS",
+            vec![
+                ("Item.dat", 1, encode_dat_payload(b"").unwrap()),
+                (
+                    "_code_uk_Item.txt",
+                    1,
+                    encode_language_table(&language, TextEncoding::Windows1252).unwrap(),
+                ),
+            ],
+        );
+        unpack_text_archive(&archive, &input).unwrap();
+        for record in archive.records() {
+            let payload = input.join(&record.name);
+            let json = root.join(format!("{}.json", record.name));
+            run_text(TextCommand::Unpack {
+                payload: payload.clone(),
+                out: json.clone(),
+                kind: TextPayloadKindArg::Auto,
+                format: TextFormatArg::Auto,
+                json: true,
+                encoding: None,
+            })
+            .unwrap();
+            if record.name.ends_with(".txt") {
+                fs::write(&json, r#"[["KEY", "edited value"]]"#).unwrap();
+            }
+            run_text(TextCommand::Pack {
+                input: json,
+                out: payload,
+                kind: TextPayloadKindArg::Auto,
+                format: TextFormatArg::Auto,
+                json: true,
+                encoding: None,
+            })
+            .unwrap();
+        }
+        pack_text_archive_dir(&input, &output).unwrap();
+        let rebuilt = TextNosArchive::open(&output).unwrap();
+        for (before, after) in archive.records().iter().zip(rebuilt.records()) {
+            assert_eq!(after.name_bytes, before.name_bytes);
+            assert_eq!(after.id, before.id);
+            assert_eq!(after.packed_flag, before.packed_flag);
+        }
+        assert_eq!(
+            taletool_text::decode_language_table(
+                &rebuilt.records()[1].payload,
+                TextEncoding::Windows1252
+            )
+            .unwrap()
+            .table,
+            LanguageTable(vec![LanguageEntry(
+                "KEY".to_owned(),
+                "edited value".to_owned()
+            )])
+        );
+        assert_eq!(rebuilt.records()[0].payload, archive.records()[0].payload);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_text_directory_packing_remains_available() {
+        let root = temp_dir("text-legacy-command");
+        let input = root.join("input");
+        let output = root.join("rebuilt.NOS");
+        fs::create_dir_all(&input).unwrap();
+        fs::write(input.join("b%20file.dat"), b"packed").unwrap();
+        fs::write(input.join("a.raw"), b"plain").unwrap();
+        pack_text_archive_dir(&input, &output).unwrap();
+        let archive = TextNosArchive::open(&output).unwrap();
+        assert_eq!(archive.records()[0].name_bytes, b"a.raw");
+        assert_eq!(archive.records()[1].name_bytes, b"b file.dat");
+        assert_eq!(archive.records()[0].id, 1);
+        assert_eq!(archive.records()[1].id, 2);
+        assert_eq!(archive.records()[0].packed_flag, 0);
+        assert_eq!(archive.records()[1].packed_flag, 1);
+        assert!(archive.trailer().is_empty());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -2065,7 +2183,7 @@ mod tests {
     }
 
     #[test]
-    fn raw_text_unpack_and_converted_sound_layout_are_unchanged() {
+    fn raw_text_unpack_keeps_encoded_payload_and_converted_sound_layout() {
         let root = temp_dir("raw-text-converted-sound");
         fs::create_dir_all(&root).unwrap();
         let payload = encode_dat_payload(b"encoded text").unwrap();
