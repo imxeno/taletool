@@ -8,14 +8,14 @@ use serde::{Deserialize, Serialize};
 use taletool_map::{HeightGrid, write_height_grid_bytes};
 
 const HEIGHT_GRID_DOCUMENT_FORMAT: &str = "height-grid";
-const HEIGHT_GRID_DOCUMENT_VERSION: u32 = 1;
+const HEIGHT_GRID_DOCUMENT_VERSION: u32 = 2;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct HeightGridDocument {
+struct HeightGridDocument<T = HeightGrid> {
     format: String,
     version: u32,
-    grid: HeightGrid,
+    grid: T,
 }
 
 /// Write a decoded height grid as a JSON document.
@@ -34,17 +34,20 @@ pub(crate) fn unpack_height_grid_file(grid: &HeightGrid, out: &Path) -> anyhow::
 /// Build and write native height-grid bytes from a JSON document.
 pub(crate) fn pack_height_grid_file(input: &Path, out: &Path) -> anyhow::Result<HeightGrid> {
     let document_bytes = fs::read(input).with_context(|| format!("reading {}", input.display()))?;
-    let document: HeightGridDocument = serde_json::from_slice(&document_bytes)
+    // Check the document version before interpreting fields from older layouts.
+    let header: HeightGridDocument<serde::de::IgnoredAny> = serde_json::from_slice(&document_bytes)
         .with_context(|| format!("parsing {}", input.display()))?;
-    validate_document_header(&document)?;
+    validate_document_header(&header)?;
 
+    let document: HeightGridDocument = serde_json::from_slice(&document_bytes)
+        .with_context(|| format!("parsing height grid in {}", input.display()))?;
     let bytes = write_height_grid_bytes(&document.grid)?;
     create_parent_dir(out)?;
     fs::write(out, bytes).with_context(|| format!("writing {}", out.display()))?;
     Ok(document.grid)
 }
 
-fn validate_document_header(document: &HeightGridDocument) -> anyhow::Result<()> {
+fn validate_document_header<T>(document: &HeightGridDocument<T>) -> anyhow::Result<()> {
     if document.format != HEIGHT_GRID_DOCUMENT_FORMAT {
         bail!(
             "height-grid document has unsupported format {:?}; expected {:?}",
@@ -53,6 +56,11 @@ fn validate_document_header(document: &HeightGridDocument) -> anyhow::Result<()>
         );
     }
     if document.version != HEIGHT_GRID_DOCUMENT_VERSION {
+        if document.version == 1 {
+            bail!(
+                "height-grid JSON version 1 uses an obsolete payload layout; unpack the original NosTale payload again to produce version 2 JSON"
+            );
+        }
         bail!(
             "height-grid document has unsupported version {}; expected {}",
             document.version,
@@ -94,7 +102,6 @@ mod tests {
     fn sample_grid(encoding: HeightGridEncoding) -> HeightGrid {
         HeightGrid {
             encoding,
-            grid_id: 42,
             map_id: 43,
             bounds: HeightGridBounds {
                 minimum: [-1.0, -2.0, -3.0],
@@ -127,6 +134,7 @@ mod tests {
                 serde_json::from_slice(&fs::read(&json_path).unwrap()).unwrap();
             assert_eq!(document["format"], HEIGHT_GRID_DOCUMENT_FORMAT);
             assert_eq!(document["version"], HEIGHT_GRID_DOCUMENT_VERSION);
+            assert!(document["grid"].get("grid_id").is_none());
 
             let actual = pack_height_grid_file(&json_path, &payload_path).unwrap();
             assert_eq!(actual, expected);
@@ -135,6 +143,34 @@ mod tests {
                 expected
             );
         }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_legacy_json_before_writing_output() {
+        let root = temp_dir("height-grid-legacy-json");
+        fs::create_dir_all(&root).unwrap();
+        let json_path = root.join("grid.json");
+        let output = root.join("grid.bin");
+        fs::write(&output, b"existing payload").unwrap();
+        let mut grid =
+            serde_json::to_value(sample_grid(HeightGridEncoding::ImplicitVersion1)).unwrap();
+        grid["grid_id"] = json!(200811281);
+        let mut document = json!({ "format": "height-grid", "version": 1, "grid": grid });
+        fs::write(&json_path, document.to_string()).unwrap();
+        let error = pack_height_grid_file(&json_path, &output).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unpack the original NosTale payload again")
+        );
+        assert_eq!(fs::read(&output).unwrap(), b"existing payload");
+
+        document["version"] = json!(2);
+        fs::write(&json_path, document.to_string()).unwrap();
+        let error = pack_height_grid_file(&json_path, &output).unwrap_err();
+        assert!(format!("{error:#}").contains("unknown field `grid_id`"));
+        assert_eq!(fs::read(&output).unwrap(), b"existing payload");
         fs::remove_dir_all(root).unwrap();
     }
 

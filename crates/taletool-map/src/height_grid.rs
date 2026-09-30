@@ -18,8 +18,10 @@ pub const HEIGHT_GRID_VERSION_2: u32 = 0x0BF8_2312;
 pub enum HeightGridError {
     #[error(transparent)]
     Truncated(#[from] ByteReadError),
-    #[error("height-grid payload declares {declared} bytes but contains {actual}")]
+    #[error("height-grid declared size {declared} exceeds the available {actual} payload bytes")]
     SizeMismatch { declared: u64, actual: usize },
+    #[error("height-grid map ID {map_id} is a version tag; choose an explicit encoding")]
+    AmbiguousMapId { map_id: i32 },
     #[error("height-grid payload has {count} trailing bytes")]
     TrailingBytes { count: usize },
     #[error("height-grid field {field} contains a non-finite floating-point value")]
@@ -157,7 +159,6 @@ pub struct HeightGridDimensions {
 #[serde(deny_unknown_fields)]
 pub struct HeightGrid {
     pub encoding: HeightGridEncoding,
-    pub grid_id: i32,
     pub map_id: i32,
     pub bounds: HeightGridBounds,
     pub dimensions: HeightGridDimensions,
@@ -199,9 +200,9 @@ impl HeightGrid {
 }
 
 /// Decode one `NSgrdData` archive payload.
+/// The declared size may be smaller than the available payload bytes.
 pub fn decode_height_grid(data: &[u8]) -> HeightGridResult<HeightGrid> {
     let mut reader = ByteReader::new(data);
-    let grid_id = reader.read_i32_le("height_grid.grid_id")?;
     let marker = reader.read_u32_le("height_grid.version_or_map_id")?;
     let (encoding, map_id) = match marker {
         HEIGHT_GRID_VERSION_1 => (
@@ -216,7 +217,7 @@ pub fn decode_height_grid(data: &[u8]) -> HeightGridResult<HeightGrid> {
     };
 
     let declared_size = reader.read_u64_le("height_grid.declared_size")?;
-    if declared_size != data.len() as u64 {
+    if declared_size > data.len() as u64 {
         return Err(HeightGridError::SizeMismatch {
             declared: declared_size,
             actual: data.len(),
@@ -293,7 +294,6 @@ pub fn decode_height_grid(data: &[u8]) -> HeightGridResult<HeightGrid> {
 
     let grid = HeightGrid {
         encoding,
-        grid_id,
         map_id,
         bounds,
         dimensions,
@@ -307,11 +307,11 @@ pub fn decode_height_grid(data: &[u8]) -> HeightGridResult<HeightGrid> {
 }
 
 /// Encode typed height-grid data into the native payload layout.
+/// The declared size is canonicalized to the complete encoded payload length.
 pub fn write_height_grid_bytes(grid: &HeightGrid) -> HeightGridResult<Vec<u8>> {
     validate_height_grid(grid)?;
 
     let mut output = Vec::new();
-    output.extend_from_slice(&grid.grid_id.to_le_bytes());
     if let Some(version) = grid.encoding.version_tag() {
         output.extend_from_slice(&version.to_le_bytes());
     }
@@ -349,6 +349,16 @@ pub fn write_height_grid_bytes(grid: &HeightGrid) -> HeightGridResult<Vec<u8>> {
 }
 
 fn validate_height_grid(grid: &HeightGrid) -> HeightGridResult<()> {
+    if grid.encoding == HeightGridEncoding::ImplicitVersion1
+        && matches!(
+            grid.map_id as u32,
+            HEIGHT_GRID_VERSION_1 | HEIGHT_GRID_VERSION_2
+        )
+    {
+        return Err(HeightGridError::AmbiguousMapId {
+            map_id: grid.map_id,
+        });
+    }
     validate_header(
         &grid.bounds,
         grid.dimensions,
@@ -547,7 +557,6 @@ mod tests {
     fn sample(encoding: HeightGridEncoding) -> HeightGrid {
         HeightGrid {
             encoding,
-            grid_id: 2006,
             map_id: 2006,
             bounds: HeightGridBounds {
                 minimum: [-1.0, -2.0, -3.0],
@@ -566,59 +575,42 @@ mod tests {
         }
     }
 
+    // Fixed native bytes, independent of the encoder and typed sample. The
+    // preamble is followed by four vertices, two triangles, and two cell rows.
     fn fixture_bytes(encoding: HeightGridEncoding) -> Vec<u8> {
-        let grid = sample(encoding);
-        let mut output = Vec::new();
-        output.extend_from_slice(&2006_i32.to_le_bytes());
-        match encoding {
-            HeightGridEncoding::ImplicitVersion1 => {}
-            HeightGridEncoding::Version1 => {
-                output.extend_from_slice(&HEIGHT_GRID_VERSION_1.to_le_bytes());
-            }
-            HeightGridEncoding::Version2 => {
-                output.extend_from_slice(&HEIGHT_GRID_VERSION_2.to_le_bytes());
-            }
-        }
-        output.extend_from_slice(&2006_i32.to_le_bytes());
-        let size_offset = output.len();
-        output.extend_from_slice(&0_u64.to_le_bytes());
-        for value in grid.bounds.minimum {
-            output.extend_from_slice(&value.to_le_bytes());
-        }
-        for value in grid.bounds.maximum {
-            output.extend_from_slice(&value.to_le_bytes());
-        }
-        output.extend_from_slice(&2_u16.to_le_bytes());
-        output.extend_from_slice(&1_u16.to_le_bytes());
-        output.extend_from_slice(&2_u32.to_le_bytes());
-        for value in grid.cell_size {
-            output.extend_from_slice(&value.to_le_bytes());
-        }
-        output.extend_from_slice(&4_u32.to_le_bytes());
-        output.extend_from_slice(&2_u32.to_le_bytes());
-        for vertex in &grid.vertices {
-            for value in vertex {
-                output.extend_from_slice(&value.to_le_bytes());
-            }
-        }
-        let write_fixture_index = |output: &mut Vec<u8>, value: u32| match encoding {
+        let preamble = match encoding {
+            HeightGridEncoding::ImplicitVersion1 => "d6 07 00 00 84 00 00 00 00 00 00 00",
+            HeightGridEncoding::Version1 => "11 23 f8 0b d6 07 00 00 88 00 00 00 00 00 00 00",
+            HeightGridEncoding::Version2 => "12 23 f8 0b d6 07 00 00 98 00 00 00 00 00 00 00",
+        };
+        let header_and_vertices = "
+            00 00 80 bf 00 00 00 c0 00 00 40 c0
+            00 00 80 40 00 00 a0 40 00 00 c0 40
+            02 00 01 00 02 00 00 00
+            00 00 00 3f 00 00 00 3f 00 00 00 3f
+            04 00 00 00 02 00 00 00
+            00 00 00 00 00 00 00 00 00 00 00 00
+            00 00 80 3f 00 00 00 00 00 00 00 00
+            00 00 00 00 00 00 00 00 00 00 80 3f
+            00 00 80 3f 00 00 00 00 00 00 80 3f";
+        let triangles_and_cells = match encoding {
             HeightGridEncoding::ImplicitVersion1 | HeightGridEncoding::Version1 => {
-                output.extend_from_slice(&(value as u16).to_le_bytes());
+                "
+                00 00 01 00 02 00 01 00 03 00 02 00
+                00 00 02 00 00 00 01 00"
             }
             HeightGridEncoding::Version2 => {
-                output.extend_from_slice(&(value as i32).to_le_bytes());
+                "
+                00 00 00 00 01 00 00 00 02 00 00 00
+                01 00 00 00 03 00 00 00 02 00 00 00
+                00 00 02 00 00 00 00 00 01 00 00 00"
             }
         };
-        for value in [0, 1, 2, 1, 3, 2] {
-            write_fixture_index(&mut output, value);
-        }
-        output.extend_from_slice(&0_u16.to_le_bytes());
-        output.extend_from_slice(&2_u16.to_le_bytes());
-        write_fixture_index(&mut output, 0);
-        write_fixture_index(&mut output, 1);
-        let size = output.len() as u64;
-        output[size_offset..size_offset + 8].copy_from_slice(&size.to_le_bytes());
-        output
+        [preamble, header_and_vertices, triangles_and_cells]
+            .into_iter()
+            .flat_map(str::split_whitespace)
+            .map(|byte| u8::from_str_radix(byte, 16).unwrap())
+            .collect()
     }
 
     #[test]
@@ -652,9 +644,69 @@ mod tests {
     fn writer_recomputes_declared_size() {
         let bytes = write_height_grid_bytes(&sample(HeightGridEncoding::Version1)).unwrap();
         assert_eq!(
-            u64::from_le_bytes(bytes[12..20].try_into().unwrap()),
+            u64::from_le_bytes(bytes[8..16].try_into().unwrap()),
             bytes.len() as u64
         );
+    }
+
+    #[test]
+    fn accepts_smaller_declared_sizes_and_writes_complete_size() {
+        for (encoding, size_offset, payload_len) in [
+            (HeightGridEncoding::ImplicitVersion1, 4, 132_u64),
+            (HeightGridEncoding::Version1, 8, 136),
+            (HeightGridEncoding::Version2, 8, 152),
+        ] {
+            for declared in [0, 1, payload_len - 1, payload_len] {
+                let mut bytes = fixture_bytes(encoding);
+                assert_eq!(bytes.len(), payload_len as usize);
+                bytes[size_offset..size_offset + 8].copy_from_slice(&declared.to_le_bytes());
+                let decoded = decode_height_grid(&bytes).unwrap();
+                assert_eq!(decoded, sample(encoding));
+                assert_eq!(
+                    write_height_grid_bytes(&decoded).unwrap(),
+                    fixture_bytes(encoding)
+                );
+            }
+            let mut bytes = fixture_bytes(encoding);
+            bytes[size_offset..size_offset + 8].copy_from_slice(&(payload_len + 1).to_le_bytes());
+            assert!(matches!(
+                decode_height_grid(&bytes),
+                Err(HeightGridError::SizeMismatch { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn version2_preserves_indices_above_u16_range() {
+        let mut grid = sample(HeightGridEncoding::Version2);
+        grid.vertices.resize(65_537, [0.0; 3]);
+        grid.triangles[0][0] = 65_536;
+        grid.triangles.resize(65_537, [0, 1, 2]);
+        grid.cells[1] = vec![65_536];
+        let bytes = write_height_grid_bytes(&grid).unwrap();
+        assert_eq!(decode_height_grid(&bytes).unwrap(), grid);
+        grid.encoding = HeightGridEncoding::Version1;
+        assert!(matches!(
+            write_height_grid_bytes(&grid),
+            Err(HeightGridError::IndexOverflow { .. })
+        ));
+    }
+
+    #[test]
+    fn version_tag_map_ids_require_explicit_encoding() {
+        for map_id in [HEIGHT_GRID_VERSION_1 as i32, HEIGHT_GRID_VERSION_2 as i32] {
+            let mut grid = sample(HeightGridEncoding::ImplicitVersion1);
+            grid.map_id = map_id;
+            assert!(matches!(
+                write_height_grid_bytes(&grid),
+                Err(HeightGridError::AmbiguousMapId { .. })
+            ));
+            grid.encoding = HeightGridEncoding::Version1;
+            assert_eq!(
+                decode_height_grid(&write_height_grid_bytes(&grid).unwrap()).unwrap(),
+                grid
+            );
+        }
     }
 
     #[test]
@@ -669,7 +721,7 @@ mod tests {
     #[test]
     fn rejects_size_mismatches_and_trailing_data() {
         let mut bytes = fixture_bytes(HeightGridEncoding::ImplicitVersion1);
-        bytes[8..16].copy_from_slice(&1_u64.to_le_bytes());
+        bytes[4..12].copy_from_slice(&u64::MAX.to_le_bytes());
         assert!(matches!(
             decode_height_grid(&bytes),
             Err(HeightGridError::SizeMismatch { .. })
@@ -678,7 +730,7 @@ mod tests {
         let mut bytes = fixture_bytes(HeightGridEncoding::ImplicitVersion1);
         bytes.push(0);
         let size = bytes.len() as u64;
-        bytes[8..16].copy_from_slice(&size.to_le_bytes());
+        bytes[4..12].copy_from_slice(&size.to_le_bytes());
         assert!(matches!(
             decode_height_grid(&bytes),
             Err(HeightGridError::TrailingBytes { count: 1 })
@@ -750,7 +802,7 @@ mod tests {
         ));
 
         let mut bytes = fixture_bytes(HeightGridEncoding::Version2);
-        let triangle_offset = 72 + 4 * 12;
+        let triangle_offset = 68 + 4 * 12;
         bytes[triangle_offset..triangle_offset + 4].copy_from_slice(&(-1_i32).to_le_bytes());
         assert!(matches!(
             decode_height_grid(&bytes),
@@ -764,7 +816,7 @@ mod tests {
         assert!(decode_height_grid(&bytes[..20]).is_err());
 
         let mut bytes = fixture_bytes(HeightGridEncoding::ImplicitVersion1);
-        bytes[60..64].copy_from_slice(&u32::MAX.to_le_bytes());
+        bytes[56..60].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(matches!(
             decode_height_grid(&bytes),
             Err(HeightGridError::ImpossibleCount {

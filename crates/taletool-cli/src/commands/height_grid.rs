@@ -69,7 +69,6 @@ fn inspect_height_grid(
                 "type": "height-grid",
                 "encoded_size": encoded_size,
                 "encoding": encoding_label(grid.encoding),
-                "grid_id": grid.grid_id,
                 "map_id": grid.map_id,
                 "bounds": grid.bounds,
                 "dimensions": grid.dimensions,
@@ -86,7 +85,6 @@ fn inspect_height_grid(
         println!("type: height-grid");
         println!("encoded_size: {encoded_size}");
         println!("encoding: {}", encoding_label(grid.encoding));
-        println!("grid_id: {}", grid.grid_id);
         println!("map_id: {}", grid.map_id);
         println!(
             "bounds: minimum={:?} maximum={:?}",
