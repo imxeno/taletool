@@ -274,6 +274,7 @@ fn inspect_sound_pack(
     json_output: bool,
     checksum: bool,
 ) -> anyhow::Result<()> {
+    let key_order_violation = archive.first_key_order_violation();
     let mut entries = Vec::new();
     for entry in archive.entries() {
         let checksum_value = if checksum {
@@ -299,12 +300,20 @@ fn inspect_sound_pack(
                 "format": "sound",
                 "entries": entries,
                 "header_hex": hex::encode(archive.header()),
+                "key_order_violation": key_order_violation,
             }))?
         );
     } else {
         println!("type: sound");
         println!("format: sound");
         println!("entries: {}", archive.entries().len());
+        if let Some(violation) = key_order_violation {
+            println!(
+                "warning: entry {} has key {}, lower than the previous entry's key {}; \
+                 NosTale needs rows in ascending key order to find entries correctly",
+                violation.index, violation.key, violation.previous_key
+            );
+        }
         for entry in entries.iter().take(20) {
             println!(
                 "  index={:<5} key={:<8} payload={:<8} name={}{}",

@@ -127,6 +127,19 @@ this shape:
 <label>.<sound-id>.wav
 ```
 
-The decimal number between the first and second dot is the DelDX entry key used
-by patch mutation records when copying existing entries. If that shape is not
-present, updater-side lookup falls back to table-position behavior.
+The decimal number between the first and second dot is the entry key. NosTale
+loads a packed sound by looking up its sound ID as this key, and patch mutation
+records use the same key when copying existing entries. A name without two dots
+takes its table position as its key; a name whose text between the dots is not
+an integer gets key `-1`.
+
+### Key Order
+
+NosTale builds a separate index of the rows sorted by key, using a signed
+comparison, and binary-searches it for the requested sound ID. On a match it
+reads the name and payload of the row at the matched position in the stored
+table, not the row that the index entry points to. Lookups therefore return the
+right entry only when rows are stored in ascending key order. In an unsorted
+pack, a sound ID resolves to whichever row occupies its position in sorted
+order. Rows with equal keys may be stored next to each other, but which of them
+a lookup returns is unspecified.

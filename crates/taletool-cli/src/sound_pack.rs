@@ -73,6 +73,17 @@ pub(crate) fn pack_sound_pack_dir(dir: &Path, out: &Path) -> anyhow::Result<DelD
         entries,
         &DelDxPackWriteOptions::new(header),
     )?;
+    if let Some(violation) = archive.first_key_order_violation() {
+        bail!(
+            "sound pack entry {} ({:?}) has key {}, lower than the previous entry's key {}; \
+             NosTale only finds entries correctly when rows are stored in ascending key order \
+             (the number between the first two dots of the name, or the row position)",
+            violation.index,
+            archive.entries()[violation.index].name,
+            violation.key,
+            violation.previous_key
+        );
+    }
     if let Some(parent) = out.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -257,6 +268,32 @@ mod tests {
                 ..DELDX_PACK_RESERVED_HEADER_OFFSET + DELDX_PACK_RESERVED_HEADER_LEN],
             &[0, 0, 0]
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rows_out_of_ascending_key_order_fail() {
+        let root = temp_dir("sound-key-order");
+        let output = root.join("snd.pck");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("000000__b.20.wav"), b"second").unwrap();
+        fs::write(root.join("000001__a.10.wav"), b"first").unwrap();
+        fs::write(
+            root.join(SOUND_PACK_MANIFEST_FILE),
+            serde_json::json!({
+                "format": SOUND_PACK_FORMAT,
+                "version": SOUND_PACK_MANIFEST_VERSION,
+                "header_hex": hex::encode(header()),
+                "entries": ["000000__b.20.wav", "000001__a.10.wav"]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let error = pack_sound_pack_dir(&root, &output).unwrap_err().to_string();
+        assert!(error.contains("entry 1"), "{error}");
+        assert!(error.contains("ascending key order"), "{error}");
+        assert!(!output.exists());
         fs::remove_dir_all(root).unwrap();
     }
 

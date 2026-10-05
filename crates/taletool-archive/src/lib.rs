@@ -22,10 +22,10 @@ pub use binary::{
 };
 pub use deldx::{
     DELDX_PACK_HEADER_LEN, DELDX_PACK_RESERVED_HEADER_LEN, DELDX_PACK_RESERVED_HEADER_OFFSET,
-    DELDX_PACK_ROW_LEN, DELDX_PACK_ROW_PREFIX_LEN, DelDxPack, DelDxPackEntry, DelDxPackError,
-    DelDxPackRecord, DelDxPackResult, DelDxPackWriteEntry, DelDxPackWriteOptions,
-    PackedArchiveMutation, PackedMutationRecord, apply_packed_archive_mutation,
-    normalize_deldx_pack_header_for_write, write_deldx_pack_bytes,
+    DELDX_PACK_ROW_LEN, DELDX_PACK_ROW_PREFIX_LEN, DelDxKeyOrderViolation, DelDxPack,
+    DelDxPackEntry, DelDxPackError, DelDxPackRecord, DelDxPackResult, DelDxPackWriteEntry,
+    DelDxPackWriteOptions, PackedArchiveMutation, PackedMutationRecord,
+    apply_packed_archive_mutation, normalize_deldx_pack_header_for_write, write_deldx_pack_bytes,
 };
 pub use text::{
     TextNosArchive, TextNosArchiveError, TextNosArchiveResult, TextNosArchiveTimestamp,
