@@ -19,8 +19,8 @@ Every payload starts with a 133-byte header.
 | `0x1F` | `aabb<f32>` | Scene bounds: minimum `vec3`, then maximum `vec3`.            |
 | `0x37` | `aabb<f32>` | Bounds consulted by the fallback ground-height path.          |
 | `0x4F` | sphere      | Center `vec3` and radius used to seed fallback ground height. |
-| `0x5F` | color       | Ambient-light RGBA channels, stored in G, B, A, R byte order. |
-| `0x63` | color       | Diffuse-light RGBA channels, stored in G, B, A, R byte order. |
+| `0x5F` | color       | Ambient-light RGBA channels, stored in B, G, R, A byte order. |
+| `0x63` | color       | Diffuse-light RGBA channels, stored in B, G, R, A byte order. |
 | `0x67` | `u32`       | Packed renderer fog color.                                    |
 | `0x6B` | `i16[3]`    | Yaw angle, minimum offset, and maximum offset in degrees.     |
 | `0x71` | `i16[3]`    | Pitch angle, minimum offset, and maximum offset in degrees.   |
@@ -85,7 +85,7 @@ Kinds 1, 2, and 3 start with the same 66-byte geometry record:
 | Type        | Field                                                        |
 | ----------- | ------------------------------------------------------------ |
 | `u16`       | Index into the payload's geometry resource table.            |
-| `u8[4]`     | Material color in R, G, B, A order.                          |
+| `u8[4]`     | Material color in B, G, R, A byte order.                     |
 | `aabb<f32>` | World-space bounds: minimum `vec3`, then maximum `vec3`.     |
 | `vec3<f32>` | Bounding-sphere center.                                      |
 | `f32`       | Bounding-sphere radius.                                      |

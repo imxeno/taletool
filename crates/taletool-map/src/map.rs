@@ -80,7 +80,7 @@ pub struct BoundingSphere {
     pub radius: f32,
 }
 
-/// An eight-bit RGBA color.
+/// An eight-bit RGBA color, stored on disk in B, G, R, A byte order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rgba8 {
@@ -315,8 +315,8 @@ fn read_header(reader: &mut ByteReader<'_>) -> MapResult<MapHeader> {
     let bounds = read_bounds(reader, "map.header.bounds")?;
     let ground_bounds = read_bounds(reader, "map.header.ground_bounds")?;
     let ground_bounding_sphere = read_sphere(reader, "map.header.ground_bounding_sphere")?;
-    let ambient_light = read_header_color(reader, "map.header.ambient_light")?;
-    let diffuse_light = read_header_color(reader, "map.header.diffuse_light")?;
+    let ambient_light = read_bgra(reader, "map.header.ambient_light")?;
+    let diffuse_light = read_bgra(reader, "map.header.diffuse_light")?;
     let fog_color = reader.read_u32_le("map.header.fog_color")?;
     let yaw_limits = read_angle_limits(reader, "map.header.yaw_limits")?;
     let pitch_limits = read_angle_limits(reader, "map.header.pitch_limits")?;
@@ -428,7 +428,7 @@ fn read_geometry_node(
     }
     Ok(GeometryNode {
         geometry_index,
-        color: read_rgba(reader, "map.node.color")?,
+        color: read_bgra(reader, "map.node.color")?,
         bounds: read_bounds(reader, "map.node.bounds")?,
         bounding_sphere: read_sphere(reader, "map.node.bounding_sphere")?,
         position: read_vec3(reader, "map.node.position")?,
@@ -467,23 +467,13 @@ fn read_rotation(reader: &mut ByteReader<'_>, field: &'static str) -> MapResult<
     ])
 }
 
-fn read_rgba(reader: &mut ByteReader<'_>, field: &'static str) -> MapResult<Rgba8> {
+fn read_bgra(reader: &mut ByteReader<'_>, field: &'static str) -> MapResult<Rgba8> {
     let bytes = reader.read_array::<4>(field)?;
     Ok(Rgba8 {
-        red: bytes[0],
+        red: bytes[2],
         green: bytes[1],
-        blue: bytes[2],
+        blue: bytes[0],
         alpha: bytes[3],
-    })
-}
-
-fn read_header_color(reader: &mut ByteReader<'_>, field: &'static str) -> MapResult<Rgba8> {
-    let bytes = reader.read_array::<4>(field)?;
-    Ok(Rgba8 {
-        red: bytes[3],
-        green: bytes[0],
-        blue: bytes[1],
-        alpha: bytes[2],
     })
 }
 
@@ -512,8 +502,8 @@ fn write_header(output: &mut Vec<u8>, header: &MapHeader) {
     write_bounds(output, &header.bounds);
     write_bounds(output, &header.ground_bounds);
     write_sphere(output, &header.ground_bounding_sphere);
-    write_header_color(output, header.ambient_light);
-    write_header_color(output, header.diffuse_light);
+    write_bgra(output, header.ambient_light);
+    write_bgra(output, header.diffuse_light);
     output.extend_from_slice(&header.fog_color.to_le_bytes());
     write_angle_limits(output, header.yaw_limits);
     write_angle_limits(output, header.pitch_limits);
@@ -581,7 +571,7 @@ fn write_node(output: &mut Vec<u8>, node: &MapNode) {
 
 fn write_geometry_node(output: &mut Vec<u8>, node: &GeometryNode) {
     output.extend_from_slice(&node.geometry_index.to_le_bytes());
-    write_rgba(output, node.color);
+    write_bgra(output, node.color);
     write_bounds(output, &node.bounds);
     write_sphere(output, &node.bounding_sphere);
     write_vec3(output, node.position);
@@ -606,12 +596,8 @@ fn write_vec3(output: &mut Vec<u8>, value: [f32; 3]) {
     }
 }
 
-fn write_rgba(output: &mut Vec<u8>, color: Rgba8) {
-    output.extend_from_slice(&[color.red, color.green, color.blue, color.alpha]);
-}
-
-fn write_header_color(output: &mut Vec<u8>, color: Rgba8) {
-    output.extend_from_slice(&[color.green, color.blue, color.alpha, color.red]);
+fn write_bgra(output: &mut Vec<u8>, color: Rgba8) {
+    output.extend_from_slice(&[color.blue, color.green, color.red, color.alpha]);
 }
 
 fn write_angle_limits(output: &mut Vec<u8>, limits: CameraAngleLimits) {
@@ -893,17 +879,63 @@ mod tests {
     }
 
     #[test]
-    fn writes_header_channel_order_and_native_effect_order() {
+    fn writes_bgra_colors_and_native_effect_order() {
         let map = fixture();
         let bytes = write_map_bytes(&map).unwrap();
-        assert_eq!(&bytes[0x5f..0x63], &[2, 3, 4, 1]);
-        assert_eq!(&bytes[0x63..0x67], &[6, 7, 8, 5]);
+        assert_eq!(&bytes[0x5f..0x63], &[3, 2, 1, 4]);
+        assert_eq!(&bytes[0x63..0x67], &[7, 6, 5, 8]);
 
         let effect_start = 312;
+        assert_eq!(
+            &bytes[effect_start + 3..effect_start + 7],
+            &[30, 20, 10, 40]
+        );
         let tail = &bytes[effect_start + 1 + 66..effect_start + 1 + 66 + 19];
         assert_eq!(&tail[0..4], &2.5_f32.to_le_bytes());
         assert_eq!(&tail[4..6], &34_u16.to_le_bytes());
         assert_eq!(tail[18], 1);
+    }
+
+    #[test]
+    fn decodes_native_bgra_colors() {
+        let mut bytes = write_map_bytes(&fixture()).unwrap();
+        let effect_start = 312;
+        bytes[0x5f..0x63].copy_from_slice(&[0x10, 0x20, 0x30, 0x40]);
+        bytes[0x63..0x67].copy_from_slice(&[0x50, 0x60, 0x70, 0x80]);
+        bytes[effect_start + 3..effect_start + 7].copy_from_slice(&[0x90, 0xa0, 0xb0, 0xc0]);
+
+        let map = decode_map(&bytes).unwrap();
+        assert_eq!(
+            map.header.ambient_light,
+            Rgba8 {
+                red: 0x30,
+                green: 0x20,
+                blue: 0x10,
+                alpha: 0x40,
+            }
+        );
+        assert_eq!(
+            map.header.diffuse_light,
+            Rgba8 {
+                red: 0x70,
+                green: 0x60,
+                blue: 0x50,
+                alpha: 0x80,
+            }
+        );
+        let MapNodeKind::EffectGeometry { geometry, .. } = &map.root_nodes[0].children[2].kind
+        else {
+            panic!("fixture node kind changed");
+        };
+        assert_eq!(
+            geometry.color,
+            Rgba8 {
+                red: 0xb0,
+                green: 0xa0,
+                blue: 0x90,
+                alpha: 0xc0,
+            }
+        );
     }
 
     #[test]
