@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
-use async_trait::async_trait;
 use serde_json::json;
 use taletool_patch::{
     ParsedPchPkg, PatchChangeSet, PatchSourceFile, PatchSourceLoader, apply_patch_packages,
@@ -143,7 +142,6 @@ struct FilesystemPatchSourceLoader {
     root: PathBuf,
 }
 
-#[async_trait]
 impl PatchSourceLoader for FilesystemPatchSourceLoader {
     async fn load_source(&self, path: &str) -> Result<Option<PatchSourceFile>> {
         let normalized = normalize_client_path(path)?;
