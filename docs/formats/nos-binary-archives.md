@@ -95,6 +95,14 @@ does not encode the compression level; it differs by archive family. Known
 compressed families use level 1 or level 9, as listed in the family table. The
 original Delphi 7 tooling used zlib 1.1.2.
 
+The client does not honor the flag in every family:
+
+| Families                                                    | Client behavior                                              |
+| ----------------------------------------------------------- | ------------------------------------------------------------ |
+| `NStcData`, `NSmpData`, `NSppData`, `NSipData`, `NS4BbData` | Inflates records with any nonzero flag; reads others raw.    |
+| `NStuData`                                                  | Always inflates records, whatever the flag says.             |
+| All other families                                          | Reads stored bytes as-is, so compressed records are misread. |
+
 ## Split Archives
 
 The client prefers an unsuffixed `<family>.NOS` file when present. Otherwise, it

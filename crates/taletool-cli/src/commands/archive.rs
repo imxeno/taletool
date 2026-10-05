@@ -24,9 +24,9 @@ use crate::binary_payloads::{
     order_binary_payload_entries, parse_binary_payload_filename, parse_id_filename,
 };
 use crate::binary_preset::{
-    BinaryPreset, binary_nos_archive_default_compression, format_chunk_pattern, output_pattern,
-    parse_header_hex, resolve_binary_nos_preset_for_archives, resolve_binary_preset,
-    resolve_zlib_profile,
+    BinaryPreset, ClientCompression, binary_nos_archive_default_compression, format_chunk_pattern,
+    output_pattern, parse_header_hex, resolve_binary_nos_preset_for_archives,
+    resolve_binary_preset, resolve_zlib_profile,
 };
 use crate::cli::{ArchiveCommand, ArchiveType, ChunkingArg, CompressionArg};
 use crate::paths::{escape_archive_name, immediate_files, resolve_inputs, unescape_archive_name};
@@ -734,6 +734,12 @@ fn pack_binary_archive_dir(
             })?,
     };
     let zlib_profile = resolve_zlib_profile(zlib_profile_arg, compression, preset.as_ref())?;
+    if let Some(warning) = preset
+        .as_ref()
+        .and_then(|preset| client_compression_warning(preset, compression, &entries))
+    {
+        eprintln!("{warning}");
+    }
     let chunking = chunking_arg
         .or_else(|| preset.as_ref().map(|preset| preset.chunking))
         .unwrap_or(ChunkingArg::Single);
@@ -814,6 +820,48 @@ fn pack_binary_archive_dir(
     }
     println!("wrote {written} archive file(s)");
     Ok(())
+}
+
+/// Describe entries whose compression NosTale does not read in this family.
+///
+/// Packing still writes them, so archives can be crafted freely.
+fn client_compression_warning(
+    preset: &BinaryPreset,
+    default_compression: BinaryCompression,
+    entries: &[BinaryPayloadInput],
+) -> Option<String> {
+    let unreadable = entries
+        .iter()
+        .filter(|entry| {
+            !preset
+                .client_compression
+                .reads(entry.compression.unwrap_or(default_compression))
+        })
+        .map(|entry| entry.source_name.as_str())
+        .collect::<Vec<_>>();
+    let behavior = match preset.client_compression {
+        ClientCompression::Raw => "reads records without decompressing them",
+        ClientCompression::Zlib => "always inflates records",
+        ClientCompression::Flag => return None,
+    };
+    if unreadable.is_empty() {
+        return None;
+    }
+    const SHOWN: usize = 5;
+    let mut names = unreadable[..unreadable.len().min(SHOWN)].join(", ");
+    if unreadable.len() > SHOWN {
+        names.push_str(&format!(", and {} more", unreadable.len() - SHOWN));
+    }
+    Some(format!(
+        "warning: NosTale {behavior} in {}, so it misreads {} {}: {names}",
+        preset.name,
+        unreadable.len(),
+        if unreadable.len() == 1 {
+            "entry"
+        } else {
+            "entries"
+        }
+    ))
 }
 
 /// Resolve the archive type for `archive pack` when the user selects `auto`.
@@ -2116,6 +2164,55 @@ mod tests {
         assert!(sound_out.join(SOUND_PACK_MANIFEST_FILE).is_file());
         assert_no_staging_directories(&root);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn warns_about_compression_the_client_does_not_read() {
+        let entry = |name: &str, compression| BinaryPayloadInput {
+            file_id: 0,
+            duplicate_ordinal: None,
+            explicit_index: None,
+            compression,
+            source_name: name.to_owned(),
+            data: Vec::new(),
+        };
+        let preset = |name: &str| resolve_binary_preset("out", name).unwrap();
+
+        let textures = [
+            entry("1.bin", None),
+            entry("2__zlib.bin", Some(BinaryCompression::Zlib)),
+        ];
+        assert_eq!(
+            client_compression_warning(&preset("NStpData"), BinaryCompression::Raw, &textures)
+                .unwrap(),
+            "warning: NosTale reads records without decompressing them in NStpData, \
+             so it misreads 1 entry: 2__zlib.bin"
+        );
+        assert!(
+            client_compression_warning(&preset("NStpData"), BinaryCompression::Zlib, &textures)
+                .unwrap()
+                .contains("misreads 2 entries: 1.bin, 2__zlib.bin")
+        );
+
+        let maps = (0..7)
+            .map(|id| entry(&format!("{id}.bin"), None))
+            .collect::<Vec<_>>();
+        assert!(
+            client_compression_warning(&preset("NStuData"), BinaryCompression::Raw, &maps)
+                .unwrap()
+                .ends_with(
+                    "always inflates records in NStuData, so it misreads 7 entries: \
+                     0.bin, 1.bin, 2.bin, 3.bin, 4.bin, and 2 more"
+                )
+        );
+        assert_eq!(
+            client_compression_warning(&preset("NStuData"), BinaryCompression::Zlib, &maps),
+            None
+        );
+        assert_eq!(
+            client_compression_warning(&preset("NStcData"), BinaryCompression::Raw, &textures),
+            None
+        );
     }
 
     #[test]
