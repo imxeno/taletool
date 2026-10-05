@@ -69,6 +69,21 @@ pub struct DelDxPackEntry {
     pub data_size: usize,
 }
 
+/// A pack row whose key is lower than the key of the row stored before it.
+///
+/// NosTale finds `snd.pck` entries by binary-searching a key-sorted index, but
+/// reads the name and payload at the matching position of the stored table.
+/// Lookups are therefore only correct when rows are stored in ascending key
+/// order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DelDxKeyOrderViolation {
+    /// Table index of the out-of-order row.
+    pub index: usize,
+    pub key: i32,
+    /// Key of the row stored immediately before it.
+    pub previous_key: i32,
+}
+
 /// Decoded DelDX pack record used by the mutation API.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DelDxPackRecord {
@@ -291,6 +306,20 @@ impl DelDxPack {
     /// Return parsed table metadata without copying payload bytes.
     pub fn entries(&self) -> &[DelDxPackEntry] {
         &self.entries
+    }
+
+    /// Return the first row stored out of ascending key order, if any.
+    ///
+    /// Equal adjacent keys are not a violation.
+    pub fn first_key_order_violation(&self) -> Option<DelDxKeyOrderViolation> {
+        self.entries
+            .windows(2)
+            .find(|pair| pair[1].key < pair[0].key)
+            .map(|pair| DelDxKeyOrderViolation {
+                index: pair[1].index,
+                key: pair[1].key,
+                previous_key: pair[0].key,
+            })
     }
 
     /// Decode every record into editable payload bytes.
@@ -932,6 +961,38 @@ mod tests {
         assert_eq!(
             parsed.read_entry_payload(&parsed.entries[0]).unwrap(),
             b"sound"
+        );
+    }
+
+    #[test]
+    fn reports_first_row_out_of_ascending_key_order() {
+        let sorted = pack(&[
+            (b"bad.x.wav", b""),
+            (b"plain", b""),
+            (b"a.10.wav", b""),
+            (b"b.10.wav", b""),
+            (b"c.20.wav", b""),
+        ]);
+        let sorted = DelDxPack::from_memory(sorted).unwrap();
+        let keys: Vec<_> = sorted.entries.iter().map(|entry| entry.key).collect();
+        assert_eq!(keys, [-1, 1, 10, 10, 20]);
+        assert_eq!(sorted.first_key_order_violation(), None);
+
+        let unsorted = pack(&[
+            (b"a.10.wav", b""),
+            (b"b.30.wav", b""),
+            (b"c.20.wav", b""),
+            (b"d.5.wav", b""),
+        ]);
+        assert_eq!(
+            DelDxPack::from_memory(unsorted)
+                .unwrap()
+                .first_key_order_violation(),
+            Some(DelDxKeyOrderViolation {
+                index: 2,
+                key: 20,
+                previous_key: 30,
+            })
         );
     }
 
