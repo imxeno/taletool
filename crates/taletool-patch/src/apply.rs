@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
+use std::future::Future;
 
 use anyhow::{Context, Result, bail};
-use async_trait::async_trait;
 use taletool_archive::deldx::apply_packed_archive_mutation;
 
 use crate::{
@@ -37,9 +37,11 @@ pub struct PatchChangeSet {
 
 pub type PatchApplyResult = PatchChangeSet;
 
-#[async_trait]
 pub trait PatchSourceLoader {
-    async fn load_source(&self, path: &str) -> Result<Option<PatchSourceFile>>;
+    fn load_source(
+        &self,
+        path: &str,
+    ) -> impl Future<Output = Result<Option<PatchSourceFile>>> + Send;
 }
 
 pub async fn apply_patch_operation(
@@ -407,7 +409,6 @@ mod tests {
         }
     }
 
-    #[async_trait]
     impl PatchSourceLoader for MemoryLoader {
         async fn load_source(&self, path: &str) -> Result<Option<PatchSourceFile>> {
             Ok(self.files.get(&path.to_ascii_lowercase()).cloned())
