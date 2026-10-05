@@ -90,13 +90,19 @@ pub struct Rgba8 {
     pub alpha: u8,
 }
 
-/// Camera angle and the permitted offsets below and above it, in degrees.
+/// Camera angle and the permitted offsets below and above it.
+///
+/// Values are signed half-turn units: NosTale converts each one to radians as
+/// `value * pi / 32767`, so `32767` is a half turn and `16384` is about 90°.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CameraAngleLimits {
-    pub angle_degrees: i16,
-    pub minimum_offset_degrees: i16,
-    pub maximum_offset_degrees: i16,
+    #[serde(alias = "angle_degrees")]
+    pub angle_units: i16,
+    #[serde(alias = "minimum_offset_degrees")]
+    pub minimum_offset_units: i16,
+    #[serde(alias = "maximum_offset_degrees")]
+    pub maximum_offset_units: i16,
 }
 
 /// Scene-wide metadata at the beginning of every map payload.
@@ -125,7 +131,7 @@ pub struct MapHeader {
     pub fog_end: u8,
     /// Preserved bytes at offsets `0x79..0x83`.
     pub unknown_79: Vec<u8>,
-    /// Whether entering the scene resets yaw to `yaw_limits.angle_degrees`.
+    /// Whether entering the scene resets yaw to `yaw_limits.angle_units`.
     pub reset_yaw: bool,
     /// Preserved final header byte at offset `0x84`.
     pub unknown_84: u8,
@@ -482,9 +488,9 @@ fn read_angle_limits(
     field: &'static str,
 ) -> MapResult<CameraAngleLimits> {
     Ok(CameraAngleLimits {
-        angle_degrees: reader.read_i16_le(field)?,
-        minimum_offset_degrees: reader.read_i16_le(field)?,
-        maximum_offset_degrees: reader.read_i16_le(field)?,
+        angle_units: reader.read_i16_le(field)?,
+        minimum_offset_units: reader.read_i16_le(field)?,
+        maximum_offset_units: reader.read_i16_le(field)?,
     })
 }
 
@@ -601,9 +607,9 @@ fn write_bgra(output: &mut Vec<u8>, color: Rgba8) {
 }
 
 fn write_angle_limits(output: &mut Vec<u8>, limits: CameraAngleLimits) {
-    output.extend_from_slice(&limits.angle_degrees.to_le_bytes());
-    output.extend_from_slice(&limits.minimum_offset_degrees.to_le_bytes());
-    output.extend_from_slice(&limits.maximum_offset_degrees.to_le_bytes());
+    output.extend_from_slice(&limits.angle_units.to_le_bytes());
+    output.extend_from_slice(&limits.minimum_offset_units.to_le_bytes());
+    output.extend_from_slice(&limits.maximum_offset_units.to_le_bytes());
 }
 
 fn validate_map(map: &Map) -> MapResult<()> {
@@ -815,14 +821,14 @@ mod tests {
                 },
                 fog_color: 0xaabb_ccdd,
                 yaw_limits: CameraAngleLimits {
-                    angle_degrees: 90,
-                    minimum_offset_degrees: 30,
-                    maximum_offset_degrees: 45,
+                    angle_units: 90,
+                    minimum_offset_units: 30,
+                    maximum_offset_units: 45,
                 },
                 pitch_limits: CameraAngleLimits {
-                    angle_degrees: 45,
-                    minimum_offset_degrees: 15,
-                    maximum_offset_degrees: 10,
+                    angle_units: 45,
+                    minimum_offset_units: 15,
+                    maximum_offset_units: 10,
                 },
                 fog_start: 50,
                 fog_end: 200,
