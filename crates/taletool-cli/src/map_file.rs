@@ -123,14 +123,14 @@ mod tests {
                 },
                 fog_color: 0xff00_0000,
                 yaw_limits: CameraAngleLimits {
-                    angle_degrees: 90,
-                    minimum_offset_degrees: 30,
-                    maximum_offset_degrees: 30,
+                    angle_units: 90,
+                    minimum_offset_units: 30,
+                    maximum_offset_units: 30,
                 },
                 pitch_limits: CameraAngleLimits {
-                    angle_degrees: 45,
-                    minimum_offset_degrees: 15,
-                    maximum_offset_degrees: 5,
+                    angle_units: 45,
+                    minimum_offset_units: 15,
+                    maximum_offset_units: 5,
                 },
                 fog_start: 10,
                 fog_end: 200,
@@ -175,6 +175,37 @@ mod tests {
             decode_map(&fs::read(&payload_path).unwrap()).unwrap(),
             expected
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn accepts_former_degree_names_for_camera_angle_units() {
+        let root = temp_dir("map-angle-aliases");
+        let json_path = root.join("map.json");
+        fs::create_dir_all(&root).unwrap();
+        let expected = map();
+
+        let mut document = serde_json::to_value(MapDocument {
+            format: MAP_DOCUMENT_FORMAT.to_owned(),
+            version: MAP_DOCUMENT_VERSION,
+            map: expected.clone(),
+        })
+        .unwrap();
+        for limits in ["yaw_limits", "pitch_limits"] {
+            let limits = document["map"]["header"][limits].as_object_mut().unwrap();
+            for (current, former) in [
+                ("angle_units", "angle_degrees"),
+                ("minimum_offset_units", "minimum_offset_degrees"),
+                ("maximum_offset_units", "maximum_offset_degrees"),
+            ] {
+                let value = limits.remove(current).unwrap();
+                limits.insert(former.to_owned(), value);
+            }
+        }
+        fs::write(&json_path, document.to_string()).unwrap();
+
+        let actual = pack_map_file(&json_path, &root.join("map.bin")).unwrap();
+        assert_eq!(actual, expected);
         fs::remove_dir_all(root).unwrap();
     }
 

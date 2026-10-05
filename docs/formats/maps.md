@@ -22,8 +22,8 @@ Every payload starts with a 133-byte header.
 | `0x5F` | color       | Ambient-light RGBA channels, stored in B, G, R, A byte order. |
 | `0x63` | color       | Diffuse-light RGBA channels, stored in B, G, R, A byte order. |
 | `0x67` | `u32`       | Packed renderer fog color.                                    |
-| `0x6B` | `i16[3]`    | Yaw angle, minimum offset, and maximum offset in degrees.     |
-| `0x71` | `i16[3]`    | Pitch angle, minimum offset, and maximum offset in degrees.   |
+| `0x6B` | `i16[3]`    | Yaw angle and minimum/maximum offsets, in angle units.        |
+| `0x71` | `i16[3]`    | Pitch angle and minimum/maximum offsets, in angle units.      |
 | `0x77` | `u8`        | Normalized fog-start distance.                                |
 | `0x78` | `u8`        | Normalized fog-end distance.                                  |
 | `0x79` | `u8[10]`    | Unidentified data with no identified runtime use.             |
@@ -31,9 +31,11 @@ Every payload starts with a 133-byte header.
 | `0x84` | `u8`        | Unidentified byte with no identified runtime use.             |
 
 The runtime maps each fog-distance byte from `0..=255` to `0..=150` world units.
-When the reset-yaw flag is set, the camera yaw is moved to the stored angle when
-the scene loads. Otherwise, the current yaw is clamped to the stored limits.
-Pitch is also clamped to its limits.
+Camera angles and offsets are signed half-turn units rather than degrees: the
+client converts each value to radians as `value * pi / 32767`, so `16384` is
+about 90° and `32767` is a half turn. When the reset-yaw flag is set, the camera
+yaw is moved to the stored angle when the scene loads. Otherwise, the current
+yaw is clamped to the stored limits. Pitch is also clamped to its limits.
 
 When optimized height-grid data is unavailable, the fallback query initializes Y
 to the ground sphere's bottom point (`center.y - radius`). It traces scene
