@@ -68,8 +68,13 @@ The separator is byte `0x0B`. The client splits at the first separator, parses
 the prefix as a signed integer, and retains the complete suffix as text. Literal
 `#13#10` sequences are expanded to CRLF before the row is split.
 
-A value containing `<NEW_TYPE>` causes the client to sort the loaded list by its
-integer keys after parsing. Without that marker, stored row order is retained.
+The client sorts the loaded rows by key before looking any of them up, so stored
+row order does not matter. When several rows share a key, which of them the
+client uses is unspecified.
+
+A value can end with a `<NEW_TYPE><i,j,...>` suffix. When the client formats
+that value, it drops the suffix and passes its format arguments in the listed
+index order, so a translation can reorder arguments.
 
 ## NSlang Language Tables
 

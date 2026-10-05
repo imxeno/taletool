@@ -210,7 +210,7 @@ The unpacked layout depends on the container:
 | Type     | Output layout                                                     |
 | -------- | ----------------------------------------------------------------- |
 | `binary` | Raw payloads named by numeric ID, for example `42.bin`.           |
-| `text`   | Still-encoded record payloads named after escaped archive names.  |
+| `text`   | Encoded record payloads plus a `text-archive.json` manifest.      |
 | `sound`  | Ordered payload files plus a required `sound-pack.json` manifest. |
 
 Binary filenames preserve metadata needed for a stable round trip. A filename
