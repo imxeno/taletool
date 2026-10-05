@@ -251,11 +251,6 @@ With `--type auto`, a `sound-pack.json` manifest or `.pck` output selects
 directory containing only numeric payload filenames selects `binary`; and any
 other directory selects `text`.
 
-Sound packing fails when the manifest lists entries out of ascending key order
-(the number between the first two dots of each name), because NosTale cannot
-find sounds in such a pack. `archive inspect` reports the first out-of-order
-entry of an existing pack.
-
 Binary packing options are:
 
 | Option                     | Meaning                                                      |
