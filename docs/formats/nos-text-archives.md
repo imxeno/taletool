@@ -34,7 +34,7 @@ guaranteed unique archive key.
 ## Timestamp Trailer
 
 Observed text archives end with a 12-byte data-version trailer after the final
-record payload. The client uses the `NSgtdData` and `NSlangData` values for the
+record payload. The client uses the `NSgtdData` and `NScliData` values for the
 displayed `GDataVer:` and `CDataVer:` strings when you type `$ver` or equivalent
 in the chat.
 
@@ -59,3 +59,9 @@ seconds = round((tdatetime - 25569.0) * 86400.0)
 
 The client still handles a missing marker: when the trailer is absent, it uses
 `2004-12-11 12:00:00` as the fallback data-version date.
+
+At startup, the client also compares the dates with minimum versions stored as
+`TDateTime` numbers in the const strings: key `0x0C87` for `NScliData` and key
+`0x0C88` for `NSgtdData`. If either archive's date is older than its minimum,
+the client shows the data-version mismatch notice and shuts down. An archive
+without a trailer counts as `2004-12-11 12:00:00` in this check.
