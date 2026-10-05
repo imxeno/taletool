@@ -38,12 +38,6 @@ pub enum BinaryNosArchiveError {
     },
     #[error("archive {path} entry {file_id} payload extends past end of file")]
     PayloadOutOfBounds { path: PathBuf, file_id: i32 },
-    #[error("archive {path} entry {file_id} uses unsupported compression flag {flag}")]
-    UnsupportedCompression {
-        path: PathBuf,
-        file_id: i32,
-        flag: u8,
-    },
     #[error("archive {path} entry {file_id} zlib decode failed: {source}")]
     Zlib {
         path: PathBuf,
@@ -270,17 +264,11 @@ impl BinaryNosArchive {
 
             let unpacked_size = read_u32(&data, data_offset + 4) as usize;
             let stored_size = read_u32(&data, data_offset + 8) as usize;
-            let flag = data[data_offset + 12];
-            let compression = match flag {
-                0 => BinaryCompression::Raw,
-                1 => BinaryCompression::Zlib,
-                _ => {
-                    return Err(BinaryNosArchiveError::UnsupportedCompression {
-                        path,
-                        file_id,
-                        flag,
-                    });
-                }
+            // Readers that honor the flag inflate any nonzero value.
+            let compression = if data[data_offset + 12] == 0 {
+                BinaryCompression::Raw
+            } else {
+                BinaryCompression::Zlib
             };
 
             if data_offset.saturating_add(13).saturating_add(stored_size) > data.len() {
@@ -1229,6 +1217,34 @@ mod tests {
             archive.read_entry(7).unwrap().unwrap().data,
             vec![1, 2, 3, 4, 5, 6]
         );
+    }
+
+    #[test]
+    fn reads_any_nonzero_compression_flag_as_zlib() {
+        let options = BinaryNosArchiveWriteOptions {
+            header: *b"NT Data 05\0\0\x15\x07\x04 ",
+            direct_index: 0,
+            compression: BinaryCompression::Zlib,
+            zlib_profile: ZlibProfile::default_level(9),
+        };
+        let mut data = write_binary_nos_archive_bytes(
+            &[BinaryNosArchiveWriteEntry {
+                file_id: 1,
+                compression: None,
+                data: b"cell flags".to_vec(),
+            }],
+            &options,
+        )
+        .unwrap();
+        let record = BinaryNosArchive::from_bytes(PathBuf::from("fixture.NOS"), data.clone())
+            .unwrap()
+            .entries()[0]
+            .data_offset;
+        data[record + 12] = 2;
+
+        let archive = BinaryNosArchive::from_bytes(PathBuf::from("fixture.NOS"), data).unwrap();
+        assert_eq!(archive.entries()[0].compression, BinaryCompression::Zlib);
+        assert_eq!(archive.read_entry(1).unwrap().unwrap().data, b"cell flags");
     }
 
     #[test]

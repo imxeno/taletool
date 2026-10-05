@@ -27,6 +27,28 @@ pub(crate) enum BinaryAssetKind {
     FreeSizeSprite,
 }
 
+/// How NosTale reads records of a binary archive family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClientCompression {
+    /// The client reads stored bytes without decompressing them.
+    Raw,
+    /// The client always inflates records, whatever their flag says.
+    Zlib,
+    /// The client inflates records whose compression flag is nonzero.
+    Flag,
+}
+
+impl ClientCompression {
+    /// Return whether NosTale reads a record stored with `compression`.
+    pub(crate) fn reads(self, compression: BinaryCompression) -> bool {
+        match self {
+            Self::Raw => compression == BinaryCompression::Raw,
+            Self::Zlib => compression == BinaryCompression::Zlib,
+            Self::Flag => true,
+        }
+    }
+}
+
 /// CLI defaults for a known binary archive family.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BinaryPreset {
@@ -38,6 +60,8 @@ pub(crate) struct BinaryPreset {
     pub(crate) direct_index: u8,
     /// Default compression for entries in this archive family.
     pub(crate) compression: BinaryCompression,
+    /// How NosTale treats the record compression flag in this family.
+    pub(crate) client_compression: ClientCompression,
     /// zlib 1.1.2 profile required for byte-compatible zlib output.
     pub(crate) zlib_profile: Option<ZlibProfile>,
     /// Default chunk routing strategy.
@@ -56,6 +80,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 06\0\0\x15\x07\x04 ",
         direct_index: 0,
         compression: BinaryCompression::Raw,
+        client_compression: ClientCompression::Raw,
         zlib_profile: None,
         chunking: ChunkingArg::Family,
         chunk_count: 4,
@@ -67,6 +92,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 10\0\0\x15\x07\x04 ",
         direct_index: 0,
         compression: BinaryCompression::Raw,
+        client_compression: ClientCompression::Raw,
         zlib_profile: None,
         chunking: ChunkingArg::Single,
         chunk_count: 1,
@@ -78,6 +104,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 07\0\0\x15\x07\x04 ",
         direct_index: 0,
         compression: BinaryCompression::Raw,
+        client_compression: ClientCompression::Raw,
         zlib_profile: None,
         chunking: ChunkingArg::Family,
         chunk_count: 32,
@@ -89,6 +116,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 11\0\0\x15\x07\x04 ",
         direct_index: 0,
         compression: BinaryCompression::Raw,
+        client_compression: ClientCompression::Raw,
         zlib_profile: None,
         chunking: ChunkingArg::Family,
         chunk_count: 8,
@@ -100,6 +128,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 12\0\0\x15\x07\x04 ",
         direct_index: 0,
         compression: BinaryCompression::Raw,
+        client_compression: ClientCompression::Raw,
         zlib_profile: None,
         chunking: ChunkingArg::Family,
         chunk_count: 4,
@@ -111,6 +140,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 20\0\0\x15\x07\x04 ",
         direct_index: 0,
         compression: BinaryCompression::Raw,
+        client_compression: ClientCompression::Raw,
         zlib_profile: None,
         chunking: ChunkingArg::Single,
         chunk_count: 1,
@@ -122,6 +152,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 21\0\0\x15\x07\x04 ",
         direct_index: 0,
         compression: BinaryCompression::Raw,
+        client_compression: ClientCompression::Raw,
         zlib_profile: None,
         chunking: ChunkingArg::Single,
         chunk_count: 1,
@@ -133,6 +164,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 22\0\0\x15\x07\x04 ",
         direct_index: 0,
         compression: BinaryCompression::Raw,
+        client_compression: ClientCompression::Raw,
         zlib_profile: None,
         chunking: ChunkingArg::Single,
         chunk_count: 1,
@@ -144,6 +176,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 23\0\0\x15\x07\x04 ",
         direct_index: 0,
         compression: BinaryCompression::Raw,
+        client_compression: ClientCompression::Raw,
         zlib_profile: None,
         chunking: ChunkingArg::Single,
         chunk_count: 1,
@@ -155,6 +188,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 05\0\0\x15\x07\x04 ",
         direct_index: 0,
         compression: BinaryCompression::Zlib,
+        client_compression: ClientCompression::Flag,
         zlib_profile: Some(ZlibProfile::default_level(9)),
         chunking: ChunkingArg::Single,
         chunk_count: 1,
@@ -166,6 +200,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 02\0\0\x15\x07\x04 ",
         direct_index: 0,
         compression: BinaryCompression::Zlib,
+        client_compression: ClientCompression::Zlib,
         zlib_profile: Some(ZlibProfile::default_level(9)),
         chunking: ChunkingArg::Single,
         chunk_count: 1,
@@ -177,6 +212,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 24\0\0\x22\x08\x03 ",
         direct_index: 0,
         compression: BinaryCompression::Zlib,
+        client_compression: ClientCompression::Flag,
         zlib_profile: Some(ZlibProfile::default_level(1)),
         chunking: ChunkingArg::Single,
         chunk_count: 1,
@@ -188,6 +224,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 16\0\0\x15\x07\x04 ",
         direct_index: 1,
         compression: BinaryCompression::Raw,
+        client_compression: ClientCompression::Raw,
         zlib_profile: None,
         chunking: ChunkingArg::Single,
         chunk_count: 1,
@@ -199,6 +236,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 17\0\0\x15\x07\x04 ",
         direct_index: 0,
         compression: BinaryCompression::Zlib,
+        client_compression: ClientCompression::Flag,
         zlib_profile: Some(ZlibProfile::default_level(1)),
         chunking: ChunkingArg::Family,
         chunk_count: 16,
@@ -210,6 +248,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 14\0\0\x15\x07\x04 ",
         direct_index: 0,
         compression: BinaryCompression::Zlib,
+        client_compression: ClientCompression::Flag,
         zlib_profile: Some(ZlibProfile::default_level(1)),
         chunking: ChunkingArg::Family,
         chunk_count: 32,
@@ -221,6 +260,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 13\0\0\x15\x07\x04 ",
         direct_index: 1,
         compression: BinaryCompression::Raw,
+        client_compression: ClientCompression::Raw,
         zlib_profile: None,
         chunking: ChunkingArg::Single,
         chunk_count: 1,
@@ -232,6 +272,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 15\0\0\x15\x07\x04 ",
         direct_index: 1,
         compression: BinaryCompression::Raw,
+        client_compression: ClientCompression::Raw,
         zlib_profile: None,
         chunking: ChunkingArg::Single,
         chunk_count: 1,
@@ -243,6 +284,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 03\0\0\x15\x07\x04 ",
         direct_index: 0,
         compression: BinaryCompression::Raw,
+        client_compression: ClientCompression::Raw,
         zlib_profile: None,
         chunking: ChunkingArg::Single,
         chunk_count: 1,
@@ -254,6 +296,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"NT Data 26\0\0\x04\x11\x05 ",
         direct_index: 0,
         compression: BinaryCompression::Raw,
+        client_compression: ClientCompression::Raw,
         zlib_profile: None,
         chunking: ChunkingArg::Single,
         chunk_count: 1,
@@ -265,6 +308,7 @@ const BINARY_PRESETS: &[BinaryPreset] = &[
         header: *b"32GBS V1.0\x1A\0\x08\x09\x03 ",
         direct_index: 0,
         compression: BinaryCompression::Zlib,
+        client_compression: ClientCompression::Flag,
         zlib_profile: Some(ZlibProfile::default_level(9)),
         chunking: ChunkingArg::Single,
         chunk_count: 1,
@@ -689,6 +733,28 @@ mod tests {
             binary_nos_archive_default_compression(&archive),
             BinaryCompression::Zlib
         );
+    }
+
+    #[test]
+    fn binary_preset_defaults_use_compression_the_client_reads() {
+        for preset in BINARY_PRESETS {
+            assert!(
+                preset.client_compression.reads(preset.compression),
+                "{} defaults to {:?}, which NosTale does not read",
+                preset.name,
+                preset.compression
+            );
+        }
+        let client_compression = |name: &str| {
+            BINARY_PRESETS
+                .iter()
+                .find(|preset| preset.name == name)
+                .unwrap()
+                .client_compression
+        };
+        assert_eq!(client_compression("NStuData"), ClientCompression::Zlib);
+        assert_eq!(client_compression("NStpData"), ClientCompression::Raw);
+        assert_eq!(client_compression("NStcData"), ClientCompression::Flag);
     }
 
     #[test]
