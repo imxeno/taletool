@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{GtdLocale, GtdWarning, ParsedGtd, fields, is_ignored_line, values, warning};
 use crate::{
-    Result, TextEncoding, TextError, decode_dat_payload, decode_legacy_text, encode_dat_payload,
-    encode_legacy_text,
+    Result, TextEncoding, TextError, TextPayloadKind, decode_legacy_text, decode_text_rows,
+    encode_dat_payload, encode_legacy_text,
 };
 
 /// Contents of one localized `*_nosmall.dat` record.
@@ -32,10 +32,11 @@ pub struct NosMallEntry {
 /// Decode a NosMall DAT payload, retaining valid entries in order.
 pub fn decode_nos_mall(
     data: &[u8],
+    kind: TextPayloadKind,
     locale: GtdLocale,
     encoding: TextEncoding,
 ) -> Result<ParsedGtd<NosMallDocument>> {
-    let decoded = decode_dat_payload(data)?;
+    let decoded = decode_text_rows(data, kind)?;
     let text = decode_legacy_text(&decoded, encoding)?;
     let lines = text
         .split_terminator('\n')
@@ -452,6 +453,7 @@ fn invalid_base64() -> TextError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::decode_dat_payload;
 
     #[test]
     fn nos_mall_preserves_multiline_and_blank_descriptions() {
@@ -471,7 +473,13 @@ mod tests {
             "END\n",
         );
         let payload = encode_dat_payload(native.as_bytes()).unwrap();
-        let parsed = decode_nos_mall(&payload, GtdLocale::Uk, TextEncoding::Windows1252).unwrap();
+        let parsed = decode_nos_mall(
+            &payload,
+            TextPayloadKind::Dat,
+            GtdLocale::Uk,
+            TextEncoding::Windows1252,
+        )
+        .unwrap();
         assert!(parsed.warnings.is_empty());
         assert_eq!(parsed.document.entries[0].id, "00001  ");
         assert_eq!(
@@ -493,7 +501,13 @@ mod tests {
             "COST 0 0 0 0 0 0\nLINK 0 0 0 0 0 0\nDSTART\nsecond\nDEND\n",
         );
         let payload = encode_dat_payload(native.as_bytes()).unwrap();
-        let parsed = decode_nos_mall(&payload, GtdLocale::Uk, TextEncoding::Windows1252).unwrap();
+        let parsed = decode_nos_mall(
+            &payload,
+            TextPayloadKind::Dat,
+            GtdLocale::Uk,
+            TextEncoding::Windows1252,
+        )
+        .unwrap();
 
         assert!(parsed.warnings.is_empty());
         assert_eq!(parsed.document.entries.len(), 2);

@@ -225,9 +225,10 @@ payloads are sorted by unsigned ID. Explicit table slots preserve archive order,
 including direct-index layouts and duplicate rows.
 
 Text archive filenames use `%HH` escapes for characters that are not ASCII
-letters, digits, `.`, `-`, or `_`. Packing reverses these escapes. Archive
-unpacking without `--convert` preserves the encoded DAT/LST payloads for a
-lossless archive-level unpack/pack workflow.
+letters, digits, `.`, `-`, or `_`. `text-archive.json` keeps each record's
+original name, ID, packed flag, and order, so repeated names get numbered
+filenames such as `Item__2.dat`. Archive unpacking without `--convert` preserves
+the encoded DAT/LST payloads for a lossless archive-level unpack/pack workflow.
 
 Add `--convert` to export supported binary archives as JSON, PNGs, or manifests,
 and supported text archives as structured JSON. Use `--plain-text` to unwrap

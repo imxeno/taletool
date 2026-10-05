@@ -69,6 +69,7 @@ pub struct TextNosRecord {
 /// Record input used to rebuild a text `.NOS` archive.
 #[derive(Debug, Clone)]
 pub struct TextNosRecordInput {
+    pub id: i32,
     pub name: String,
     pub name_bytes: Vec<u8>,
     pub packed_flag: i32,
@@ -80,12 +81,16 @@ impl TextNosRecord {
         self.packed_flag != 0
     }
 
+    /// Return how NosTale reads this record's payload.
+    ///
+    /// The client's `.lst` filter-list readers take the stored bytes whatever
+    /// the flag says. Other records are compact DAT when packed and plain text
+    /// otherwise.
     pub fn payload_kind(&self) -> TextPayloadKind {
-        let name = self.name.to_ascii_lowercase();
-        if self.is_packed() || name.ends_with(".dat") {
-            TextPayloadKind::Dat
-        } else if name.ends_with(".lst") {
+        if self.name.to_ascii_lowercase().ends_with(".lst") {
             TextPayloadKind::List
+        } else if self.is_packed() {
+            TextPayloadKind::Dat
         } else {
             TextPayloadKind::Raw
         }
@@ -106,7 +111,17 @@ pub struct TextNosArchive {
     path: PathBuf,
     records: Vec<TextNosRecord>,
     timestamp: Option<TextNosArchiveTimestamp>,
-    trailing_bytes: usize,
+    trailing_data: Vec<u8>,
+}
+
+/// Archive-level bytes written after the records of a text `.NOS` archive.
+#[derive(Debug, Clone, Default)]
+pub struct TextNosArchiveWriteOptions {
+    /// Unrecognized bytes written directly after the last record.
+    pub trailing_data: Vec<u8>,
+    /// Delphi `TDateTime` stored in the data-version trailer. `None` writes no
+    /// trailer, which NosTale reads as `2004-12-11 12:00`.
+    pub version_date: Option<f64>,
 }
 
 impl TextNosArchive {
@@ -158,11 +173,13 @@ impl TextNosArchive {
             });
         }
 
+        // NosTale reads the trailer from the end of the file, so unrecognized
+        // bytes may sit between the last record and the trailer.
         let trailing = &data[reader.offset()..];
-        let (timestamp, trailing_bytes) =
-            if trailing.len() == 12 && trailing[8..12] == TEXT_ARCHIVE_TRAILER_MARKER {
+        let (timestamp, trailing_data) = match trailing.len().checked_sub(12) {
+            Some(trailer_start) if trailing[trailer_start + 8..] == TEXT_ARCHIVE_TRAILER_MARKER => {
                 let mut variant_bytes = [0_u8; 8];
-                variant_bytes.copy_from_slice(&trailing[0..8]);
+                variant_bytes.copy_from_slice(&trailing[trailer_start..trailer_start + 8]);
                 let variant = f64::from_le_bytes(variant_bytes);
                 let unix_seconds = ((variant - 2.00001) * 86400.0 - 2_208_988_800.0).round() as i64;
                 (
@@ -170,17 +187,17 @@ impl TextNosArchive {
                         variant,
                         unix_seconds,
                     }),
-                    0,
+                    trailing[..trailer_start].to_vec(),
                 )
-            } else {
-                (None, trailing.len())
-            };
+            }
+            _ => (None, trailing.to_vec()),
+        };
 
         Ok(Self {
             path,
             records,
             timestamp,
-            trailing_bytes,
+            trailing_data,
         })
     }
 
@@ -201,28 +218,26 @@ impl TextNosArchive {
 
     /// Return the number of unrecognized bytes left after the parsed records.
     pub fn trailing_bytes(&self) -> usize {
-        self.trailing_bytes
+        self.trailing_data.len()
+    }
+
+    /// Return unrecognized bytes between the last record and the trailer.
+    pub fn trailing_data(&self) -> &[u8] {
+        &self.trailing_data
     }
 }
 
 /// Rebuild text `.NOS` archive bytes from named record inputs.
-///
-/// `version_date` is the Delphi `TDateTime` stored in the data-version
-/// trailer. `None` writes no trailer, which NosTale reads as
-/// `2004-12-11 12:00`.
 pub fn write_text_nos_archive_bytes(
     records: &[TextNosRecordInput],
-    version_date: Option<f64>,
+    options: &TextNosArchiveWriteOptions,
 ) -> TextNosArchiveResult<Vec<u8>> {
     let count = i32::try_from(records.len()).map_err(|_| TextNosArchiveError::TooManyRecords {
         count: records.len(),
     })?;
     let mut out = Vec::new();
     out.extend_from_slice(&count.to_le_bytes());
-    for (index, record) in records.iter().enumerate() {
-        let id = i32::try_from(index + 1).map_err(|_| TextNosArchiveError::TooManyRecords {
-            count: records.len(),
-        })?;
+    for record in records {
         let name_len = i32::try_from(record.name_bytes.len()).map_err(|_| {
             TextNosArchiveError::RecordTooLarge {
                 name: record.name.clone(),
@@ -237,14 +252,15 @@ pub fn write_text_nos_archive_bytes(
                 size: record.payload.len(),
             }
         })?;
-        out.extend_from_slice(&id.to_le_bytes());
+        out.extend_from_slice(&record.id.to_le_bytes());
         out.extend_from_slice(&name_len.to_le_bytes());
         out.extend_from_slice(&record.name_bytes);
         out.extend_from_slice(&record.packed_flag.to_le_bytes());
         out.extend_from_slice(&payload_len.to_le_bytes());
         out.extend_from_slice(&record.payload);
     }
-    if let Some(version_date) = version_date {
+    out.extend_from_slice(&options.trailing_data);
+    if let Some(version_date) = options.version_date {
         out.extend_from_slice(&version_date.to_le_bytes());
         out.extend_from_slice(&TEXT_ARCHIVE_TRAILER_MARKER);
     }
@@ -315,6 +331,41 @@ mod tests {
     }
 
     #[test]
+    fn payload_kind_follows_the_packed_flag() {
+        let record = |name: &str, packed_flag| TextNosRecord {
+            id: 1,
+            name: name.to_owned(),
+            name_bytes: name.as_bytes().to_vec(),
+            packed_flag,
+            payload: b"plain\r\ntext".to_vec(),
+        };
+        assert_eq!(
+            record("conststring.dat", 1).payload_kind(),
+            TextPayloadKind::Dat
+        );
+        assert_eq!(
+            record("conststring.dat", 0).payload_kind(),
+            TextPayloadKind::Raw
+        );
+        assert_eq!(
+            record("_code_UK_Item.txt", 1).payload_kind(),
+            TextPayloadKind::Dat
+        );
+        assert_eq!(
+            record("TabooStr.lst", 0).payload_kind(),
+            TextPayloadKind::List
+        );
+        assert_eq!(
+            record("TabooStr.lst", 1).payload_kind(),
+            TextPayloadKind::List
+        );
+        assert_eq!(
+            record("conststring.dat", 0).decoded_payload().unwrap(),
+            b"plain\r\ntext"
+        );
+    }
+
+    #[test]
     fn ignores_non_matching_text_archive_trailing_bytes() {
         let mut archive = Vec::new();
         archive.extend_from_slice(&0_i32.to_le_bytes());
@@ -326,28 +377,30 @@ mod tests {
     }
 
     #[test]
-    fn writes_text_archive_with_sequential_ids() {
+    fn writes_stored_record_ids() {
         let bytes = write_text_nos_archive_bytes(
             &[
                 TextNosRecordInput {
+                    id: 77,
                     name: "a.dat".to_owned(),
                     name_bytes: b"a.dat".to_vec(),
                     packed_flag: 1,
                     payload: taletool_text::encode_dat_payload(b"a\n").unwrap(),
                 },
                 TextNosRecordInput {
+                    id: 5,
                     name: "b.lst".to_owned(),
                     name_bytes: b"b.lst".to_vec(),
                     packed_flag: 0,
                     payload: taletool_text::encode_list_payload(b"b\n").unwrap(),
                 },
             ],
-            None,
+            &TextNosArchiveWriteOptions::default(),
         )
         .unwrap();
         let archive = TextNosArchive::from_bytes(PathBuf::from("fixture.NOS"), bytes).unwrap();
-        assert_eq!(archive.records()[0].id, 1);
-        assert_eq!(archive.records()[1].id, 2);
+        assert_eq!(archive.records()[0].id, 77);
+        assert_eq!(archive.records()[1].id, 5);
         assert_eq!(archive.records()[0].decoded_payload().unwrap(), b"a\n");
         assert_eq!(archive.records()[1].decoded_payload().unwrap(), b"b\n");
     }
@@ -355,13 +408,22 @@ mod tests {
     #[test]
     fn writes_version_date_trailer() {
         let records = [TextNosRecordInput {
+            id: 1,
             name: "a.dat".to_owned(),
             name_bytes: b"a.dat".to_vec(),
             packed_flag: 1,
             payload: taletool_text::encode_dat_payload(b"a\n").unwrap(),
         }];
-        let without = write_text_nos_archive_bytes(&records, None).unwrap();
-        let with = write_text_nos_archive_bytes(&records, Some(45_567.5)).unwrap();
+        let without =
+            write_text_nos_archive_bytes(&records, &TextNosArchiveWriteOptions::default()).unwrap();
+        let with = write_text_nos_archive_bytes(
+            &records,
+            &TextNosArchiveWriteOptions {
+                trailing_data: Vec::new(),
+                version_date: Some(45_567.5),
+            },
+        )
+        .unwrap();
 
         assert_eq!(&with[..without.len()], without.as_slice());
         assert_eq!(
@@ -372,6 +434,29 @@ mod tests {
         let archive = TextNosArchive::from_bytes(PathBuf::from("fixture.NOS"), with).unwrap();
         assert_eq!(archive.timestamp().unwrap().variant, 45_567.5);
         assert_eq!(archive.trailing_bytes(), 0);
+    }
+
+    #[test]
+    fn reads_trailer_after_unrecognized_bytes_and_rebuilds_them() {
+        let options = TextNosArchiveWriteOptions {
+            trailing_data: vec![1, 2, 3],
+            version_date: Some(45_567.5),
+        };
+        let bytes = write_text_nos_archive_bytes(&[], &options).unwrap();
+        let archive =
+            TextNosArchive::from_bytes(PathBuf::from("fixture.NOS"), bytes.clone()).unwrap();
+
+        assert_eq!(archive.trailing_data(), [1, 2, 3]);
+        assert_eq!(archive.timestamp().unwrap().variant, 45_567.5);
+        let rebuilt = write_text_nos_archive_bytes(
+            &[],
+            &TextNosArchiveWriteOptions {
+                trailing_data: archive.trailing_data().to_vec(),
+                version_date: archive.timestamp().map(|timestamp| timestamp.variant),
+            },
+        )
+        .unwrap();
+        assert_eq!(rebuilt, bytes);
     }
 
     fn push_text_record(out: &mut Vec<u8>, id: i32, name: &str, packed_flag: i32, payload: &[u8]) {

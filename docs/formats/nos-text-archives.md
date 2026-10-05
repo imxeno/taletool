@@ -31,6 +31,16 @@ All integer fields are little-endian.
 Record IDs are part of each stored record. They should not be treated as a
 guaranteed unique archive key.
 
+The packed flag selects how the client reads a payload. A nonzero flag means
+compact DAT rows (see [Text](text.md)); a zero flag means plain text, which the
+client splits into rows at CR, LF, or CRLF and stops reading at the first NUL
+byte. The `.lst` filter-list readers ignore the flag and read the stored bytes
+as an LST payload.
+
+When the client loads a whole archive, it processes every record in stored
+order, including records that repeat a name. When it looks a record up by name,
+it uses the first match.
+
 ## Timestamp Trailer
 
 Observed text archives end with a 12-byte data-version trailer after the final
@@ -42,6 +52,9 @@ in the chat.
 | ------------------------- | ----- | ------------------------------------------ |
 | `0x00`                    | `f64` | Delphi `TDateTime` data-version timestamp. |
 | `0x08`                    | `u32` | Marker value `$01323EEE`, little-endian.   |
+
+The client reads the trailer from the last 12 bytes of the file, so other bytes
+may sit between the final record and the trailer.
 
 The marker bytes at the end of the file are:
 

@@ -179,9 +179,13 @@ pub struct ParsedConstStringTable {
 #[serde(transparent)]
 pub struct NSetcStringList(pub Vec<String>);
 
-/// Decode an NSlang DAT payload using the valid-row behavior of the client.
-pub fn decode_language_table(data: &[u8], encoding: TextEncoding) -> Result<ParsedLanguageTable> {
-    let decoded = decode_dat_payload(data)?;
+/// Decode an NSlang record payload using the valid-row behavior of the client.
+pub fn decode_language_table(
+    data: &[u8],
+    kind: TextPayloadKind,
+    encoding: TextEncoding,
+) -> Result<ParsedLanguageTable> {
+    let decoded = decode_text_rows(data, kind)?;
     let text = decode_legacy_text(&decoded, encoding)?;
     let mut table = Vec::new();
     let mut malformed_rows = Vec::new();
@@ -225,12 +229,13 @@ pub fn encode_language_table(table: &LanguageTable, encoding: TextEncoding) -> R
     encode_dat_payload(&bytes)
 }
 
-/// Decode an NScli constant-string DAT payload into valid numeric rows.
+/// Decode an NScli constant-string payload into valid numeric rows.
 pub fn decode_const_string_table(
     data: &[u8],
+    kind: TextPayloadKind,
     encoding: TextEncoding,
 ) -> Result<ParsedConstStringTable> {
-    let decoded = decode_dat_payload(data)?;
+    let decoded = decode_text_rows(data, kind)?;
     let text = decode_legacy_text(&decoded, encoding)?;
     let mut table = Vec::new();
     let mut malformed_rows = Vec::new();
@@ -283,17 +288,13 @@ pub fn encode_const_string_table(
     encode_dat_payload(&bytes)
 }
 
-/// Decode an `NSetcData` DAT or LST payload into its ordered strings.
+/// Decode an `NSetcData` payload into its ordered strings.
 pub fn decode_nsetc_string_list(
     data: &[u8],
     kind: TextPayloadKind,
     encoding: TextEncoding,
 ) -> Result<NSetcStringList> {
-    let decoded = match kind {
-        TextPayloadKind::Dat => decode_dat_payload(data)?,
-        TextPayloadKind::List => decode_list_payload(data)?,
-        TextPayloadKind::Raw => return Err(TextError::UnsupportedNSetcPayloadKind),
-    };
+    let decoded = decode_text_rows(data, kind)?;
     let text = decode_legacy_text(&decoded, encoding)?;
     if text.is_empty() {
         return Ok(NSetcStringList::default());
@@ -377,6 +378,44 @@ fn validate_const_string_crlf(value: &str, entry: usize) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Return the rows NosTale reads from a stored text payload, each ending in `\n`.
+///
+/// Packed records hold compact DAT rows and LST records hold counted strings.
+/// Unpacked records are plain text, which the client splits at CR, LF, or
+/// CRLF and stops reading at the first NUL byte.
+pub fn decode_text_rows(data: &[u8], kind: TextPayloadKind) -> Result<Vec<u8>> {
+    match kind {
+        TextPayloadKind::Dat => decode_dat_payload(data),
+        TextPayloadKind::List => decode_list_payload(data),
+        TextPayloadKind::Raw => Ok(plain_text_rows(data)),
+    }
+}
+
+fn plain_text_rows(data: &[u8]) -> Vec<u8> {
+    let data = data
+        .iter()
+        .position(|byte| *byte == 0)
+        .map_or(data, |end| &data[..end]);
+    let mut rows = Vec::with_capacity(data.len() + 1);
+    let mut index = 0;
+    while index < data.len() {
+        match data[index] {
+            b'\r' => {
+                rows.push(b'\n');
+                if data.get(index + 1) == Some(&b'\n') {
+                    index += 1;
+                }
+            }
+            byte => rows.push(byte),
+        }
+        index += 1;
+    }
+    if rows.last().is_some_and(|byte| *byte != b'\n') {
+        rows.push(b'\n');
+    }
+    rows
 }
 
 pub fn decode_dat_payload(data: &[u8]) -> Result<Vec<u8>> {
@@ -541,6 +580,33 @@ fn read_i32_at(data: &[u8], offset: usize) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn plain_text_rows_split_like_the_client() {
+        assert_eq!(
+            decode_text_rows(b"a\r\nb\rc\nd\0ignored\n", TextPayloadKind::Raw).unwrap(),
+            b"a\nb\nc\nd\n"
+        );
+        assert_eq!(
+            decode_text_rows(b"row\r\n", TextPayloadKind::Raw).unwrap(),
+            b"row\n"
+        );
+        assert_eq!(decode_text_rows(b"", TextPayloadKind::Raw).unwrap(), b"");
+
+        let parsed = decode_const_string_table(
+            b"1\x0bOK\r\n2\x0bCancel",
+            TextPayloadKind::Raw,
+            TextEncoding::Windows1252,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.table.0,
+            [
+                ConstStringEntry(1, "OK".into()),
+                ConstStringEntry(2, "Cancel".into())
+            ]
+        );
+    }
+
     use super::*;
 
     #[test]
@@ -630,7 +696,9 @@ mod tests {
             "zts2e\tBefore#13#10After\n",
         );
         let encoded = encode_dat_payload(decoded.as_bytes()).unwrap();
-        let parsed = decode_language_table(&encoded, TextEncoding::Windows1252).unwrap();
+        let parsed =
+            decode_language_table(&encoded, TextPayloadKind::Dat, TextEncoding::Windows1252)
+                .unwrap();
 
         assert_eq!(
             parsed.table,
@@ -658,7 +726,9 @@ mod tests {
         ]);
 
         let encoded = encode_language_table(&expected, TextEncoding::Windows1252).unwrap();
-        let parsed = decode_language_table(&encoded, TextEncoding::Windows1252).unwrap();
+        let parsed =
+            decode_language_table(&encoded, TextPayloadKind::Dat, TextEncoding::Windows1252)
+                .unwrap();
         assert_eq!(parsed.table, expected);
         assert!(parsed.malformed_rows.is_empty());
     }
@@ -707,7 +777,7 @@ mod tests {
     fn language_table_uses_strict_legacy_encoding() {
         let encoded = encode_dat_payload(&[0x81, b'\t', b'x', b'\n']).unwrap();
         assert!(matches!(
-            decode_language_table(&encoded, TextEncoding::Big5),
+            decode_language_table(&encoded, TextPayloadKind::Dat, TextEncoding::Big5),
             Err(TextError::InvalidTextEncoding { .. })
         ));
 
@@ -740,7 +810,9 @@ mod tests {
             "8\u{000b}Before#13#10After[n]<NEW_TYPE>\n",
         );
         let encoded = encode_dat_payload(decoded.as_bytes()).unwrap();
-        let parsed = decode_const_string_table(&encoded, TextEncoding::Windows1252).unwrap();
+        let parsed =
+            decode_const_string_table(&encoded, TextPayloadKind::Dat, TextEncoding::Windows1252)
+                .unwrap();
 
         assert_eq!(
             parsed.table,
@@ -773,7 +845,9 @@ mod tests {
             ConstStringEntry(1, "duplicate key".into()),
         ]);
         let encoded = encode_const_string_table(&expected, TextEncoding::Windows1252).unwrap();
-        let parsed = decode_const_string_table(&encoded, TextEncoding::Windows1252).unwrap();
+        let parsed =
+            decode_const_string_table(&encoded, TextPayloadKind::Dat, TextEncoding::Windows1252)
+                .unwrap();
         assert_eq!(parsed.table, expected);
         assert!(parsed.malformed_rows.is_empty());
     }
@@ -855,10 +929,6 @@ mod tests {
                 TextPayloadKind::Raw,
                 TextEncoding::EucKr,
             ),
-            Err(TextError::UnsupportedNSetcPayloadKind)
-        ));
-        assert!(matches!(
-            decode_nsetc_string_list(&[], TextPayloadKind::Raw, TextEncoding::EucKr),
             Err(TextError::UnsupportedNSetcPayloadKind)
         ));
     }

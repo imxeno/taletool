@@ -360,18 +360,17 @@ fn validate_nsetc_record_kind(path: &Path, kind: TextPayloadKind) -> anyhow::Res
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("");
-    let expected = if name.eq_ignore_ascii_case("MiniGame6WordData.dat") {
-        TextPayloadKind::Dat
+    let valid = if name.eq_ignore_ascii_case("MiniGame6WordData.dat") {
+        matches!(kind, TextPayloadKind::Dat | TextPayloadKind::Raw)
     } else if name.eq_ignore_ascii_case("TabooStr.lst") {
-        TextPayloadKind::List
+        kind == TextPayloadKind::List
     } else {
         unreachable!("NSetc family is resolved only from supported native names")
     };
-    if kind != expected {
+    if !valid {
         anyhow::bail!(
-            "{} requires a {} payload, got {}",
+            "{} cannot be read from a {} payload",
             path.display(),
-            payload_kind_name(expected),
             payload_kind_name(kind),
         );
     }
