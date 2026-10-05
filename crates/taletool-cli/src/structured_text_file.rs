@@ -31,7 +31,7 @@ pub(crate) fn decode_structured_text_document(
     match format {
         TextFormatArg::Lang => {
             let encoding = resolve_language_encoding(path, encoding)?;
-            let parsed = decode_language_table(data, encoding)?;
+            let parsed = decode_language_table(data, kind, encoding)?;
             let warnings = parsed
                 .malformed_rows
                 .iter()
@@ -46,7 +46,7 @@ pub(crate) fn decode_structured_text_document(
         }
         TextFormatArg::Cli => {
             let encoding = resolve_cli_encoding(encoding)?;
-            let parsed = decode_const_string_table(data, encoding)?;
+            let parsed = decode_const_string_table(data, kind, encoding)?;
             let warnings = parsed
                 .malformed_rows
                 .iter()
@@ -75,7 +75,7 @@ pub(crate) fn decode_structured_text_document(
             let gtd_kind = GtdFileKind::for_path(path).ok_or_else(|| {
                 anyhow::anyhow!("cannot infer an NSgtdData grammar from {}", path.display())
             })?;
-            let parsed = decode_gtd_document(gtd_kind, data, encoding)?;
+            let parsed = decode_gtd_document(gtd_kind, data, kind, encoding)?;
             let warnings = parsed
                 .warnings
                 .iter()
@@ -127,12 +127,8 @@ pub(crate) fn resolve_structured_format(
     };
 
     match format {
-        TextFormatArg::Lang | TextFormatArg::Cli if kind != TextPayloadKind::Dat => bail!(
-            "structured {format:?} JSON requires a DAT payload, got {}",
-            path.display()
-        ),
-        TextFormatArg::Etc if kind == TextPayloadKind::Raw => bail!(
-            "structured etc JSON requires a DAT or LST payload, got {}",
+        TextFormatArg::Lang | TextFormatArg::Cli if kind == TextPayloadKind::List => bail!(
+            "structured {format:?} JSON requires a DAT or plain-text payload, got {}",
             path.display()
         ),
         TextFormatArg::Gtd => {
@@ -145,9 +141,9 @@ pub(crate) fn resolve_structured_format(
                     "structured gtd abuse JSON requires an LST payload, got {}",
                     payload_kind_label(kind)
                 ),
-                (_, TextPayloadKind::Dat) => {}
-                (_, _) => bail!(
-                    "structured gtd JSON requires a DAT payload, got {}",
+                (_, TextPayloadKind::Dat | TextPayloadKind::Raw) => {}
+                (_, TextPayloadKind::List) => bail!(
+                    "structured gtd JSON requires a DAT or plain-text payload, got {}",
                     payload_kind_label(kind)
                 ),
             }

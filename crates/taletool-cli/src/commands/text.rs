@@ -296,21 +296,13 @@ mod tests {
         for (name, kind) in [
             ("renamed.dat", TextPayloadKind::Dat),
             ("renamed.lst", TextPayloadKind::List),
+            ("renamed.bin", TextPayloadKind::Raw),
         ] {
             assert_eq!(
                 resolve_structured_format(Path::new(name), kind, TextFormatArg::Etc).unwrap(),
                 TextFormatArg::Etc
             );
         }
-
-        assert!(
-            resolve_structured_format(
-                Path::new("renamed.bin"),
-                TextPayloadKind::Raw,
-                TextFormatArg::Etc,
-            )
-            .is_err()
-        );
         assert!(!is_nsetc_payload_name(Path::new("other.dat")));
         assert_eq!(resolve_etc_encoding(None), TextEncoding::EucKr);
         assert_eq!(

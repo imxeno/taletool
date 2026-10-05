@@ -12,7 +12,7 @@ use anyhow::Context;
 use serde_json::json;
 use taletool_archive::{
     BinaryCompression, BinaryNosArchive, BinaryNosArchiveWriteOptions, BinaryNosChunkRouting,
-    DelDxPack, TextNosArchive, TextNosRecordInput, write_text_nos_archive_bytes,
+    DelDxPack, TextNosArchive, write_text_nos_archive_bytes,
 };
 
 use crate::archive_convert::{
@@ -29,7 +29,7 @@ use crate::binary_preset::{
     resolve_binary_preset, resolve_zlib_profile,
 };
 use crate::cli::{ArchiveCommand, ArchiveType, ChunkingArg, CompressionArg};
-use crate::paths::{escape_archive_name, immediate_files, resolve_inputs, unescape_archive_name};
+use crate::paths::{immediate_files, resolve_inputs};
 use crate::sound_pack::{
     pack_sound_pack_dir as build_sound_pack_dir, sound_pack_manifest_exists, unpack_sound_pack,
 };
@@ -37,10 +37,9 @@ use crate::text_archive_convert::{
     TextArchiveOutputMode, convert_text_archive, resolve_text_archive_conversion,
 };
 use crate::text_archive_manifest::{
-    TEXT_ARCHIVE_MANIFEST_FILE, read_text_archive_version_date, text_archive_manifest_exists,
-    write_text_archive_manifest,
+    read_unpacked_text_archive, text_archive_manifest_exists, unpack_text_archive_dir,
 };
-use crate::text_payload::{packed_flag_for_text_record, payload_kind_label};
+use crate::text_payload::payload_kind_label;
 use crate::util::{duplicate_id_counts, fnv1a64, warn_duplicate_archive_ids};
 
 /// Dispatch an `archive` subcommand.
@@ -599,27 +598,7 @@ fn write_text_archive_records(
         "IDs are ambiguous for id-based lookup; files are written by archived name.",
     );
 
-    if let Some(record) = archive
-        .records()
-        .iter()
-        .find(|record| escape_archive_name(&record.name) == TEXT_ARCHIVE_MANIFEST_FILE)
-    {
-        anyhow::bail!(
-            "text record {:?} would overwrite the {TEXT_ARCHIVE_MANIFEST_FILE} manifest",
-            record.name
-        );
-    }
-
-    fs::create_dir_all(out)?;
-    let mut written = Vec::with_capacity(archive.records().len());
-    for record in archive.records() {
-        let relative_path = PathBuf::from(escape_archive_name(&record.name));
-        let path = out.join(&relative_path);
-        fs::write(&path, &record.payload)?;
-        written.push((record.id, relative_path));
-    }
-    write_text_archive_manifest(archive, out)?;
-    Ok(written)
+    unpack_text_archive_dir(archive, out)
 }
 
 /// Extract a DelDX sound pack into a manifest-backed directory.
@@ -631,31 +610,12 @@ fn unpack_sound_pack_archive(archive: &DelDxPack, out: &Path) -> anyhow::Result<
 
 /// Pack an unpacked text archive directory into a text archive.
 fn pack_text_archive_dir(dir: &Path, out: &Path) -> anyhow::Result<()> {
-    let version_date = read_text_archive_version_date(dir)?;
-    let mut records = Vec::new();
-    for path in immediate_files(dir)? {
-        let file_name = path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .ok_or_else(|| anyhow::anyhow!("invalid UTF-8 file name: {}", path.display()))?;
-        if file_name == TEXT_ARCHIVE_MANIFEST_FILE {
-            continue;
-        }
-        let name = unescape_archive_name(file_name)?;
-        let payload = fs::read(&path)?;
-        records.push(TextNosRecordInput {
-            packed_flag: packed_flag_for_text_record(&name),
-            name_bytes: name.as_bytes().to_vec(),
-            name,
-            payload,
-        });
-    }
-    records.sort_by_key(|record| record.name.to_lowercase());
-    let bytes = write_text_nos_archive_bytes(&records, version_date)?;
+    let unpacked = read_unpacked_text_archive(dir)?;
+    let bytes = write_text_nos_archive_bytes(&unpacked.records, &unpacked.options)?;
     fs::write(out, bytes)?;
     println!(
         "packed {} text records into {}",
-        records.len(),
+        unpacked.records.len(),
         out.display()
     );
     Ok(())
@@ -933,6 +893,7 @@ mod tests {
     use image::{GenericImageView, Rgba, RgbaImage};
     use taletool_archive::{
         BinaryNosArchiveWriteEntry, DELDX_PACK_HEADER_LEN, DelDxPackWriteOptions,
+        TextNosArchiveWriteOptions, TextNosRecordInput,
     };
     use taletool_ccinf::CCINF_HEADER;
     use taletool_effect::{
@@ -963,6 +924,7 @@ mod tests {
 
     use crate::sound_pack::SOUND_PACK_MANIFEST_FILE;
     use crate::sprite_file::SPRITE_MANIFEST_FILE;
+    use crate::text_archive_manifest::TEXT_ARCHIVE_MANIFEST_FILE;
     use crate::texture_file::TEXTURE_MANIFEST_FILE;
 
     use super::*;
@@ -1169,14 +1131,17 @@ mod tests {
     fn text_archive(archive_name: &str, records: Vec<(&str, i32, Vec<u8>)>) -> TextNosArchive {
         let records = records
             .into_iter()
-            .map(|(name, packed_flag, payload)| TextNosRecordInput {
+            .zip(1..)
+            .map(|((name, packed_flag, payload), id)| TextNosRecordInput {
+                id,
                 name: name.to_owned(),
                 name_bytes: name.as_bytes().to_vec(),
                 packed_flag,
                 payload,
             })
             .collect::<Vec<_>>();
-        let bytes = write_text_nos_archive_bytes(&records, None).unwrap();
+        let bytes =
+            write_text_nos_archive_bytes(&records, &TextNosArchiveWriteOptions::default()).unwrap();
         TextNosArchive::from_bytes(PathBuf::from(archive_name), bytes).unwrap()
     }
 
@@ -1746,6 +1711,24 @@ mod tests {
     }
 
     #[test]
+    fn json_conversion_reads_unpacked_records_as_plain_text() {
+        let root = temp_dir("plain-record-json");
+        fs::create_dir_all(&root).unwrap();
+        let archive = text_archive(
+            "NScliData_UK.NOS",
+            vec![("conststring.dat", 0, b"1\x0bOK\r\n2\x0bCancel".to_vec())],
+        );
+        let out = root.join("cli");
+
+        unpack_converted_archive_with_options(DetectedArchive::Text(archive), &out, None, false)
+            .unwrap();
+        let json: serde_json::Value =
+            serde_json::from_slice(&fs::read(out.join("conststring.json")).unwrap()).unwrap();
+        assert_eq!(json, json!([[1, "OK"], [2, "Cancel"]]));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn plain_text_conversion_has_no_semantic_warnings() {
         let root = temp_dir("convert-plain-text-no-warnings");
         fs::create_dir_all(&root).unwrap();
@@ -2054,9 +2037,9 @@ mod tests {
                 "both convert to",
             ),
             (
-                "nsetc-kind-conflict",
+                "nsetc-packed-taboo-reads-lst",
                 text_archive("NSetcData.NOS", vec![("TabooStr.lst", 1, etc_payload)]),
-                "requires a LST payload",
+                "LST payload",
             ),
             (
                 "renamed-empty",
@@ -2215,48 +2198,108 @@ mod tests {
         );
     }
 
+    fn text_record_input(
+        id: i32,
+        name_bytes: &[u8],
+        packed_flag: i32,
+        payload: &[u8],
+    ) -> TextNosRecordInput {
+        TextNosRecordInput {
+            id,
+            name: String::from_utf8_lossy(name_bytes).into_owned(),
+            name_bytes: name_bytes.to_vec(),
+            packed_flag,
+            payload: payload.to_vec(),
+        }
+    }
+
     #[test]
-    fn raw_text_round_trip_keeps_version_date_trailer() {
-        let root = temp_dir("text-version-date");
+    fn raw_text_unpack_and_pack_are_lossless() {
+        let root = temp_dir("text-lossless");
         let unpacked = root.join("unpacked");
         let repacked = root.join("NSgtdData.NOS");
         fs::create_dir_all(&root).unwrap();
-        let records = [TextNosRecordInput {
-            name: "Item.dat".to_owned(),
-            name_bytes: b"Item.dat".to_vec(),
-            packed_flag: 1,
-            payload: encode_dat_payload(b"encoded text").unwrap(),
-        }];
-        let original = write_text_nos_archive_bytes(&records, Some(45_567.5)).unwrap();
+        let records = [
+            text_record_input(77, b"b.dat", 0, b"plain\r\ntext"),
+            text_record_input(3, b"A.dat", 1, &encode_dat_payload(b"first").unwrap()),
+            text_record_input(9, b"a.dat", 1, &encode_dat_payload(b"second").unwrap()),
+            text_record_input(
+                4,
+                TEXT_ARCHIVE_MANIFEST_FILE.as_bytes(),
+                0,
+                b"not a manifest",
+            ),
+            text_record_input(5, &[0xb0, 0xa1, b'.', b'd', b'a', b't'], 1, b""),
+        ];
+        let original = write_text_nos_archive_bytes(
+            &records,
+            &TextNosArchiveWriteOptions {
+                trailing_data: vec![9, 9],
+                version_date: Some(45_567.5),
+            },
+        )
+        .unwrap();
         let archive =
             TextNosArchive::from_bytes(PathBuf::from("NSgtdData.NOS"), original.clone()).unwrap();
 
         unpack_text_archive(&archive, &unpacked).unwrap();
-        assert!(unpacked.join(TEXT_ARCHIVE_MANIFEST_FILE).is_file());
+        assert_eq!(
+            fs::read(unpacked.join("A.dat")).unwrap(),
+            records[1].payload
+        );
+        assert_eq!(
+            fs::read(unpacked.join("a__2.dat")).unwrap(),
+            records[2].payload
+        );
+        assert_eq!(
+            fs::read(unpacked.join("text-archive__2.json")).unwrap(),
+            b"not a manifest"
+        );
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(unpacked.join(TEXT_ARCHIVE_MANIFEST_FILE)).unwrap())
+                .unwrap();
+        assert_eq!(manifest["records"][4]["name_hex"], "b0a12e646174");
+
         pack_text_archive_dir(&unpacked, &repacked).unwrap();
         assert_eq!(fs::read(&repacked).unwrap(), original);
-
-        fs::remove_file(unpacked.join(TEXT_ARCHIVE_MANIFEST_FILE)).unwrap();
-        pack_text_archive_dir(&unpacked, &repacked).unwrap();
-        let rebuilt = TextNosArchive::open(&repacked).unwrap();
-        assert!(rebuilt.timestamp().is_none());
-        assert_eq!(rebuilt.records().len(), 1);
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn raw_text_unpack_rejects_record_named_like_manifest() {
-        let root = temp_dir("text-manifest-collision");
-        let archive = text_archive(
-            "NSgtdData.NOS",
-            vec![(TEXT_ARCHIVE_MANIFEST_FILE, 0, Vec::new())],
-        );
+    fn raw_text_pack_rejects_files_missing_from_the_manifest() {
+        let root = temp_dir("text-unlisted");
+        let unpacked = root.join("unpacked");
+        let archive = text_archive("NSgtdData.NOS", vec![("Item.dat", 1, Vec::new())]);
+        unpack_text_archive(&archive, &unpacked).unwrap();
+        fs::write(unpacked.join("Extra.dat"), b"extra").unwrap();
 
-        let error = unpack_text_archive(&archive, &root)
+        let error = pack_text_archive_dir(&unpacked, &root.join("out.NOS"))
             .unwrap_err()
             .to_string();
-        assert!(error.contains("would overwrite"), "{error}");
-        assert!(!root.exists());
+        assert!(error.contains("Extra.dat"), "{error}");
+        assert!(error.contains("not listed"), "{error}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn raw_text_pack_without_manifest_regenerates_metadata() {
+        let root = temp_dir("text-no-manifest");
+        let unpacked = root.join("unpacked");
+        let repacked = root.join("out.NOS");
+        fs::create_dir_all(&unpacked).unwrap();
+        fs::write(unpacked.join("b.dat"), b"b").unwrap();
+        fs::write(unpacked.join("A.lst"), b"a").unwrap();
+
+        pack_text_archive_dir(&unpacked, &repacked).unwrap();
+        let rebuilt = TextNosArchive::open(&repacked).unwrap();
+        let records = rebuilt
+            .records()
+            .iter()
+            .map(|record| (record.id, record.name.as_str(), record.packed_flag))
+            .collect::<Vec<_>>();
+        assert_eq!(records, [(1, "A.lst", 0), (2, "b.dat", 1)]);
+        assert!(rebuilt.timestamp().is_none());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

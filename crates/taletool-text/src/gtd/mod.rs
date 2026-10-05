@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::{
-    Result, TextEncoding, TextError, decode_dat_payload, encode_dat_payload, encode_legacy_text,
+    Result, TextEncoding, TextError, TextPayloadKind, decode_text_rows, encode_dat_payload,
+    encode_legacy_text,
 };
 
 pub use entity::*;
@@ -301,15 +302,19 @@ impl GtdDocument {
 }
 
 /// Decode a native payload selected by its source filename grammar.
+///
+/// `payload_kind` follows the record's packed flag; abuse lists are always
+/// read as LST payloads.
 pub fn decode_gtd_document(
     kind: GtdFileKind,
     payload: &[u8],
+    payload_kind: TextPayloadKind,
     encoding: Option<TextEncoding>,
 ) -> Result<ParsedGtdDocument> {
     let encoding = encoding.unwrap_or_else(|| kind.default_encoding());
     let (data, warnings) = match kind {
         GtdFileKind::NosMall(locale) => {
-            let parsed = decode_nos_mall(payload, locale, encoding)?;
+            let parsed = decode_nos_mall(payload, payload_kind, locale, encoding)?;
             (GtdDocumentData::NosMall(parsed.document), parsed.warnings)
         }
         GtdFileKind::Abuse(locale) => {
@@ -317,7 +322,7 @@ pub fn decode_gtd_document(
             (GtdDocumentData::Abuse(parsed.document), parsed.warnings)
         }
         _ => {
-            let decoded = decode_dat_payload(payload)?;
+            let decoded = decode_text_rows(payload, payload_kind)?;
             let text = super::decode_legacy_text(&decoded, encoding)?;
             match kind {
                 GtdFileKind::ActDescription => {
@@ -601,7 +606,7 @@ mod tests {
         };
         let decode = |text: String| {
             let payload = encode_dat_payload(text.as_bytes()).unwrap();
-            decode_gtd_document(GtdFileKind::Card, &payload, None)
+            decode_gtd_document(GtdFileKind::Card, &payload, TextPayloadKind::Dat, None)
                 .unwrap()
                 .document
         };
@@ -618,7 +623,7 @@ mod tests {
 
             let payload = encode_gtd_document(GtdFileKind::Card, &document, None).unwrap();
             assert_eq!(
-                decode_gtd_document(GtdFileKind::Card, &payload, None)
+                decode_gtd_document(GtdFileKind::Card, &payload, TextPayloadKind::Dat, None)
                     .unwrap()
                     .document,
                 document

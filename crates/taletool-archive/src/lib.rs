@@ -29,5 +29,5 @@ pub use deldx::{
 };
 pub use text::{
     TextNosArchive, TextNosArchiveError, TextNosArchiveResult, TextNosArchiveTimestamp,
-    TextNosRecord, TextNosRecordInput, write_text_nos_archive_bytes,
+    TextNosArchiveWriteOptions, TextNosRecord, TextNosRecordInput, write_text_nos_archive_bytes,
 };
