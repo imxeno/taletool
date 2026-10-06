@@ -1729,6 +1729,55 @@ mod tests {
     }
 
     #[test]
+    fn cn_archives_convert_with_gbk() {
+        let root = temp_dir("cn-gbk");
+        fs::create_dir_all(&root).unwrap();
+
+        let language = LanguageTable(vec![LanguageEntry(
+            "zts1e".to_owned(),
+            "简体中文".to_owned(),
+        )]);
+        let lang = text_archive(
+            "NSlangData_CN.NOS",
+            vec![(
+                "_code_CN_Item.txt",
+                1,
+                encode_language_table(&language, TextEncoding::Gbk).unwrap(),
+            )],
+        );
+        let lang_out = root.join("lang");
+        unpack_converted_archive(DetectedArchive::Text(lang), &lang_out).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<LanguageTable>(
+                &fs::read(lang_out.join("_code_CN_Item.json")).unwrap()
+            )
+            .unwrap(),
+            language
+        );
+
+        let constants = ConstStringTable(vec![ConstStringEntry(1, "确定".to_owned())]);
+        let cli = text_archive(
+            "NScliData_CN.NOS",
+            vec![(
+                "conststring.dat",
+                1,
+                encode_const_string_table(&constants, TextEncoding::Gbk).unwrap(),
+            )],
+        );
+        let cli_out = root.join("cli");
+        unpack_converted_archive(DetectedArchive::Text(cli), &cli_out).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<ConstStringTable>(
+                &fs::read(cli_out.join("conststring.json")).unwrap()
+            )
+            .unwrap(),
+            constants
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn plain_text_conversion_has_no_semantic_warnings() {
         let root = temp_dir("convert-plain-text-no-warnings");
         fs::create_dir_all(&root).unwrap();

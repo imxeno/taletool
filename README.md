@@ -456,8 +456,9 @@ The recognized core filenames are `act_desc.dat`, `BCard.dat`, `Card.dat`,
 `Item.dat`, `monster.dat`, `npctalk.dat`, `Skill.dat`, `quest.dat`,
 `qstprize.dat`, `tutorial.dat`, `shoptype.dat`, `MapIDData.dat`,
 `MapPointData.dat`, `qstnpc.dat`, `team.dat`, and `fish.dat`. Locale records use
-`<locale>_nosmall.dat` and `<locale>_abuse.lst` for `cz`, `de`, `es`, `fr`,
-`gsp`, `hk`, `in`, `it`, `jp`, `kr`, `my`, `pl`, `ru`, `tr`, `tw`, and `uk`.
+`<locale>_nosmall.dat` and `<locale>_abuse.lst` for `cn`, `cz`, `de`, `es`,
+`fr`, `gsp`, `hk`, `in`, `it`, `jp`, `kr`, `my`, `pl`, `ru`, `tr`, `tw`, and
+`uk`.
 
 ```console
 taletool text unpack work/lang/_code_uk_Item.txt --out work/Item.json --json
@@ -491,12 +492,13 @@ is inferred as follows:
 | `tr`                                            | Windows-1254 |
 | `hk`, `tw`                                      | Big5         |
 | `jp`                                            | Shift_JIS    |
+| `cn`                                            | GBK          |
 
 Use `--encoding` for an unknown or renamed locale. `cli` is inferred from
 `conststring.dat` but always requires `--encoding`. `etc` is inferred from
 `MiniGame6WordData.dat` and `TabooStr.lst`; it defaults to EUC-KR and accepts an
 encoding override. Accepted labels are `big5`,
-`euc-kr`/`euckr`/`windows-949`/`cp949`,
+`euc-kr`/`euckr`/`windows-949`/`cp949`, `gbk`/`windows-936`/`cp936`,
 `shift-jis`/`shiftjis`/`sjis`/`windows-932`/`cp932`, and `windows-1250` through
 `windows-1254` (or the corresponding `cp1250`, `cp1251`, `cp1252`, and `cp1254`
 aliases).

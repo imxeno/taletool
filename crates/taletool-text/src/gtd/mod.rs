@@ -20,6 +20,7 @@ pub use structured::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GtdLocale {
+    Cn,
     Cz,
     De,
     Es,
@@ -119,6 +120,7 @@ impl GtdFileKind {
             Some(GtdLocale::Tr) => TextEncoding::Windows1254,
             Some(GtdLocale::Hk | GtdLocale::Tw) => TextEncoding::Big5,
             Some(GtdLocale::Jp) => TextEncoding::ShiftJis,
+            Some(GtdLocale::Cn) => TextEncoding::Gbk,
             Some(GtdLocale::Kr) | None => TextEncoding::EucKr,
         }
     }
@@ -150,6 +152,7 @@ impl GtdFileKind {
 impl GtdLocale {
     pub(crate) const fn code(self) -> &'static str {
         match self {
+            Self::Cn => "cn",
             Self::Cz => "cz",
             Self::De => "de",
             Self::Es => "es",
@@ -171,6 +174,7 @@ impl GtdLocale {
 
     pub(crate) fn for_code(code: &str) -> Option<Self> {
         match code.to_ascii_lowercase().as_str() {
+            "cn" => Some(Self::Cn),
             "cz" => Some(Self::Cz),
             "de" => Some(Self::De),
             "es" => Some(Self::Es),
@@ -542,8 +546,8 @@ mod tests {
         );
 
         let locales = [
-            "cz", "de", "es", "fr", "gsp", "hk", "in", "it", "jp", "kr", "my", "pl", "ru", "tr",
-            "tw", "uk",
+            "cn", "cz", "de", "es", "fr", "gsp", "hk", "in", "it", "jp", "kr", "my", "pl", "ru",
+            "tr", "tw", "uk",
         ];
         for locale in locales {
             assert!(GtdFileKind::for_path(Path::new(&format!("{locale}_nosmall.dat"))).is_some());
@@ -578,6 +582,15 @@ mod tests {
                     .unwrap()
                     .default_encoding(),
                 TextEncoding::Windows1252,
+                "{name}"
+            );
+        }
+        for name in ["CN_nosmall.dat", "CN_abuse.lst"] {
+            assert_eq!(
+                GtdFileKind::for_path(Path::new(name))
+                    .unwrap()
+                    .default_encoding(),
+                TextEncoding::Gbk,
                 "{name}"
             );
         }

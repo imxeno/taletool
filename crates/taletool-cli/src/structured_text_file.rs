@@ -203,6 +203,7 @@ pub(crate) fn encoding_for_locale(locale: &str) -> Option<TextEncoding> {
         "hk" | "tw" => Some(TextEncoding::Big5),
         "jp" => Some(TextEncoding::ShiftJis),
         "kr" => Some(TextEncoding::EucKr),
+        "cn" => Some(TextEncoding::Gbk),
         _ => None,
     }
 }

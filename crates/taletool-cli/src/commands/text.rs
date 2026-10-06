@@ -189,6 +189,8 @@ mod tests {
     #[test]
     fn infers_supported_language_encodings() {
         let cases = [
+            ("_code_cn_Item.txt", TextEncoding::Gbk),
+            ("_code_CN_Item.txt", TextEncoding::Gbk),
             ("_code_cz_Item.txt", TextEncoding::Windows1250),
             ("_code_de_Item.txt", TextEncoding::Windows1252),
             ("_code_gsp_Item.txt", TextEncoding::Windows1252),
