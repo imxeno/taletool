@@ -23,10 +23,6 @@ depends on the locale/archive the record came from, so localized files should be
 decoded with the matching client locale in mind. For `_code_<locale>_*.txt`
 records, the locale code in the record name identifies the expected encoding.
 
-NosTale reads these bytes in the ANSI code page of the Windows locale it selects
-for its region. German and Italian clients select `de-DE` and `it-IT`, which
-both use Windows-1252.
-
 Known locale encodings:
 
 | Suffix | Locale     | Encoding     |
