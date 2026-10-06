@@ -104,14 +104,14 @@ impl GtdFileKind {
             _ => None,
         };
         match locale {
-            Some(GtdLocale::Cz | GtdLocale::De | GtdLocale::It | GtdLocale::Pl) => {
-                TextEncoding::Windows1250
-            }
+            Some(GtdLocale::Cz | GtdLocale::Pl) => TextEncoding::Windows1250,
             Some(
-                GtdLocale::Es
+                GtdLocale::De
+                | GtdLocale::Es
                 | GtdLocale::Fr
                 | GtdLocale::Gsp
                 | GtdLocale::In
+                | GtdLocale::It
                 | GtdLocale::My
                 | GtdLocale::Uk,
             ) => TextEncoding::Windows1252,
@@ -567,6 +567,29 @@ mod tests {
                 .default_encoding(),
             TextEncoding::Windows1252
         );
+        for name in [
+            "de_nosmall.dat",
+            "de_abuse.lst",
+            "it_nosmall.dat",
+            "it_abuse.lst",
+        ] {
+            assert_eq!(
+                GtdFileKind::for_path(Path::new(name))
+                    .unwrap()
+                    .default_encoding(),
+                TextEncoding::Windows1252,
+                "{name}"
+            );
+        }
+        for name in ["cz_nosmall.dat", "pl_abuse.lst"] {
+            assert_eq!(
+                GtdFileKind::for_path(Path::new(name))
+                    .unwrap()
+                    .default_encoding(),
+                TextEncoding::Windows1250,
+                "{name}"
+            );
+        }
     }
 
     #[test]

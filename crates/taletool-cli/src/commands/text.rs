@@ -13,7 +13,9 @@ use taletool_text::{
     gtd::{GtdDocument, GtdFileKind, encode_gtd_document},
 };
 #[cfg(test)]
-use taletool_text::{MalformedConstStringRowKind, TextEncoding, TextPayloadKind};
+use taletool_text::{
+    LanguageEntry, MalformedConstStringRowKind, TextEncoding, TextPayloadKind, decode_dat_payload,
+};
 
 use crate::cli::{TextCommand, TextFormatArg};
 use crate::structured_text_file::{
@@ -188,10 +190,13 @@ mod tests {
     fn infers_supported_language_encodings() {
         let cases = [
             ("_code_cz_Item.txt", TextEncoding::Windows1250),
+            ("_code_de_Item.txt", TextEncoding::Windows1252),
             ("_code_gsp_Item.txt", TextEncoding::Windows1252),
             ("_code_in_Item.txt", TextEncoding::Windows1252),
+            ("_code_it_Item.txt", TextEncoding::Windows1252),
             ("_code_jp_Item.txt", TextEncoding::ShiftJis),
             ("_code_kr_Item.txt", TextEncoding::EucKr),
+            ("_code_pl_Item.txt", TextEncoding::Windows1250),
             ("_code_ru_Item.txt", TextEncoding::Windows1251),
             ("_code_tr_Item.txt", TextEncoding::Windows1254),
             ("_code_tw_Item.txt", TextEncoding::Big5),
@@ -200,6 +205,34 @@ mod tests {
             assert_eq!(
                 resolve_language_encoding(Path::new(name), None).unwrap(),
                 expected
+            );
+        }
+    }
+
+    #[test]
+    fn german_and_italian_language_text_uses_the_client_code_page() {
+        let cases = [
+            (
+                "_code_de_Item.txt",
+                "Crème brûlée",
+                &b"Cr\xe8me br\xfbl\xe9e"[..],
+            ),
+            (
+                "_code_it_Item.txt",
+                "città più così",
+                &b"citt\xe0 pi\xf9 cos\xec"[..],
+            ),
+        ];
+        for (name, value, expected) in cases {
+            let encoding = resolve_language_encoding(Path::new(name), None).unwrap();
+            let table = LanguageTable(vec![LanguageEntry("zts1e".to_owned(), value.to_owned())]);
+            let payload = encode_language_table(&table, encoding).unwrap();
+            let decoded = decode_dat_payload(&payload).unwrap();
+            assert!(
+                decoded
+                    .windows(expected.len())
+                    .any(|bytes| bytes == expected),
+                "{name}: {decoded:02x?}"
             );
         }
     }
