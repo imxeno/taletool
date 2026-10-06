@@ -196,8 +196,8 @@ pub(crate) fn resolve_etc_encoding(override_encoding: Option<TextEncoding>) -> T
 
 pub(crate) fn encoding_for_locale(locale: &str) -> Option<TextEncoding> {
     match locale.to_ascii_lowercase().as_str() {
-        "cz" | "de" | "it" | "pl" => Some(TextEncoding::Windows1250),
-        "es" | "fr" | "gsp" | "in" | "my" | "uk" => Some(TextEncoding::Windows1252),
+        "cz" | "pl" => Some(TextEncoding::Windows1250),
+        "de" | "es" | "fr" | "gsp" | "in" | "it" | "my" | "uk" => Some(TextEncoding::Windows1252),
         "ru" => Some(TextEncoding::Windows1251),
         "tr" => Some(TextEncoding::Windows1254),
         "hk" | "tw" => Some(TextEncoding::Big5),

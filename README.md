@@ -483,14 +483,14 @@ taletool text pack work/Item.json --out work/gtd/Item.dat --json
 `lang` is inferred from native `_code_<locale>_<table>.txt` names. Its encoding
 is inferred as follows:
 
-| Locales                             | Encoding     |
-| ----------------------------------- | ------------ |
-| `cz`, `de`, `it`, `pl`              | Windows-1250 |
-| `ru`                                | Windows-1251 |
-| `es`, `fr`, `gsp`, `in`, `my`, `uk` | Windows-1252 |
-| `tr`                                | Windows-1254 |
-| `hk`, `tw`                          | Big5         |
-| `jp`                                | Shift_JIS    |
+| Locales                                         | Encoding     |
+| ----------------------------------------------- | ------------ |
+| `cz`, `pl`                                      | Windows-1250 |
+| `ru`                                            | Windows-1251 |
+| `de`, `es`, `fr`, `gsp`, `in`, `it`, `my`, `uk` | Windows-1252 |
+| `tr`                                            | Windows-1254 |
+| `hk`, `tw`                                      | Big5         |
+| `jp`                                            | Shift_JIS    |
 
 Use `--encoding` for an unknown or renamed locale. `cli` is inferred from
 `conststring.dat` but always requires `--encoding`. `etc` is inferred from

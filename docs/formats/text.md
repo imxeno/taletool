@@ -28,13 +28,13 @@ Known locale encodings:
 | Suffix | Locale     | Encoding     |
 | ------ | ---------- | ------------ |
 | `CZ`   | Czech      | Windows-1250 |
-| `DE`   | German     | Windows-1250 |
+| `DE`   | German     | Windows-1252 |
 | `ES`   | Spanish    | Windows-1252 |
 | `FR`   | French     | Windows-1252 |
 | `GSP`  | Spanish    | Windows-1252 |
 | `HK`   | Hong Kong  | Big5         |
 | `IN`   | Indonesian | Windows-1252 |
-| `IT`   | Italian    | Windows-1250 |
+| `IT`   | Italian    | Windows-1252 |
 | `JP`   | Japanese   | Shift_JIS    |
 | `KR`   | Korean     | EUC-KR       |
 | `MY`   | Malay      | Windows-1252 |
