@@ -27,6 +27,7 @@ Known locale encodings:
 
 | Suffix | Locale     | Encoding     |
 | ------ | ---------- | ------------ |
+| `CN`   | Chinese    | GBK          |
 | `CZ`   | Czech      | Windows-1250 |
 | `DE`   | German     | Windows-1252 |
 | `ES`   | Spanish    | Windows-1252 |
