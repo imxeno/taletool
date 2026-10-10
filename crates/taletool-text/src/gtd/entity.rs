@@ -224,7 +224,7 @@ pub fn decode_basic_card(text: &str) -> Result<ParsedGtd<BasicCardDocument>> {
                         "repeated BCard NAME row; the client frees the earlier name, so its result is unreliable",
                     );
                 }
-                set_basic_card_text(&mut entry.name, tagged.text());
+                set_text(&mut entry.name, tagged.text());
             }
             "DESC" => {
                 // The client reads only the first five values, and a
@@ -282,7 +282,7 @@ fn read_basic_card_text(
             if tag != tagged.tag {
                 rows.renamed(row, tagged.tag, &tag);
             }
-            set_basic_card_text(slot.text_mut(entry), text);
+            set_text(slot.text_mut(entry), text);
         }
         None if is_ignored_slot_tag(tagged.tag) => {
             entry.ignored_rows.push(BasicCardIgnoredRow {
@@ -290,7 +290,13 @@ fn read_basic_card_text(
                 text: text.to_owned(),
             });
         }
-        None => rows.warn(row, "unrecognized BCard row"),
+        None => rows.warn(
+            row,
+            format!(
+                "BCard {} row is dropped because its slot index is not plain decimal",
+                tagged.tag
+            ),
+        ),
     }
 }
 
@@ -308,13 +314,6 @@ fn is_ignored_slot_tag(tag: &str) -> bool {
         false
     };
     numbered && BasicCardSlot::parse(tag).is_none()
-}
-
-/// The client keeps earlier text when a repeated row has none.
-fn set_basic_card_text(field: &mut String, text: &str) {
-    if !text.is_empty() {
-        *field = text.to_owned();
-    }
 }
 
 pub fn encode_basic_card(document: &BasicCardDocument) -> Result<String> {
@@ -467,8 +466,8 @@ pub fn decode_card(text: &str) -> Result<ParsedGtd<CardDocument>> {
                     continue;
                 };
                 match tag {
-                    "NAME" => entry.name = tagged.text().to_owned(),
-                    "DESC" => entry.description = tagged.text().to_owned(),
+                    "NAME" => set_text(&mut entry.name, tagged.text()),
+                    "DESC" => set_text(&mut entry.description, tagged.text()),
                     "ICON" => entry.icon = Some(rows.scalar(row, tag, &tagged, -1)),
                     _ => {
                         let Some(values) = rows.values(row, tag, &tagged) else {
@@ -587,6 +586,62 @@ fn item_row(tag: &str) -> Option<&'static str> {
     })
 }
 
+/// Whether an INDEX row adds the item to one of the client's four type
+/// lists. The client keeps the type in 16 bits and maps 8, 9, and 10 to 0,
+/// 1, and 2.
+fn item_index_lists_type(values: &[i32]) -> bool {
+    let item_type = match values.first().map_or(-1, |value| *value as i16) {
+        8 => 0,
+        9 => 1,
+        10 => 2,
+        item_type => item_type,
+    };
+    (0..4).contains(&item_type)
+}
+
+/// Counts the signed-item labels the client appends to an Item name. Each
+/// FLAG row with the signed-item flag appends one, and a NAME row with text
+/// replaces the name. Packing writes NAME before a single FLAG row, so the
+/// packed name has at most the last FLAG row's label.
+#[derive(Default)]
+struct SignedLabels {
+    /// Labels appended after the last NAME row with text.
+    appended: usize,
+    /// Whether the last FLAG row sets the signed-item flag.
+    last_flag: bool,
+    /// The last FLAG or NAME row that changed the labels.
+    row: usize,
+}
+
+impl SignedLabels {
+    fn flag(&mut self, row: usize, signed: bool) {
+        self.appended += usize::from(signed);
+        self.last_flag = signed;
+        self.row = row;
+    }
+
+    fn name(&mut self, row: usize) {
+        self.appended = 0;
+        self.row = row;
+    }
+
+    /// Reports an entry whose packed name would have a different number of
+    /// labels, and starts counting for the next entry.
+    fn finish(&mut self, rows: &mut RowReader) {
+        let packed = usize::from(self.last_flag);
+        if self.appended != packed {
+            rows.warn(
+                self.row,
+                format!(
+                    "Item name has {} signed-item labels in the client but {packed} after packing, which writes NAME before one FLAG row",
+                    self.appended
+                ),
+            );
+        }
+        *self = Self::default();
+    }
+}
+
 /// The client keeps Item and Skill description counts in a 16-bit word and
 /// reads description rows only when its signed value is positive.
 fn description_count_is_positive(count: i32) -> bool {
@@ -598,7 +653,9 @@ pub fn decode_item(text: &str) -> Result<ParsedGtd<ItemDocument>> {
     let mut rows = RowReader::new("Item");
     let mut entries = Vec::new();
     let mut current: Option<ItemEntry> = None;
-    let mut signed_flag = false;
+    let mut labels = SignedLabels::default();
+    // Whether an earlier INDEX row of the entry added it to a type list.
+    let mut listed = false;
     // The client sets its append limit only for a description whose first
     // row is not END, and later scans reuse it.
     let mut append_limit = 0;
@@ -615,12 +672,13 @@ pub fn decode_item(text: &str) -> Result<ParsedGtd<ItemDocument>> {
                 if !exact || !rest.is_empty() {
                     rows.malformed(row, tag, &[vnum, price]);
                 }
+                labels.finish(&mut rows);
+                listed = false;
                 entries.extend(current.replace(ItemEntry {
                     vnum,
                     price,
                     ..ItemEntry::default()
                 }));
-                signed_flag = false;
             }
             "LINEDESC" => {
                 let ([count], exact, rest) = tagged.leading([0]);
@@ -670,23 +728,30 @@ pub fn decode_item(text: &str) -> Result<ParsedGtd<ItemDocument>> {
                     continue;
                 };
                 if tag == "NAME" {
-                    if signed_flag {
-                        rows.warn(
-                            row,
-                            "Item NAME follows a FLAG row with the signed-item flag; packing writes NAME first, so the client appends the signed-item label",
-                        );
+                    if !tagged.text().is_empty() {
+                        labels.name(row);
                     }
-                    entry.name = tagged.text().to_owned();
+                    set_text(&mut entry.name, tagged.text());
                     continue;
                 }
                 let Some(values) = rows.values(row, tag, &tagged) else {
                     continue;
                 };
                 match tag {
-                    "INDEX" => entry.index = Some(values),
+                    "INDEX" => {
+                        if listed {
+                            rows.warn(
+                                row,
+                                "repeated Item INDEX row; the client adds the item to a type list for each INDEX row, but packing writes only the last one",
+                            );
+                        }
+                        listed |= item_index_lists_type(&values);
+                        entry.index = Some(values);
+                    }
                     "TYPE" => entry.item_type = Some(values),
                     "FLAG" => {
-                        signed_flag = values.get(ITEM_SIGNED_FLAG).is_some_and(|flag| *flag != 0);
+                        let signed = values.get(ITEM_SIGNED_FLAG).is_some_and(|flag| *flag != 0);
+                        labels.flag(row, signed);
                         entry.flags = Some(values);
                     }
                     "DATA" => entry.data = Some(values),
@@ -696,6 +761,7 @@ pub fn decode_item(text: &str) -> Result<ParsedGtd<ItemDocument>> {
             }
         }
     }
+    labels.finish(&mut rows);
     entries.extend(current);
     Ok(ParsedGtd {
         document: ItemDocument { entries },
@@ -765,13 +831,9 @@ fn push_item_description(out: &mut String, e: &ItemEntry) -> Result<()> {
         if *line == "END" {
             return invalid("Item description contains its END boundary");
         }
-        if index > 0 && line.starts_with('#') {
-            return invalid("Item description continuation rows cannot start with '#'");
-        }
     }
     push_values(out, "LINEDESC", &[count]);
-    out.push_str(description);
-    out.push('\n');
+    push_description_rows(out, &lines);
     Ok(())
 }
 
@@ -894,7 +956,7 @@ pub fn decode_monster(text: &str) -> Result<ParsedGtd<MonsterDocument>> {
             continue;
         };
         if tag == "NAME" {
-            entry.name = tagged.text().to_owned();
+            set_text(&mut entry.name, tagged.text());
             continue;
         }
         let Some(values) = rows.values(row, tag, &tagged) else {
@@ -955,9 +1017,43 @@ pub fn encode_monster(d: &MonsterDocument) -> Result<String> {
 #[serde(deny_unknown_fields)]
 pub struct SkillDescription {
     pub declared_count: i32,
-    /// Rows read after a positive count, or at most one line holding the text
-    /// after a non-positive count on the `Z_DESC` row itself.
+    /// Rows read after a positive count.
     pub lines: Vec<String>,
+    /// Text after a non-positive count on the `Z_DESC` row itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_text: Option<String>,
+}
+
+impl SkillDescription {
+    /// The description text the client loads, with rows joined by line feeds.
+    fn text(&self) -> String {
+        if description_count_is_positive(self.declared_count) {
+            self.lines.join("\n")
+        } else {
+            self.inline_text.clone().unwrap_or_default()
+        }
+    }
+
+    /// This description's text under another count, if a single `Z_DESC`
+    /// row with that count can carry it.
+    fn with_count(&self, declared_count: i32) -> Option<Self> {
+        let text = self.text();
+        if description_count_is_positive(declared_count) {
+            // Rows after a positive count are trimmed.
+            let lines = text.split('\n').map(str::to_owned).collect::<Vec<_>>();
+            lines.iter().all(|line| trim(line) == line).then_some(Self {
+                declared_count,
+                lines,
+                inline_text: None,
+            })
+        } else {
+            (!text.contains('\n')).then_some(Self {
+                declared_count,
+                lines: Vec::new(),
+                inline_text: Some(text),
+            })
+        }
+    }
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1031,14 +1127,17 @@ pub fn decode_skill(text: &str) -> Result<ParsedGtd<SkillDocument>> {
                 if !exact {
                     rows.malformed(row, tag, &[count]);
                 }
-                let mut description = Vec::new();
+                let mut description = SkillDescription {
+                    declared_count: count,
+                    ..SkillDescription::default()
+                };
                 if description_count_is_positive(count) {
                     if !rest.is_empty() {
                         rows.warn(row, "text after a positive Skill Z_DESC count is ignored");
                     }
                     if let Some(first) = lines.get(next) {
                         next += 1;
-                        description.push(trim(first).to_owned());
+                        description.lines.push(trim(first).to_owned());
                         for _ in 0..100 {
                             let Some(line) = lines.get(next) else {
                                 break;
@@ -1047,17 +1146,14 @@ pub fn decode_skill(text: &str) -> Result<ParsedGtd<SkillDocument>> {
                                 break;
                             }
                             next += 1;
-                            description.push(trim(line).to_owned());
+                            description.lines.push(trim(line).to_owned());
                         }
                     }
                 } else if !rest.is_empty() {
-                    description.push(rest.to_owned());
+                    description.inline_text = Some(rest.to_owned());
                 }
                 if let Some(entry) = rows.entry(row, &mut current) {
-                    entry.description = SkillDescription {
-                        declared_count: count,
-                        lines: description,
-                    };
+                    set_skill_description(&mut rows, row, &mut entry.description, description);
                 }
             }
             _ => {
@@ -1065,7 +1161,7 @@ pub fn decode_skill(text: &str) -> Result<ParsedGtd<SkillDocument>> {
                     continue;
                 };
                 if tag == "NAME" {
-                    entry.name = tagged.text().to_owned();
+                    set_text(&mut entry.name, tagged.text());
                     continue;
                 }
                 let Some(values) = rows.values(row, tag, &tagged) else {
@@ -1124,27 +1220,65 @@ pub fn encode_skill(d: &SkillDocument) -> Result<String> {
     Ok(out)
 }
 
+/// Stores a `Z_DESC` row's description. The client always takes the new
+/// count, but keeps the earlier text when the row has none.
+fn set_skill_description(
+    rows: &mut RowReader,
+    row: usize,
+    field: &mut SkillDescription,
+    description: SkillDescription,
+) {
+    if !description.text().is_empty() || field.text().is_empty() {
+        *field = description;
+        return;
+    }
+    match field.with_count(description.declared_count) {
+        Some(kept) => *field = kept,
+        None => {
+            rows.warn(
+                row,
+                format!(
+                    "Skill Z_DESC {} row has no text, so the client keeps the earlier description, which one Z_DESC row with that count cannot hold; the earlier description is dropped",
+                    description.declared_count
+                ),
+            );
+            *field = description;
+        }
+    }
+}
+
 fn push_skill_description(out: &mut String, e: &SkillEntry) -> Result<()> {
     let count = e.description.declared_count;
     let lines = &e.description.lines;
+    let inline_text = e
+        .description
+        .inline_text
+        .as_deref()
+        .filter(|text| !text.is_empty());
     if !description_count_is_positive(count) {
-        match lines.as_slice() {
-            [] => push_values(out, "Z_DESC", &[count]),
-            [text] if text.is_empty() => push_values(out, "Z_DESC", &[count]),
-            [text] => {
-                check_rest_text(text, &format!("Skill entry {} Z_DESC text", e.vnum))?;
+        // Blank rows after a non-positive count change nothing in the client.
+        if lines.iter().any(|line| !line.is_empty()) {
+            return invalid(format!(
+                "Skill entry {} has description lines, but its Z_DESC count {count} is not positive; the client reads only inline_text from the Z_DESC row",
+                e.vnum
+            ));
+        }
+        match inline_text {
+            Some(text) => {
+                check_rest_text(text, &format!("Skill entry {} inline_text", e.vnum))?;
                 push_text(out, "Z_DESC", &format!("{count}\t{text}"));
             }
-            _ => {
-                return invalid(format!(
-                    "Skill entry {} Z_DESC count {count} is not positive, so its description is one line on the Z_DESC row",
-                    e.vnum
-                ));
-            }
+            None => push_values(out, "Z_DESC", &[count]),
         }
         return Ok(());
     }
 
+    if inline_text.is_some() {
+        return invalid(format!(
+            "Skill entry {} has inline_text, but its Z_DESC count {count} is positive; the client reads only the rows after Z_DESC",
+            e.vnum
+        ));
+    }
     if lines.is_empty() {
         return invalid("Skill Z_DESC with a positive count requires a description row");
     }
@@ -1156,16 +1290,32 @@ fn push_skill_description(out: &mut String, e: &SkillEntry) -> Result<()> {
             line,
             &format!("Skill entry {} Z_DESC row {}", e.vnum, index + 1),
         )?;
-        if index > 0 && line.starts_with('#') {
-            return invalid("Skill Z_DESC continuation rows cannot start with '#'");
-        }
     }
     push_values(out, "Z_DESC", &[count]);
-    for line in lines {
-        out.push_str(line);
-        out.push('\n')
-    }
+    push_description_rows(out, lines);
     Ok(())
+}
+
+/// Stores a text row's text. The client keeps the earlier text when a
+/// repeated row has none.
+fn set_text(field: &mut String, text: &str) {
+    if !text.is_empty() {
+        *field = text.to_owned();
+    }
+}
+
+/// Writes the rows after a positive description count. A later row
+/// beginning with `#` would end the client's scan, so it gets a leading
+/// space that the client trims.
+fn push_description_rows(out: &mut String, lines: &[impl AsRef<str>]) {
+    for (index, line) in lines.iter().enumerate() {
+        let line = line.as_ref();
+        if index > 0 && line.starts_with('#') {
+            out.push(' ');
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
 }
 
 fn push_optional_values(out: &mut String, tag: &str, values: &Option<Vec<i32>>) {
@@ -1339,6 +1489,7 @@ mod tests {
         let source = concat!(
             "SUBJ1 orphan\nVALUE 3 x\nIMAGE 7\nNOTE  spaced  name\nDATA 1 x 3\n",
             "SUBJ01 one\nSXYZ2 two\nL0003-2 negative\nSUBJ\nLIST-1 bad\nFOO bar\n",
+            "SUBJ 0\tspaced\n",
         );
         let parsed = decode_basic_card(source).unwrap();
 
@@ -1355,9 +1506,19 @@ mod tests {
                 warning(6, "BCard tag SUBJ01 is read as SUBJ1"),
                 warning(7, "BCard tag SXYZ2 is read as SUBJ2"),
                 warning(8, "BCard tag L0003-2 is read as LIST3-2"),
-                warning(9, "unrecognized BCard row"),
-                warning(10, "unrecognized BCard row"),
+                warning(
+                    9,
+                    "BCard SUBJ row is dropped because its slot index is not plain decimal"
+                ),
+                warning(
+                    10,
+                    "BCard LIST-1 row is dropped because its slot index is not plain decimal"
+                ),
                 warning(11, "unrecognized BCard row"),
+                warning(
+                    12,
+                    "BCard SUBJ 0 row is dropped because its slot index is not plain decimal"
+                ),
             ]
         );
         let entry = &parsed.document.entries[0];
@@ -1829,18 +1990,185 @@ mod tests {
     }
 
     #[test]
-    fn item_name_after_a_signed_flag_is_reported() {
-        let mut flags = [0; 25];
-        flags[ITEM_SIGNED_FLAG] = 1;
-        let flags = flags
+    fn item_signed_labels_are_reported_when_packing_changes_their_count() {
+        let flag = |signed: bool| {
+            let mut flags = [0; 25];
+            flags[ITEM_SIGNED_FLAG] = i32::from(signed);
+            let flags = flags.map(|flag| flag.to_string()).join(" ");
+            format!("FLAG {flags}\n")
+        };
+        let (signed, unsigned) = (flag(true), flag(false));
+        let labels = |client: usize, packed: usize| {
+            format!(
+                "Item name has {client} signed-item labels in the client but {packed} after packing, which writes NAME before one FLAG row"
+            )
+        };
+        let source = [
+            format!("VNUM 1 0\nNAME one\n{signed}NAME late\n"),
+            format!("VNUM 2 0\nNAME two\n{signed}{signed}"),
+            format!("VNUM 3 0\nNAME three\n{signed}{unsigned}"),
+            format!("VNUM 4 0\nNAME four\n{unsigned}{signed}"),
+            format!("VNUM 5 0\n{signed}NAME five\n{signed}"),
+            format!("VNUM 6 0\nNAME six\n{signed}NAME\n"),
+        ]
+        .concat();
+        let parsed = decode_item(&source).unwrap();
+
+        assert_eq!(
+            parsed.warnings,
+            [
+                warning(4, labels(0, 1)),
+                warning(8, labels(2, 1)),
+                warning(12, labels(1, 0)),
+            ]
+        );
+        let names = parsed
+            .document
+            .entries
             .iter()
-            .map(i32::to_string)
-            .collect::<Vec<_>>()
-            .join(" ");
-        let parsed = decode_item(&format!("VNUM 1 0\nFLAG {flags}\nNAME late\n")).unwrap();
-        assert_eq!(parsed.warnings.len(), 1);
-        assert_eq!(parsed.warnings[0].row, 3);
-        assert_eq!(parsed.document.entries[0].name, "late");
+            .map(|entry| entry.name.as_str());
+        assert!(names.eq(["late", "two", "three", "four", "five", "six"]));
+    }
+
+    #[test]
+    fn repeated_item_index_rows_are_reported_after_a_type_list_entry() {
+        let source = concat!(
+            "VNUM 1 0\nINDEX 0 1\nINDEX 0 2\n",
+            "VNUM 2 0\nINDEX 4\nINDEX 9\n",
+            "VNUM 3 0\nINDEX 10\nINDEX 65540\n",
+            "VNUM 4 0\nINDEX -1\nINDEX 7\nINDEX 65536\n",
+        );
+        let parsed = decode_item(source).unwrap();
+
+        let repeated = "repeated Item INDEX row; the client adds the item to a type list for each INDEX row, but packing writes only the last one";
+        assert_eq!(
+            parsed.warnings,
+            [warning(3, repeated), warning(9, repeated)]
+        );
+        assert_eq!(parsed.document.entries[3].index, Some(vec![65536]));
+    }
+
+    #[test]
+    fn repeated_empty_text_rows_keep_the_earlier_text() {
+        let card = decode_card("VNUM 5 junk\nNAME five\nDESC a\nDESC\nNAME\n").unwrap();
+        let entry = &card.document.entries[0];
+        assert_eq!(
+            (entry.name.as_str(), entry.description.as_str()),
+            ("five", "a")
+        );
+        let encoded = encode_card(&card.document).unwrap();
+        assert!(encoded.contains("VNUM\t5\nNAME\tfive\nDESC\ta\nEND\n"));
+
+        let item = decode_item("VNUM 1 0\nNAME one\nNAME \t \n").unwrap();
+        assert_eq!(item.document.entries[0].name, "one");
+        let monster = decode_monster("VNUM 6\nNAME six\nNAME\n").unwrap();
+        assert_eq!(monster.document.entries[0].name, "six");
+        let skill = decode_skill("VNUM 7\nNAME seven\nNAME\nNAME eight\n").unwrap();
+        assert_eq!(skill.document.entries[0].name, "eight");
+        assert!(item.warnings.is_empty() && monster.warnings.is_empty());
+        assert!(skill.warnings.is_empty());
+    }
+
+    #[test]
+    fn skill_z_desc_without_text_keeps_the_earlier_description() {
+        let source = concat!(
+            "VNUM 1\nZ_DESC 0 first\nZ_DESC -1\n",
+            "VNUM 2\nZ_DESC 2\na\nb\n#\nZ_DESC 3\n\n#\n",
+            "VNUM 3\nZ_DESC 1\none\n#\nZ_DESC 0\n",
+            "VNUM 4\nZ_DESC 2\na\nb\n#\nZ_DESC 0\n",
+            "VNUM 5\nZ_DESC 0  lead\nZ_DESC 1\n\n#\n",
+        );
+        let parsed = decode_skill(source).unwrap();
+
+        let dropped = |row: usize, count: i32| {
+            warning(
+                row,
+                format!(
+                    "Skill Z_DESC {count} row has no text, so the client keeps the earlier description, which one Z_DESC row with that count cannot hold; the earlier description is dropped"
+                ),
+            )
+        };
+        assert_eq!(parsed.warnings, [dropped(22, 0), dropped(25, 1)]);
+        let descriptions = parsed
+            .document
+            .entries
+            .iter()
+            .map(|entry| &entry.description)
+            .collect::<Vec<_>>();
+        let inline = |declared_count: i32, text: Option<&str>| SkillDescription {
+            declared_count,
+            lines: Vec::new(),
+            inline_text: text.map(str::to_owned),
+        };
+        assert_eq!(descriptions[0], &inline(-1, Some("first")));
+        assert_eq!(descriptions[1].declared_count, 3);
+        assert_eq!(descriptions[1].lines, ["a", "b"]);
+        assert_eq!(descriptions[2], &inline(0, Some("one")));
+        assert_eq!(descriptions[3], &inline(0, None));
+        assert_eq!(descriptions[4].lines, [""]);
+
+        let encoded = encode_skill(&parsed.document).unwrap();
+        assert!(encoded.contains("Z_DESC\t-1\tfirst\n#\n"));
+        assert!(encoded.contains("Z_DESC\t3\na\nb\n#\n"));
+        let reparsed = decode_skill(&encoded).unwrap();
+        assert!(reparsed.warnings.is_empty());
+        assert_eq!(reparsed.document, parsed.document);
+    }
+
+    #[test]
+    fn skill_text_on_the_z_desc_row_is_inline_text() {
+        let parsed = decode_skill("VNUM 1\nNAME n1\nZ_DESC 40000 NAME renamed\n#\n").unwrap();
+        let description = &parsed.document.entries[0].description;
+        assert_eq!(description.declared_count, 40000);
+        assert!(description.lines.is_empty());
+        assert_eq!(description.inline_text.as_deref(), Some("NAME renamed"));
+        let encoded = encode_skill(&parsed.document).unwrap();
+        assert!(encoded.contains("Z_DESC\t40000\tNAME renamed\n#\n"));
+        assert_eq!(decode_skill(&encoded).unwrap().document, parsed.document);
+
+        // Older documents stored rows after any positive 32-bit count.
+        let old = |declared_count: i32, lines: &[&str]| {
+            serde_json::from_value::<SkillDocument>(serde_json::json!({ "entries": [{
+                "vnum": 1, "name": "n1", "basic": [],
+                "description": { "declared_count": declared_count, "lines": lines },
+            }]}))
+            .unwrap()
+        };
+        let error = encode_skill(&old(40000, &["NAME renamed"]))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("inline_text"), "{error}");
+        assert!(
+            encode_skill(&old(40000, &[""]))
+                .unwrap()
+                .ends_with("Z_DESC\t40000\n#\n")
+        );
+        assert!(
+            encode_skill(&old(4, &["a", "b"]))
+                .unwrap()
+                .ends_with("Z_DESC\t4\na\nb\n#\n")
+        );
+    }
+
+    #[test]
+    fn description_rows_beginning_with_hash_are_kept() {
+        let item = decode_item("VNUM 1 1\nLINEDESC 3\n#first\n  #x\n\t#y\nEND\n").unwrap();
+        assert!(item.warnings.is_empty());
+        let description = item.document.entries[0].description.as_deref();
+        assert_eq!(description, Some("#first\n#x\n#y"));
+        let encoded = encode_item(&item.document).unwrap();
+        assert!(encoded.ends_with("LINEDESC\t3\n#first\n #x\n #y\nEND\n"));
+        assert_eq!(decode_item(&encoded).unwrap().document, item.document);
+
+        let skill = decode_skill("VNUM 1\nZ_DESC 2\nfirst\n  #second\n#\n").unwrap();
+        assert!(skill.warnings.is_empty());
+        assert_eq!(
+            skill.document.entries[0].description.lines,
+            ["first", "#second"]
+        );
+        let encoded = encode_skill(&skill.document).unwrap();
+        assert!(encoded.ends_with("Z_DESC\t2\nfirst\n #second\n#\n"));
+        assert_eq!(decode_skill(&encoded).unwrap().document, skill.document);
     }
 
     #[test]
@@ -1971,19 +2299,18 @@ mod tests {
         assert!(encode_monster(&monster).is_err());
 
         let mut skill = decode_skill(&skill_record(1, 0)).unwrap().document;
-        skill.entries[0].description.lines = vec!["inline ".to_owned()];
+        skill.entries[0].description.inline_text = Some("inline ".to_owned());
         assert!(encode_skill(&skill).is_err());
-        skill.entries[0].description.lines = vec!["  inline".to_owned()];
+        skill.entries[0].description.inline_text = Some("  inline".to_owned());
         assert!(
             encode_skill(&skill)
                 .unwrap()
                 .contains("Z_DESC\t0\t  inline\n#\n")
         );
-        skill.entries[0].description.lines = vec!["one".to_owned(), "two".to_owned()];
-        assert!(encode_skill(&skill).is_err());
-        skill.entries[0].description.declared_count = 65536;
-        assert!(encode_skill(&skill).is_err());
         skill.entries[0].description.declared_count = 2;
+        assert!(encode_skill(&skill).is_err());
+        skill.entries[0].description.inline_text = None;
+        skill.entries[0].description.lines = vec!["one".to_owned(), "two".to_owned()];
         assert!(encode_skill(&skill).is_ok());
         skill.entries[0].description.lines[1] = "two ".to_owned();
         assert!(encode_skill(&skill).is_err());
@@ -2094,7 +2421,11 @@ mod tests {
         assert_eq!(bare.vnum, -1);
         assert!(bare.basic.is_empty());
         assert_eq!(bare.effect, Some(vec![]));
-        assert_eq!(two.description.lines, [" inline  text"]);
+        assert!(two.description.lines.is_empty());
+        assert_eq!(
+            two.description.inline_text.as_deref(),
+            Some(" inline  text")
+        );
 
         let reparsed = decode_skill(&encode_skill(&parsed.document).unwrap()).unwrap();
         assert!(reparsed.warnings.is_empty());

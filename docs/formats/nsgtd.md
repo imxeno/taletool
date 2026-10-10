@@ -99,21 +99,25 @@ reader shape. The client trims each row and splits off its tag at the first tab
 anywhere in the row, or at the first space when the row has no tab. A row such
 as `DESC x<TAB>sp  y` therefore has the tag `DESC x` and the text `sp  y`. Value
 tokens are split from the rest of the row the same way. A text field is the
-trimmed rest of the row; its inner spaces and tabs are kept.
+trimmed rest of the row; its inner spaces and tabs are kept. A text row replaces
+the field's earlier text, but unless a section says otherwise, a row with empty
+text leaves the earlier text in place.
 
 Most rows are selected by the first character of their tag; the sections below
 list the rows that need an exact tag. Every row whose tag begins with `V` starts
-a new zero-filled entry, even when its values are missing or malformed, and the
-following rows belong to that entry. The next `V` row, or end of payload, closes
-it. Rows before the first `V` row fill a placeholder record that the client
-discards. Rows whose tag selects nothing, such as `END` and `~` in most of these
-records, have no effect.
+a new entry, even when its values are missing or malformed, and the following
+rows belong to that entry. The next `V` row, or end of payload, closes it. Rows
+before the first `V` row fill a placeholder record that the client discards.
+Rows whose tag selects nothing, such as `END` and `~` in most of these records,
+have no effect.
 
-Every row is optional. An absent numeric row leaves the entry's zero-filled
-fields. A present row assigns every position the client reads: a missing or
-non-decimal token takes that position's default, which is -1 unless a section
-says otherwise, and the value is truncated to the width of its field. Tokens
-after the positions the client reads are ignored.
+Every row is optional. A new entry's fields are zero unless a section says
+otherwise, and an absent row leaves them unchanged. A present numeric row
+assigns every position the client reads: a missing or invalid token takes that
+position's default, which is -1 unless a section says otherwise, and the value
+is truncated to the width of its field. Tokens are parsed as Delphi integers, so
+a `$` prefix marks a hexadecimal value: `$10` reads as 16. Tokens after the
+positions the client reads are ignored.
 
 ## `BCard.dat`
 
@@ -135,7 +139,7 @@ whatever the number of `DESC` values:
 
 - `DESC` sets the value formats of slots 0 through 4 from its first five values
   and ignores the rest. Unlike other numeric rows, it assigns only the values
-  present, and a non-decimal value reads as 0, so a repeated `DESC` row replaces
+  present, and an invalid value reads as 0, so a repeated `DESC` row replaces
   only as many formats as it has values.
 - `SUBJ<n>` stores the subject text of slot `n`, for `n` from 0 through 4.
 - `LIST<k>-<m>` stores template `m` of slot `k - 1`, for `k` from 1 through 5
@@ -219,10 +223,13 @@ END
 ```
 
 Every row is selected by its first character. A missing price reads as 0. The
-client reads 6 values of `INDEX`, 2 of `TYPE`, and 20 of `DATA`. It reads 25
-`FLAG` values: the first defaults to -1, and the other 24 are flags that default
-to 0. A non-zero 23rd `FLAG` value appends the signed-item label to the name
-loaded so far; a later `NAME` row replaces the labeled name. `BUFF` is
+client reads 6 values of `INDEX`, 2 of `TYPE`, and 20 of `DATA`. The first
+`INDEX` value is the item type, kept in 16 bits; types 8, 9, and 10 read as 0,
+1, and 2. Each `INDEX` row whose type is then 0 through 3 adds the item to that
+type's list, so a repeated row adds it again. The client reads 25 `FLAG` values:
+the first defaults to -1, and the other 24 are flags that default to 0. Each
+`FLAG` row with a non-zero 23rd value appends the signed-item label to the name
+loaded so far; a later `NAME` row with text replaces the labeled name. `BUFF` is
 physically one 25-integer row, viewed as five groups of five; the client reads
 the first four values of each group and skips the fifth.
 
@@ -337,7 +344,9 @@ selected by their first character. Any tag beginning with `E`, including `END`,
 is read as `EFFECT`. The client never reads `FCOMBO`. It reads 6 values of
 `TYPE`, 5 of `TARGET` and `LEVEL`, 15 of `DATA`, and 9 of `EFFECT`, whose last
 three default to 0. It reads 33 `COST` values, all after the third defaulting to
-0, and skips two `CELL` values before reading 91 that default to 0.
+0, and skips two `CELL` values before reading 91 that default to 0. A new skill
+is not entirely zero: until a `TYPE` row is read, its first `TYPE` value is
+65535, the 16-bit form of -1, and its fifth is -1.
 
 `BASIC` is a repeated row. Its first value selects slot 0 through 4 and defaults
 to 0; the next four values fill that slot. A row naming another slot has no
@@ -355,8 +364,9 @@ ultimately ends every positive description; intervening blank rows become
 trailing line breaks in the loaded text. Text after a positive count on the
 `Z_DESC` row is ignored. A non-positive count consumes no following row; the
 description is the text after the count on the `Z_DESC` row, with its leading
-whitespace kept. A final `~` has no effect only when it reaches the outer
-tagged-row reader.
+whitespace kept. Every `Z_DESC` row sets the count, but one whose description is
+empty leaves the earlier description text in place. A final `~` has no effect
+only when it reaches the outer tagged-row reader.
 
 ## `npctalk.dat`
 
