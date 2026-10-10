@@ -274,6 +274,9 @@ f <text>
 ...
 ```
 
+The client splits each row once at its first space, so a single space must
+separate the command from its text. A tab is part of the command token.
+
 `%` updates the pending NPC key, while `s` appends a state using that key. The
 `c`, `b`, and `f` rows are ordered commands belonging to the most recently
 created state and may be freely interleaved. The client ignores `t`; the title

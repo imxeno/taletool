@@ -171,10 +171,10 @@ pub fn encode_npc_talk(doc: &NpcTalkDocument) -> Result<String> {
         if e.title.is_empty() {
             return Err(invalid("npc title is required"));
         }
-        push_text(&mut out, "%", &e.vnum.to_string());
-        push_text(&mut out, "t", &e.title);
+        push_npc_talk_row(&mut out, "%", &e.vnum.to_string());
+        push_npc_talk_row(&mut out, "t", &e.title);
         for s in &e.states {
-            push_text(&mut out, "s", &s.vnum.to_string());
+            push_npc_talk_row(&mut out, "s", &s.vnum.to_string());
             for c in &s.commands {
                 let (tag, text) = match c {
                     NpcTalkCommand::C(t) => ("c", t),
@@ -182,11 +182,21 @@ pub fn encode_npc_talk(doc: &NpcTalkDocument) -> Result<String> {
                     NpcTalkCommand::F(t) => ("f", t),
                 };
                 clean_text(text, "npc command")?;
-                push_text(&mut out, tag, text);
+                push_npc_talk_row(&mut out, tag, text);
             }
         }
     }
     Ok(out)
+}
+
+/// The client splits npctalk rows once at the first space, never at a tab.
+fn push_npc_talk_row(out: &mut String, tag: &str, text: &str) {
+    out.push_str(tag);
+    if !text.is_empty() {
+        out.push(' ');
+        out.push_str(text);
+    }
+    out.push('\n');
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1013,6 +1023,16 @@ mod tests {
                 .unwrap()
                 .starts_with("# generated")
         )
+    }
+
+    #[test]
+    fn npc_talk_rows_separate_the_tag_with_one_space() {
+        let src = "# header\n% 42\nt name\ns 7\nc hello world\nf 1\nb branch data\nc\n";
+        let encoded = encode_npc_talk(&decode_npc_talk(src).unwrap().document).unwrap();
+        assert_eq!(
+            encoded,
+            "# generated npc talk\n% 42\nt name\ns 7\nc hello world\nf 1\nb branch data\nc\n"
+        );
     }
 
     #[test]
