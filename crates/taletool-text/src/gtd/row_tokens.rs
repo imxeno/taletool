@@ -1,4 +1,4 @@
-//! Row tokenizing used by the client's map and fish readers.
+//! Row tokenizing shared by the client's NSgtdData readers.
 
 /// Removes the characters the client's `Trim` strips: every character up to
 /// and including the space.
