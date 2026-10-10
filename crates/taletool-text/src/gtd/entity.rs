@@ -9,7 +9,7 @@ use crate::{Result, TextError};
 
 mod row;
 
-use row::{RowReader, check_rest_text, check_row_text, trim};
+use row::{RowReader, TaggedRow, check_rest_text, check_row_text, trim};
 
 macro_rules! document {
     ($name:ident, $entry:ty) => {
@@ -93,206 +93,281 @@ pub fn encode_act_description(document: &ActDescriptionDocument) -> Result<Strin
     Ok(out)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BasicCardEntry {
     pub vnum: i32,
-    pub icon: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<i32>,
     pub name: String,
-    pub description: Vec<i32>,
-    pub subjects: Vec<String>,
-    pub list: Vec<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<Vec<i32>>,
+    /// `SUBJ0` through `SUBJ4` text by slot; empty without a row.
+    pub subject_slots: [String; BASIC_CARD_SLOTS],
+    /// `LISTk-1` and `LISTk-2` text of slot `k - 1`; empty without a row.
+    pub list_slots: [[String; 2]; BASIC_CARD_SLOTS],
+    /// `SUBJ` and `LIST` rows whose index the client ignores, in source order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignored_rows: Vec<BasicCardIgnoredRow>,
 }
 document!(BasicCardDocument, BasicCardEntry);
 
-const BASIC_CARD_LIST_VALUES_PER_SLOT: usize = 2;
-
-fn validate_basic_card_text(value: &str, field: &str) -> Result<()> {
-    if value.contains(['\r', '\n']) {
-        return invalid(format!("BCard {field} contains a line break"));
-    }
-    Ok(())
+/// A `SUBJ` or `LIST` row kept as its source tag and text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BasicCardIgnoredRow {
+    pub tag: String,
+    pub text: String,
 }
 
-fn validate_basic_card_entry(entry: &BasicCardEntry) -> Result<()> {
-    let slot_count = entry.description.len();
-    if entry.subjects.len() != slot_count {
-        return invalid(format!(
-            "BCard entry {} has {} DESC values but {} subjects",
-            entry.vnum,
-            slot_count,
-            entry.subjects.len()
-        ));
-    }
-    if entry.list.len() != slot_count {
-        return invalid(format!(
-            "BCard entry {} has {} DESC values but {} LIST groups",
-            entry.vnum,
-            slot_count,
-            entry.list.len()
-        ));
-    }
+/// Number of subject and list slots the client stores per BCard entry.
+const BASIC_CARD_SLOTS: usize = 5;
 
-    validate_basic_card_text(&entry.name, "name")?;
-    for (index, subject) in entry.subjects.iter().enumerate() {
-        validate_basic_card_text(subject, &format!("SUBJ{}", index + 1))?;
-    }
-    for (slot_index, values) in entry.list.iter().enumerate() {
-        if values.len() != BASIC_CARD_LIST_VALUES_PER_SLOT {
-            return invalid(format!(
-                "BCard entry {} LIST group {} has {} values; expected {BASIC_CARD_LIST_VALUES_PER_SLOT}",
-                entry.vnum,
-                slot_index + 1,
-                values.len()
-            ));
-        }
-        for (value_index, value) in values.iter().enumerate() {
-            validate_basic_card_text(
-                value,
-                &format!("LIST{}-{}", slot_index + 1, value_index + 1),
-            )?;
-        }
-    }
-
-    Ok(())
+/// A BCard text slot that a `SUBJ` or `LIST` row fills.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BasicCardSlot {
+    /// `SUBJn` fills subject slot `n`.
+    Subject(usize),
+    /// `LISTk-m` fills template `m - 1` of slot `k - 1`.
+    List(usize, usize),
 }
 
-#[derive(Default)]
-struct BasicCardBuilder {
-    vnum: Option<i32>,
-    icon: Option<i32>,
-    name: Option<String>,
-    description: Option<Vec<i32>>,
-    subjects: std::collections::BTreeMap<usize, String>,
-    list: std::collections::BTreeMap<(usize, usize), String>,
-}
-impl BasicCardBuilder {
-    fn new() -> Self {
-        Self::default()
-    }
-    fn finish(mut self) -> Option<BasicCardEntry> {
-        let description = self.description?;
-        let slot_count = description.len();
-        let entry = BasicCardEntry {
-            vnum: self.vnum?,
-            icon: self.icon?,
-            name: self.name?,
-            description,
-            subjects: (0..slot_count)
-                .map(|index| self.subjects.remove(&index).unwrap_or_default())
-                .collect(),
-            list: (0..slot_count)
-                .map(|slot| {
-                    (0..BASIC_CARD_LIST_VALUES_PER_SLOT)
-                        .map(|value| self.list.remove(&(slot, value)).unwrap_or_default())
-                        .collect()
-                })
-                .collect(),
+impl BasicCardSlot {
+    /// Reads an ASCII tag beginning with `S` or `L` as the client does. The
+    /// index starts after the fourth character, whatever those characters
+    /// are. Returns `None` for an index outside the client's slots.
+    fn parse(tag: &str) -> Option<Self> {
+        let one_based = |index: &str, count: usize| {
+            parse_i32(index)?
+                .checked_sub(1)
+                .and_then(|index| usize::try_from(index).ok())
+                .filter(|index| *index < count)
         };
-        validate_basic_card_entry(&entry).ok()?;
-        Some(entry)
+        match tag.as_bytes().first()? {
+            b'S' => {
+                let slot = usize::try_from(parse_i32(tag.get(4..)?)?).ok()?;
+                (slot < BASIC_CARD_SLOTS).then_some(Self::Subject(slot))
+            }
+            b'L' => {
+                let dash = tag.find('-').filter(|dash| *dash > 4)?;
+                Some(Self::List(
+                    one_based(tag.get(4..dash)?, BASIC_CARD_SLOTS)?,
+                    one_based(tag.get(dash + 1..)?, 2)?,
+                ))
+            }
+            _ => None,
+        }
     }
+
+    fn tag(self) -> String {
+        match self {
+            Self::Subject(slot) => format!("SUBJ{slot}"),
+            Self::List(slot, template) => format!("LIST{}-{}", slot + 1, template + 1),
+        }
+    }
+
+    fn text_mut(self, entry: &mut BasicCardEntry) -> &mut String {
+        match self {
+            Self::Subject(slot) => &mut entry.subject_slots[slot],
+            Self::List(slot, template) => &mut entry.list_slots[slot][template],
+        }
+    }
+}
+
+/// Maps a BCard tag to the row the client reads it as. Tags beginning with
+/// `S` or `L` are `SUBJ` and `LIST` rows, read by [`BasicCardSlot::parse`].
+fn basic_card_row(tag: &str) -> Option<&'static str> {
+    Some(match tag.as_bytes()[0] {
+        b'V' => "VNUM",
+        b'I' => "ICON",
+        b'N' => "NAME",
+        b'D' => "DESC",
+        _ => return None,
+    })
 }
 
 pub fn decode_basic_card(text: &str) -> Result<ParsedGtd<BasicCardDocument>> {
+    let mut rows = RowReader::new("BCard");
     let mut entries = Vec::new();
-    let mut warnings = Vec::new();
-    let mut current: Option<BasicCardBuilder> = None;
+    let mut current: Option<BasicCardEntry> = None;
     for (index, line) in text.lines().enumerate() {
         let row = index + 1;
-        if line.trim() == "~" {
+        if let Some(tagged) =
+            TaggedRow::parse(line).filter(|tagged| tagged.tag.starts_with(['S', 'L']))
+        {
+            let Some(entry) = rows.entry(row, &mut current) else {
+                continue;
+            };
+            read_basic_card_text(&mut rows, row, tagged, entry);
             continue;
         }
-        if is_ignored_line(line) {
-            continue;
-        }
-        let f = fields(line);
-        if f.is_empty() {
-            continue;
-        }
-        if f[0] == "VNUM" {
-            if let Some(old) = current.take() {
-                if let Some(e) = old.finish() {
-                    entries.push(e)
-                } else {
-                    warnings.push(warning(row, "incomplete BCard entry"))
-                }
-            }
-            current = Some(BasicCardBuilder::new());
-        }
-        if f[0] == "END" {
-            continue;
-        }
-        let Some(c) = current.as_mut() else {
-            warnings.push(warning(row, "BCard row outside entry"));
+        let Some((tag, tagged)) = rows.read(row, line, basic_card_row) else {
             continue;
         };
-        match f[0] {
-            "VNUM" => c.vnum = one(&f),
-            "ICON" => c.icon = one(&f),
-            "NAME" if f.len() >= 2 => c.name = Some(f[1..].join(" ")),
-            "DESC" => {
-                if let Some(v) = values(&f[1..]) {
-                    c.description = Some(v)
-                } else {
-                    warnings.push(warning(row, "BCard DESC must contain integers"));
-                }
-            }
-            tag if tag.starts_with("SUBJ") => match tag[4..].parse::<usize>() {
-                Ok(i) if i > 0 => {
-                    c.subjects
-                        .insert(i - 1, f.get(1..).unwrap_or_default().join(" "));
-                }
-                _ => {}
-            },
-            tag if tag.starts_with("LIST") => {
-                let p = tag[4..]
-                    .split('-')
-                    .filter_map(|x| x.parse::<usize>().ok())
-                    .collect::<Vec<_>>();
-                if p.len() == 2 && p[0] > 0 && (1..=2).contains(&p[1]) {
-                    c.list.insert(
-                        (p[0] - 1, p[1] - 1),
-                        f.get(1..).unwrap_or_default().join(" "),
+        if tag == "VNUM" {
+            let vnum = rows.scalar(row, tag, &tagged, -1);
+            entries.extend(current.replace(BasicCardEntry {
+                vnum,
+                ..BasicCardEntry::default()
+            }));
+            continue;
+        }
+        let Some(entry) = rows.entry(row, &mut current) else {
+            continue;
+        };
+        match tag {
+            "ICON" => entry.icon = Some(rows.scalar(row, tag, &tagged, -1)),
+            "NAME" => {
+                if !entry.name.is_empty() {
+                    rows.warn(
+                        row,
+                        "repeated BCard NAME row; the client frees the earlier name, so its result is unreliable",
                     );
                 }
+                set_basic_card_text(&mut entry.name, tagged.text());
             }
-            _ => warnings.push(warning(row, "unrecognized BCard row")),
+            "DESC" => {
+                // The client reads only the first five values, and a
+                // non-decimal value as 0.
+                let mut exact = true;
+                let values = tagged
+                    .tokens()
+                    .map(|token| {
+                        parse_i32(token).unwrap_or_else(|| {
+                            exact = false;
+                            0
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                if !exact {
+                    rows.malformed(row, tag, &values);
+                }
+                // A repeated row replaces only the values it has.
+                let description = entry.description.get_or_insert_default();
+                for (index, value) in values.into_iter().enumerate() {
+                    match description.get_mut(index) {
+                        Some(earlier) => *earlier = value,
+                        None => description.push(value),
+                    }
+                }
+            }
+            _ => unreachable!(),
         }
     }
-    if let Some(old) = current {
-        if let Some(entry) = old.finish() {
-            entries.push(entry)
-        } else {
-            warnings.push(warning(text.lines().count(), "incomplete BCard entry"))
-        }
-    }
+    entries.extend(current);
     Ok(ParsedGtd {
         document: BasicCardDocument { entries },
-        warnings,
+        warnings: rows.finish(),
     })
+}
+
+/// Reads a `SUBJ` or `LIST` row into its slot, or keeps a row whose index
+/// the client ignores.
+fn read_basic_card_text(
+    rows: &mut RowReader,
+    row: usize,
+    tagged: TaggedRow,
+    entry: &mut BasicCardEntry,
+) {
+    let text = tagged.text();
+    // The client finds the index by byte position in the encoded tag.
+    match tagged
+        .tag
+        .is_ascii()
+        .then(|| BasicCardSlot::parse(tagged.tag))
+        .flatten()
+    {
+        Some(slot) => {
+            let tag = slot.tag();
+            if tag != tagged.tag {
+                rows.renamed(row, tagged.tag, &tag);
+            }
+            set_basic_card_text(slot.text_mut(entry), text);
+        }
+        None if is_ignored_slot_tag(tagged.tag) => {
+            entry.ignored_rows.push(BasicCardIgnoredRow {
+                tag: tagged.tag.to_owned(),
+                text: text.to_owned(),
+            });
+        }
+        None => rows.warn(row, "unrecognized BCard row"),
+    }
+}
+
+/// Whether `tag` is a `SUBJn` or `LISTk-m` tag with decimal indexes that
+/// the client ignores because they select no slot.
+fn is_ignored_slot_tag(tag: &str) -> bool {
+    let digits = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    let numbered = if let Some(index) = tag.strip_prefix("SUBJ") {
+        digits(index)
+    } else if let Some(indexes) = tag.strip_prefix("LIST") {
+        indexes
+            .split_once('-')
+            .is_some_and(|(slot, template)| digits(slot) && digits(template))
+    } else {
+        false
+    };
+    numbered && BasicCardSlot::parse(tag).is_none()
+}
+
+/// The client keeps earlier text when a repeated row has none.
+fn set_basic_card_text(field: &mut String, text: &str) {
+    if !text.is_empty() {
+        *field = text.to_owned();
+    }
 }
 
 pub fn encode_basic_card(document: &BasicCardDocument) -> Result<String> {
     let mut out = String::new();
     for e in &document.entries {
-        validate_basic_card_entry(e)?;
+        check_row_text(&e.name, &format!("BCard entry {} name", e.vnum))?;
         push_values(&mut out, "VNUM", &[e.vnum]);
-        push_values(&mut out, "ICON", &[e.icon]);
-        push_text(&mut out, "NAME", &e.name);
-        push_values(&mut out, "DESC", &e.description);
-        for (i, s) in e.subjects.iter().enumerate() {
-            push_text(&mut out, &format!("SUBJ{}", i + 1), s)
+        if let Some(icon) = e.icon {
+            push_values(&mut out, "ICON", &[icon]);
         }
-        for (i, r) in e.list.iter().enumerate() {
-            exact(r, 2, "BCard LIST row")?;
-            for (j, s) in r.iter().enumerate() {
-                push_text(&mut out, &format!("LIST{}-{}", i + 1, j + 1), s)
+        push_text(&mut out, "NAME", &e.name);
+        push_optional_values(&mut out, "DESC", &e.description);
+        for (slot, text) in e.subject_slots.iter().enumerate() {
+            push_basic_card_text(&mut out, e.vnum, BasicCardSlot::Subject(slot), text)?;
+        }
+        for row in &e.ignored_rows {
+            check_basic_card_ignored_row(row, e.vnum)?;
+            push_text(&mut out, &row.tag, &row.text);
+        }
+        for (slot, templates) in e.list_slots.iter().enumerate() {
+            for (template, text) in templates.iter().enumerate() {
+                push_basic_card_text(&mut out, e.vnum, BasicCardSlot::List(slot, template), text)?;
             }
         }
         out.push_str("END\n");
     }
     Ok(out)
+}
+
+/// Writes a slot's text row. An empty slot needs no row.
+fn push_basic_card_text(
+    out: &mut String,
+    vnum: i32,
+    slot: BasicCardSlot,
+    text: &str,
+) -> Result<()> {
+    if text.is_empty() {
+        return Ok(());
+    }
+    let tag = slot.tag();
+    check_row_text(text, &format!("BCard entry {vnum} {tag}"))?;
+    push_text(out, &tag, text);
+    Ok(())
+}
+
+fn check_basic_card_ignored_row(row: &BasicCardIgnoredRow, vnum: i32) -> Result<()> {
+    let tag = &row.tag;
+    if !is_ignored_slot_tag(tag) {
+        return invalid(format!(
+            "BCard entry {vnum} ignored row {tag:?} must be a SUBJn or LISTk-m tag that selects no slot"
+        ));
+    }
+    check_row_text(&row.text, &format!("BCard entry {vnum} {tag}"))
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1126,9 +1201,6 @@ fn push_optional_groups(
     Ok(())
 }
 
-fn one(f: &[&str]) -> Option<i32> {
-    if f.len() == 2 { parse_i32(f[1]) } else { None }
-}
 fn chunks(v: Vec<i32>, width: usize) -> Vec<Vec<i32>> {
     v.chunks(width).map(<[i32]>::to_vec).collect()
 }
@@ -1151,106 +1223,223 @@ fn invalid<T>(message: impl Into<String>) -> Result<T> {
 mod tests {
     use super::*;
 
-    fn basic_card_entry(slot_count: usize) -> BasicCardEntry {
-        BasicCardEntry {
-            vnum: 4,
-            icon: -1,
-            name: "zts39e".to_owned(),
-            description: (1..=slot_count).map(|value| value as i32).collect(),
-            subjects: (1..=slot_count)
-                .map(|index| format!("subject-{index}"))
-                .collect(),
-            list: (1..=slot_count)
-                .map(|index| vec![format!("positive-{index}"), format!("negative-{index}")])
-                .collect(),
+    fn ignored(tag: &str, text: &str) -> BasicCardIgnoredRow {
+        BasicCardIgnoredRow {
+            tag: tag.to_owned(),
+            text: text.to_owned(),
         }
     }
 
     #[test]
-    fn basic_card_validation_accepts_one_slot_without_padding() {
-        let entry = basic_card_entry(1);
-        validate_basic_card_entry(&entry).unwrap();
+    fn basic_card_slots_follow_the_client_independent_of_desc() {
+        let source = concat!(
+            "VNUM 1\nICON -1\nNAME n\nDESC 0 0\n",
+            "SUBJ0 first\nSUBJ1 second\nSUBJ5 fifth\n",
+            "LIST1-1 a\nLIST1-2 b\nLIST3-1 c\nLIST6-1 sixth\nLIST1-3 third\nEND\n~\n",
+        );
+        let parsed = decode_basic_card(source).unwrap();
 
-        assert_eq!(entry.description, [1]);
-        assert_eq!(entry.subjects, ["subject-1"]);
-        assert_eq!(entry.list[0], ["positive-1", "negative-1"]);
-    }
-
-    #[test]
-    fn basic_card_validation_accepts_arbitrary_slot_counts() {
-        let entry = basic_card_entry(7);
-        validate_basic_card_entry(&entry).unwrap();
-
-        assert_eq!(entry.description, [1, 2, 3, 4, 5, 6, 7]);
+        assert!(parsed.warnings.is_empty());
+        let entry = &parsed.document.entries[0];
+        assert_eq!(entry.description, Some(vec![0, 0]));
+        assert_eq!(entry.subject_slots, ["first", "second", "", "", ""]);
+        assert_eq!(entry.list_slots[0], ["a", "b"]);
+        assert_eq!(entry.list_slots[1], ["", ""]);
+        assert_eq!(entry.list_slots[2], ["c", ""]);
         assert_eq!(
-            entry.subjects,
+            entry.ignored_rows,
             [
-                "subject-1",
-                "subject-2",
-                "subject-3",
-                "subject-4",
-                "subject-5",
-                "subject-6",
-                "subject-7"
+                ignored("SUBJ5", "fifth"),
+                ignored("LIST6-1", "sixth"),
+                ignored("LIST1-3", "third"),
             ]
         );
-        assert_eq!(entry.list[6], ["positive-7", "negative-7"]);
+
+        let encoded = encode_basic_card(&parsed.document).unwrap();
+        assert_eq!(
+            encoded,
+            concat!(
+                "VNUM\t1\nICON\t-1\nNAME\tn\nDESC\t0\t0\n",
+                "SUBJ0\tfirst\nSUBJ1\tsecond\n",
+                "SUBJ5\tfifth\nLIST6-1\tsixth\nLIST1-3\tthird\n",
+                "LIST1-1\ta\nLIST1-2\tb\nLIST3-1\tc\nEND\n",
+            )
+        );
+        assert_eq!(
+            decode_basic_card(&encoded).unwrap().document,
+            parsed.document
+        );
     }
 
     #[test]
-    fn basic_card_validation_accepts_empty_slot_sequences() {
-        validate_basic_card_entry(&basic_card_entry(0)).unwrap();
+    fn basic_card_keeps_observed_rows() {
+        let lists = |indent: &str| {
+            (1..=4)
+                .map(|slot| {
+                    format!("{indent}LIST{slot}-1\tp{slot}\n{indent}LIST{slot}-2\tn{slot}\n")
+                })
+                .collect::<String>()
+        };
+        let source = format!(
+            concat!(
+                "#====\n\tVNUM\t4\n\tICON\t-1\n\tNAME\tzts39e\n\tDESC\t1 1 1 1 2 2\n",
+                "\tSUBJ1\ts1\n\tSUBJ2\ts2\n\tSUBJ3\ts3\n\tSUBJ4\ts4\n\tSUBJ5\ts5\n",
+                "{}\tLIST5-1\tp5\n\tLIST5-1\tp5\n\tEND\n#====\n\n~\n",
+            ),
+            lists("\t")
+        );
+        let parsed = decode_basic_card(&source).unwrap();
+
+        assert!(parsed.warnings.is_empty());
+        let entry = &parsed.document.entries[0];
+        assert_eq!(entry.icon, Some(-1));
+        assert_eq!(entry.description, Some(vec![1, 1, 1, 1, 2, 2]));
+        assert_eq!(entry.subject_slots, ["", "s1", "s2", "s3", "s4"]);
+        assert_eq!(entry.ignored_rows, [ignored("SUBJ5", "s5")]);
+        assert_eq!(entry.list_slots[4], ["p5", ""]);
+        assert_eq!(
+            encode_basic_card(&parsed.document).unwrap(),
+            format!(
+                concat!(
+                    "VNUM\t4\nICON\t-1\nNAME\tzts39e\nDESC\t1\t1\t1\t1\t2\t2\n",
+                    "SUBJ1\ts1\nSUBJ2\ts2\nSUBJ3\ts3\nSUBJ4\ts4\nSUBJ5\ts5\n",
+                    "{}LIST5-1\tp5\nEND\n",
+                ),
+                lists("")
+            )
+        );
     }
 
     #[test]
-    fn basic_card_validation_rejects_inconsistent_slot_groups() {
-        let mut missing_subject = basic_card_entry(4);
-        missing_subject.subjects.pop();
-        assert!(validate_basic_card_entry(&missing_subject).is_err());
+    fn basic_card_entries_need_no_rows_after_vnum() {
+        let parsed = decode_basic_card("VNUM 1\nNAME\nVNUM 2\nEND\n").unwrap();
 
-        let mut missing_list_group = basic_card_entry(4);
-        missing_list_group.list.pop();
-        assert!(validate_basic_card_entry(&missing_list_group).is_err());
+        assert!(parsed.warnings.is_empty());
+        let [first, second] = parsed.document.entries.as_slice() else {
+            panic!("expected two BCard entries");
+        };
+        assert_eq!(
+            first,
+            &BasicCardEntry {
+                vnum: 1,
+                ..BasicCardEntry::default()
+            }
+        );
+        assert_eq!(second.vnum, 2);
 
-        let mut incomplete_list_pair = basic_card_entry(4);
-        incomplete_list_pair.list[2].pop();
-        assert!(validate_basic_card_entry(&incomplete_list_pair).is_err());
+        let encoded = encode_basic_card(&parsed.document).unwrap();
+        assert_eq!(encoded, "VNUM\t1\nNAME\nEND\nVNUM\t2\nNAME\nEND\n");
+        let reparsed = decode_basic_card(&encoded).unwrap();
+        assert!(reparsed.warnings.is_empty());
+        assert_eq!(reparsed.document, parsed.document);
     }
 
     #[test]
-    fn basic_card_validation_preserves_signed_numeric_values() {
-        let mut entry = basic_card_entry(1);
-        entry.vnum = -7;
-        entry.icon = -1;
-        entry.description[0] = -32;
+    fn basic_card_rows_are_read_by_their_first_character() {
+        let source = concat!(
+            "SUBJ1 orphan\nVALUE 3 x\nIMAGE 7\nNOTE  spaced  name\nDATA 1 x 3\n",
+            "SUBJ01 one\nSXYZ2 two\nL0003-2 negative\nSUBJ\nLIST-1 bad\nFOO bar\n",
+        );
+        let parsed = decode_basic_card(source).unwrap();
 
-        validate_basic_card_entry(&entry).unwrap();
-        assert_eq!(entry.vnum, -7);
-        assert_eq!(entry.icon, -1);
-        assert_eq!(entry.description, [-32]);
+        assert_eq!(
+            parsed.warnings,
+            [
+                warning(1, "BCard row before the first VNUM has no entry"),
+                warning(2, "BCard tag VALUE is read as VNUM"),
+                warning(2, "malformed BCard VNUM row stored as VNUM 3"),
+                warning(3, "BCard tag IMAGE is read as ICON"),
+                warning(4, "BCard tag NOTE is read as NAME"),
+                warning(5, "BCard tag DATA is read as DESC"),
+                warning(5, "malformed BCard DESC row stored as DESC 1 0 3"),
+                warning(6, "BCard tag SUBJ01 is read as SUBJ1"),
+                warning(7, "BCard tag SXYZ2 is read as SUBJ2"),
+                warning(8, "BCard tag L0003-2 is read as LIST3-2"),
+                warning(9, "unrecognized BCard row"),
+                warning(10, "unrecognized BCard row"),
+                warning(11, "unrecognized BCard row"),
+            ]
+        );
+        let entry = &parsed.document.entries[0];
+        assert_eq!(
+            (entry.vnum, entry.icon, entry.name.as_str()),
+            (3, Some(7), "spaced  name")
+        );
+        assert_eq!(entry.description, Some(vec![1, 0, 3]));
+        assert_eq!(entry.subject_slots, ["", "one", "two", "", ""]);
+        assert_eq!(entry.list_slots[2], ["", "negative"]);
+        assert!(entry.ignored_rows.is_empty());
     }
 
     #[test]
-    fn basic_card_validation_preserves_duplicates() {
-        let mut entry = basic_card_entry(4);
-        entry.description = vec![9, 9, -2, 9];
-        entry.subjects = vec![
-            "same".to_owned(),
-            "same".to_owned(),
-            "third".to_owned(),
-            "same".to_owned(),
-        ];
+    fn basic_card_repeated_rows_follow_the_client() {
+        let source = concat!(
+            "VNUM 1\nNAME first\nDESC 1 2 3 4 5 6\n",
+            "LIST1-1 keep\nLIST1-2 b\nLIST1-1\nSUBJ2 old\nSUBJ2 new\n",
+            "DESC 7 8\nNAME second\nNAME\n",
+        );
+        let parsed = decode_basic_card(source).unwrap();
 
-        validate_basic_card_entry(&entry).unwrap();
-        assert_eq!(entry.description, [9, 9, -2, 9]);
-        assert_eq!(entry.subjects, ["same", "same", "third", "same"]);
+        let repeated = "repeated BCard NAME row; the client frees the earlier name, so its result is unreliable";
+        assert_eq!(
+            parsed.warnings,
+            [warning(10, repeated), warning(11, repeated)]
+        );
+        let entry = &parsed.document.entries[0];
+        assert_eq!(entry.name, "second");
+        assert_eq!(entry.description, Some(vec![7, 8, 3, 4, 5, 6]));
+        assert_eq!(entry.list_slots[0], ["keep", "b"]);
+        assert_eq!(entry.subject_slots[2], "new");
     }
 
     #[test]
-    fn basic_card_validation_rejects_physical_line_breaks() {
-        let mut entry = basic_card_entry(1);
-        entry.list[0][1] = "split\nrow".to_owned();
-        assert!(validate_basic_card_entry(&entry).is_err());
+    fn basic_card_writer_rejects_rows_the_client_reads_differently() {
+        let source = decode_basic_card("VNUM 1\nNAME n\n").unwrap().document;
+        let encode = |edit: &dyn Fn(&mut BasicCardEntry)| {
+            let mut document = source.clone();
+            edit(&mut document.entries[0]);
+            encode_basic_card(&document)
+        };
+
+        assert!(encode(&|entry| entry.name = "trailing ".to_owned()).is_err());
+        assert!(encode(&|entry| entry.subject_slots[0] = " padded".to_owned()).is_err());
+        assert!(encode(&|entry| entry.list_slots[4][1] = "split\nrow".to_owned()).is_err());
+        for tag in ["SUBJ4", "LIST5-2", "SUBJ 5", "LIST6-1\tx", "NAME", ""] {
+            let error = encode(&|entry| entry.ignored_rows = vec![ignored(tag, "x")]);
+            assert!(error.is_err(), "{tag}");
+        }
+        let ignored_rows = vec![ignored("SUBJ5", ""), ignored("LIST0-1", "x")];
+        assert_eq!(
+            encode(&|entry| entry.ignored_rows = ignored_rows.clone()).unwrap(),
+            "VNUM\t1\nNAME\tn\nSUBJ5\nLIST0-1\tx\nEND\n"
+        );
+    }
+
+    #[test]
+    fn basic_card_json_names_the_client_slots() {
+        let parsed =
+            decode_basic_card("VNUM 1\nNAME n\nDESC 2\nSUBJ0 s\nSUBJ7 t\nLIST2-2 l\n").unwrap();
+        assert_eq!(
+            serde_json::to_value(&parsed.document).unwrap(),
+            serde_json::json!({ "entries": [{
+                "vnum": 1, "name": "n", "description": [2],
+                "subject_slots": ["s", "", "", "", ""],
+                "list_slots": [["", ""], ["", "l"], ["", ""], ["", ""], ["", ""]],
+                "ignored_rows": [{ "tag": "SUBJ7", "text": "t" }],
+            }]})
+        );
+
+        let old = serde_json::json!({ "entries": [{
+            "vnum": 1, "icon": -1, "name": "n", "description": [0],
+            "subjects": ["s"], "list": [["a", "b"]],
+        }]});
+        let error = serde_json::from_value::<BasicCardDocument>(old)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("unknown field") && error.contains("`subject_slots`"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -1290,40 +1479,6 @@ mod tests {
         assert!(native.contains("EFFECT\t1\t2\t3\t4\t5\t6\t7\n"));
         assert_eq!(decode_card(&native).unwrap().document, long)
     }
-    #[test]
-    fn basic_card_preserves_subject_five() {
-        let p=decode_basic_card("VNUM 1\nICON -1\nNAME n\nDESC 0 0 0 0 0\nSUBJ1 a\nSUBJ2 b\nSUBJ3 c\nSUBJ4 d\nSUBJ5 e\nLIST1-1 a\nLIST1-2 b\nLIST2-1 a\nLIST2-2 b\nLIST3-1 a\nLIST3-2 b\nLIST4-1 a\nLIST4-2 b\nLIST5-1 a\nLIST5-2 b\nEND\n").unwrap();
-        assert_eq!(p.document.entries[0].subjects[4], "e");
-        assert!(encode_basic_card(&p.document).unwrap().contains("SUBJ5\te"))
-    }
-
-    #[test]
-    fn basic_card_preserves_arbitrary_slot_counts_and_client_tolerated_gaps() {
-        let source = concat!(
-            "VNUM 1\nICON -1\nNAME old\nDESC -2\n",
-            "SUBJ1 subject\nLIST1-1 yes\nLIST1-2 no\nEND\n",
-            "VNUM 2\nICON -1\nNAME modern\nDESC 1 2 3 4 5 99\n",
-            "SUBJ1 a\nSUBJ2 b\nSUBJ3 c\nSUBJ4 d\nSUBJ5 e\n",
-            "LIST1-1 a\nLIST1-2 b\nLIST2-1 a\nLIST2-2 b\n",
-            "LIST3-1 a\nLIST3-2 b\nLIST4-1 a\nLIST4-2 b\nLIST5-1 a\n",
-            "END\n~\n",
-        );
-        let parsed = decode_basic_card(source).unwrap();
-        assert!(parsed.warnings.is_empty());
-        assert_eq!(parsed.document.entries.len(), 2);
-        assert_eq!(parsed.document.entries[0].description, [-2]);
-        assert_eq!(parsed.document.entries[0].subjects, ["subject"]);
-        assert_eq!(parsed.document.entries[1].description, [1, 2, 3, 4, 5, 99]);
-        assert_eq!(parsed.document.entries[1].list[4], ["a", ""]);
-        assert_eq!(parsed.document.entries[1].list[5], ["", ""]);
-        assert_eq!(
-            decode_basic_card(&encode_basic_card(&parsed.document).unwrap())
-                .unwrap()
-                .document,
-            parsed.document
-        );
-    }
-
     #[test]
     fn card_preserves_arbitrary_style_widths() {
         for style in [vec![], vec![-1, 2, 3, 4, 5, 6, i32::MAX]] {

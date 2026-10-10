@@ -9,7 +9,7 @@ otherwise independent.
 | Record                 | Payload | Reader boundary or framing                        |
 | ---------------------- | ------- | ------------------------------------------------- |
 | `act_desc.dat`         | DAT     | Independent `Data`/`A` rows; observed `end`, `~`  |
-| `BCard.dat`            | DAT     | Next `VNUM` or end of payload                     |
+| `BCard.dat`            | DAT     | Next `V` row or end of payload                    |
 | `Card.dat`             | DAT     | Global indexed rows plus `V`-started entries      |
 | `Item.dat`             | DAT     | Next `V` row or end; `END` stops description scan |
 | `monster.dat`          | DAT     | Next `V` row or end of payload                    |
@@ -117,36 +117,48 @@ after the positions the client reads are ignored.
 
 ## `BCard.dat`
 
-Each `BasicCardData` entry is stored on a keyword-prefixed row. The reader
-identifies a row by that keyword rather than by its position in the entry. The
-slot count `N` is the number of integers on `DESC`:
-
 ```text
 VNUM <vnum>
 ICON <icon>
 NAME <text>
-DESC <i32> ...                         # N values
-SUBJ1 <text>
+DESC <i32> ...
+SUBJ<n> <text>
 ...
-SUBJN <text>
-LIST1-1 <text>
-LIST1-2 <text>
+LIST<k>-<m> <text>
 ...
-LISTN-1 <text>
-LISTN-2 <text>
 END
 ```
 
-Observed records use every `N` from one through five, but the source row accepts
-any token count. One `DESC` value, one `SUBJ` row, and two `LIST` rows form each
-slot.
+Every row is selected by the first character of its tag. The client reads one
+value of `VNUM` and `ICON`. Each entry has five slots numbered 0 through 4,
+whatever the number of `DESC` values:
 
-The client stores five zero-initialized slots, consumes at most five `DESC`
-values, and uses last-write semantics for repeated indexed text rows. Missing
-text slots become empty strings. Consequently, a sixth `DESC` token is ignored
-and a missing `SUBJ` or `LIST` row has an empty current-layout value. A new
-`VNUM`, or end of payload, closes the preceding entry. `END` and the final `~`
-are framing rows (not commit points).
+- `DESC` sets the value formats of slots 0 through 4 from its first five values
+  and ignores the rest. Unlike other numeric rows, it assigns only the values
+  present, and a non-decimal value reads as 0, so a repeated `DESC` row replaces
+  only as many formats as it has values.
+- `SUBJ<n>` stores the subject text of slot `n`, for `n` from 0 through 4.
+- `LIST<k>-<m>` stores template `m` of slot `k - 1`, for `k` from 1 through 5
+  and `m` 1 or 2.
+
+The `SUBJ` index is the part of the tag after its fourth character. The `LIST`
+indexes are the parts between the fourth character and the first `-`, and after
+that `-`. The second through fourth characters are not checked, and a row whose
+index is outside these ranges has no effect. Observed records number subjects
+`SUBJ1` through `SUBJ5`, so slot 0 has no subject and `SUBJ5` has no effect.
+Observed `DESC` rows have one through six values.
+
+An equipment option of slot `i` is displayed with template 1 of that slot for a
+non-negative option value and template 2 for a negative one. The slot's format
+selects how the value is inserted into the template; format 0 shows the template
+unchanged.
+
+Text fields are the trimmed rest of their row. An empty `SUBJ` or `LIST` row
+keeps its slot's earlier text, so a slot without a non-empty row has empty text.
+An entry without a non-empty `NAME` row has an empty name. A `NAME` row frees
+the earlier name before reallocating that buffer for its own text, so a repeated
+`NAME` row after a non-empty name is unreliable. `END` and the final `~` have no
+effect.
 
 ## `Card.dat`
 

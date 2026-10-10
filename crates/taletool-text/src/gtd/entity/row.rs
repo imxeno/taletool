@@ -124,12 +124,17 @@ impl RowReader {
             return None;
         };
         if tag != tagged.tag {
-            self.warn(
-                row,
-                format!("{} tag {} is read as {tag}", self.record, tagged.tag),
-            );
+            self.renamed(row, tagged.tag, tag);
         }
         Some((tag, tagged))
+    }
+
+    /// Reports a tag the client reads under another name.
+    pub(super) fn renamed(&mut self, row: usize, tag: &str, read_as: &str) {
+        self.warn(
+            row,
+            format!("{} tag {tag} is read as {read_as}", self.record),
+        );
     }
 
     /// Returns the entry a row belongs to. Rows before the first `VNUM` fill

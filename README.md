@@ -441,11 +441,14 @@ rows read after a positive count; with a non-positive count, the client reads
 only the text after the count on the `LINEDESC` row, stored as
 `inline_description`. Packing rejects a non-empty `description` with a
 non-positive count. Likewise, a Skill description with a non-positive count has
-at most one line, the text on its `Z_DESC` row. Card, Item, monster, and Skill
-entries omit numeric rows that their source entry lacks, and Card entries keep
-an `ICON` row as `icon`. Abuse documents distinguish a zero-byte payload from a
-counted empty list; undecodable legacy text uses a reversible `bytes_base64`
-entry instead.
+at most one line, the text on its `Z_DESC` row. BCard, Card, Item, monster, and
+Skill entries omit numeric rows that their source entry lacks, and Card entries
+keep an `ICON` row as `icon`. BCard entries hold the client's five text slots,
+whatever their `DESC` count: `subject_slots` holds `SUBJ0` through `SUBJ4`, and
+`list_slots` holds `LIST1-1` through `LIST5-2`. Other numbered `SUBJ` and `LIST`
+rows, which the client ignores, are kept in `ignored_rows`. Abuse documents
+distinguish a zero-byte payload from a counted empty list; undecodable legacy
+text uses a reversible `bytes_base64` entry instead.
 
 Rows whose field counts vary between data revisions retain their complete token
 sequences in JSON. Packing writes those sequences unchanged, including empty,
