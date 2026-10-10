@@ -2,6 +2,7 @@
 
 mod entity;
 mod localized;
+mod row_tokens;
 mod structured;
 
 use serde::{Deserialize, Serialize};

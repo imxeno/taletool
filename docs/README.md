@@ -2,10 +2,6 @@
 
 These pages document NosTale file formats that taletool knows about.
 
-The [NosTale client audit](nostale-client-audit.md) compares these assumptions
-with NosTale and records implementation discrepancies, compatibility limits, and
-claims that require other evidence.
-
 ## Archive Formats
 
 | Page                                                     | Covers                                                                    |
