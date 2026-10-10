@@ -10,8 +10,6 @@ use crate::{
 
 /// Most rows the client's `DSTART` scan reads as description text.
 const DESCRIPTION_SCAN_ROWS: usize = 20;
-/// Largest `LINK` count the client's signed 16-bit count can hold.
-const MAX_LINK_COUNT: i32 = i16::MAX as i32;
 
 /// Contents of one localized `*_nosmall.dat` record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,12 +63,31 @@ impl NosMallValue {
         }
     }
 
-    /// The integer the client reads from a plain signed decimal value.
-    fn decimal(&self) -> Option<i32> {
-        match self {
-            Self::Integer(value) => Some(*value),
-            Self::Text(text) => text.parse().ok(),
-        }
+    /// The integer the client reads from this value, or -1 when it reads none.
+    ///
+    /// The client accepts a 32-bit decimal with an optional sign, or up to 32
+    /// bits of hexadecimal after a `$`, `x` or `0x` prefix. It skips leading
+    /// spaces and stops at a NUL.
+    fn client_integer(&self) -> i32 {
+        let text = match self {
+            Self::Integer(value) => return *value,
+            Self::Text(text) => text,
+        };
+        let text = text.split('\0').next().unwrap_or_default();
+        let text = text.trim_start_matches(' ');
+        let hex = ["$", "x", "X", "0x", "0X"]
+            .iter()
+            .find_map(|prefix| text.strip_prefix(prefix));
+        let value = match hex {
+            Some(digits) if digits.bytes().all(|byte| byte.is_ascii_hexdigit()) => {
+                u32::from_str_radix(digits, 16)
+                    .ok()
+                    .map(|value| value as i32)
+            }
+            Some(_) => None,
+            None => text.parse().ok(),
+        };
+        value.unwrap_or(-1)
     }
 }
 
@@ -120,6 +137,14 @@ pub fn decode_nos_mall(
         } else {
             None
         };
+        // The client applies every LINK row, even one that a later row
+        // replaces or that precedes the first VNUM.
+        if tag == "LINK" && !is_client_link_count(&row_values(rest)) {
+            warnings.push(warning(
+                row,
+                "NosMall LINK count reads as a negative 16-bit value, so the client raises a range error",
+            ));
+        }
         let Some(builder) = current.as_mut() else {
             if !matches!(tag.as_str(), "DEND" | "END" | "~") {
                 warnings.push(warning(row, "expected VNUM entry start"));
@@ -134,16 +159,7 @@ pub fn decode_nos_mall(
             "TITLE1" => entry.title1 = Some(row_text(line).to_owned()),
             "TITLE2" => entry.title2 = Some(row_text(line).to_owned()),
             "COST" => entry.cost = Some(row_values(rest)),
-            "LINK" => {
-                let link = row_values(rest);
-                if !is_client_link_count(&link) {
-                    warnings.push(warning(
-                        row,
-                        format!("NosMall LINK count is not an integer from 0 to {MAX_LINK_COUNT}"),
-                    ));
-                }
-                entry.link = Some(link);
-            }
+            "LINK" => entry.link = Some(row_values(rest)),
             "DSTART" => entry.description_lines = description,
             "DEND" | "END" | "~" => continue,
             _ => {
@@ -246,10 +262,11 @@ fn is_client_tag_row(line: &str) -> bool {
 }
 
 /// Whether the client can size the linked-ID list from this LINK row's count.
+///
+/// The client keeps the low 16 bits of the count as a signed value, reads a
+/// missing count as -1, and raises a range error for a negative count.
 fn is_client_link_count(link: &[NosMallValue]) -> bool {
-    link.first()
-        .and_then(NosMallValue::decimal)
-        .is_some_and(|count| (0..=MAX_LINK_COUNT).contains(&count))
+    link.first().map_or(-1, NosMallValue::client_integer) as i16 >= 0
 }
 
 /// Split off the first token the way the client does: trim the text, then cut
@@ -349,11 +366,18 @@ fn unwritable_entry(entry: &NosMallEntry) -> Option<String> {
         ("title1", &entry.title1),
         ("title2", &entry.title2),
     ] {
-        if value
-            .as_ref()
-            .is_some_and(|value| value.contains(['\r', '\n']))
-        {
+        let Some(value) = value else {
+            continue;
+        };
+        if value.contains(['\r', '\n']) {
             return Some(format!("{field} contains a line break"));
+        }
+        // The row trim and the client's title trim drop leading whitespace.
+        // Trailing whitespace is accepted because decoding keeps it from rows.
+        if value.starts_with(|c: char| c <= ' ') {
+            return Some(format!(
+                "{field} starts with whitespace that the row's trim would remove"
+            ));
         }
     }
     if let Some(text) = unwritable_value(std::iter::once(&entry.vnum).chain(&entry.vnum_fields)) {
@@ -373,9 +397,10 @@ fn unwritable_entry(entry: &NosMallEntry) -> Option<String> {
         .as_ref()
         .is_some_and(|link| !is_client_link_count(link))
     {
-        return Some(format!(
-            "LINK count must be an integer from 0 to {MAX_LINK_COUNT}"
-        ));
+        return Some(
+            "LINK count reads as a negative 16-bit value, so the client would raise a range error"
+                .into(),
+        );
     }
     for (position, line) in entry.description_lines.iter().flatten().enumerate() {
         if line.contains(['\r', '\n']) {
@@ -797,27 +822,87 @@ mod tests {
     }
 
     #[test]
-    fn nos_mall_link_counts_must_fit_the_client_array() {
-        let parsed = decode_uk("VNUM 1\nLINK -1 5\nVNUM 2\nLINK\nVNUM 3\nLINK many\n");
+    fn nos_mall_reads_integers_like_the_client() {
+        for (token, value) in [
+            ("7", 7),
+            ("+7", 7),
+            ("-7", -7),
+            ("07", 7),
+            ("-0", 0),
+            ("  7", 7),
+            ("7\0junk", 7),
+            ("2147483647", i32::MAX),
+            ("-2147483648", i32::MIN),
+            ("$1F", 31),
+            ("$1f", 31),
+            ("x1F", 31),
+            ("X1F", 31),
+            ("0x1F", 31),
+            ("0X1F", 31),
+            ("$FFFFFFFF", -1),
+            ("$7FFFFFFF", i32::MAX),
+            ("2147483648", -1),
+            ("$100000000", -1),
+            ("", -1),
+            ("+", -1),
+            ("$", -1),
+            ("0x", -1),
+            ("-$3", -1),
+            ("$+3", -1),
+            ("7 ", -1),
+            ("1e3", -1),
+            ("True", -1),
+        ] {
+            assert_eq!(text(token).client_integer(), value, "{token:?}");
+        }
+    }
 
-        assert_eq!(warning_rows(&parsed), [2, 4, 6]);
+    #[test]
+    fn nos_mall_link_counts_must_fit_the_client_array() {
+        let parsed = decode_uk(concat!(
+            "VNUM 1\nLINK -1 5\n",
+            "VNUM 2\nLINK\n",
+            "VNUM 3\nLINK many\n",
+            "VNUM 4\nLINK 32768\n",
+            "VNUM 5\nLINK $FFFF 1\n",
+            "VNUM 6\nLINK -$3 1\n",
+        ));
+
+        assert_eq!(warning_rows(&parsed), [2, 4, 6, 8, 10, 12]);
+        assert!(parsed.warnings[0].message.contains("range error"));
         assert_eq!(parsed.document.entries[0].link, values(&[-1, 5]));
         for entry in &parsed.document.entries {
             let document = NosMallDocument {
                 locale: GtdLocale::Uk,
                 entries: vec![entry.clone()],
             };
-            assert!(encode_uk(&document).is_err());
+            assert!(encode_uk(&document).is_err(), "{:?}", entry.link);
         }
 
-        let mut document = parsed.document;
-        document.entries.truncate(1);
-        document.entries[0].link = values(&[32767]);
-        assert!(encode_uk(&document).is_ok());
-        document.entries[0].link = values(&[32768]);
-        assert!(encode_uk(&document).is_err());
-        document.entries[0].link = Some(vec![text("03"), 1.into()]);
-        assert!(encode_uk(&document).is_ok());
+        // The client reads hexadecimal counts and keeps the low 16 bits.
+        let native = concat!(
+            "VNUM\t1\nLINK\t$3\t10\t11\t12\nEND\n",
+            "VNUM\t2\nLINK\t65537\t10\nEND\n",
+            "VNUM\t3\nLINK\t0x2\t1\t2\nEND\n",
+            "VNUM\t4\nLINK\tx1\t1\nEND\n",
+            "VNUM\t5\nLINK\t03\t1\t2\t3\nEND\n",
+            "VNUM\t6\nLINK\t65536\nEND\n",
+            "VNUM\t7\nLINK\t32767\nEND\n",
+        );
+        let parsed = decode_uk(native);
+        assert!(parsed.warnings.is_empty());
+        assert_eq!(parsed.document.entries[1].link, values(&[65537, 10]));
+        assert_eq!(encode_uk(&parsed.document).unwrap(), native);
+    }
+
+    #[test]
+    fn nos_mall_warns_for_every_link_count_the_client_cannot_size() {
+        let parsed = decode_uk("LINK -1\nVNUM 1\nLINK many\nLINK 0\n");
+
+        assert_eq!(warning_rows(&parsed), [1, 1, 3, 3]);
+        assert!(parsed.warnings[0].message.contains("range error"));
+        assert!(parsed.warnings[2].message.contains("range error"));
+        assert_eq!(parsed.document.entries[0].link, values(&[0]));
     }
 
     #[test]
@@ -966,6 +1051,21 @@ mod tests {
         assert!(encode_uk(&entry(tagged)).is_ok());
 
         let mut document = entry(Vec::new());
+        for (title, writable) in [
+            (" lead", false),
+            ("\tlead", false),
+            ("   ", false),
+            ("trail  ", true),
+            ("", true),
+        ] {
+            document.entries[0].title1 = Some(title.into());
+            assert_eq!(encode_uk(&document).is_ok(), writable, "{title:?}");
+        }
+        document.entries[0].title1 = None;
+        document.entries[0].id = Some(" 00001".into());
+        assert!(encode_uk(&document).is_err());
+        document.entries[0].id = None;
+
         for (fields, writable) in [
             (vec![text("a b"), 1.into()], true),
             (vec![1.into(), text("a b")], false),

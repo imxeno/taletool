@@ -544,19 +544,24 @@ trimmed remainder at the first tab, or at the first space when no tab remains. A
 space before a tab therefore stays inside the token: `ITEM 1<TAB>2` has the tag
 `ITEM 1` and is ignored, and `COST<TAB>1 2<TAB>3` reads `1 2` as one value.
 
-Numeric fields take the row's values in order. A missing or non-numeric value
-becomes -1, and values after the last field are ignored. `VNUM` holds three
-integers and four flags in the order shown. A flag is true for a nonzero number
-or `True` and false for zero or `False`, in any letter case. A missing or other
-flag value leaves the first three flags false and the last one true.
+Numeric fields take the row's values in order. Each value is read as a 32-bit
+integer, in decimal with an optional sign or in hexadecimal after a `$`, `x`, or
+`0x` prefix. A missing or non-numeric value becomes -1, and values after the
+last field are ignored. `VNUM` holds three integers and four flags in the order
+shown. A flag is true for a nonzero number or `True` and false for zero or
+`False`, in any letter case. A missing or other flag value leaves the first
+three flags false and the last one true.
 
 `LINK` has no fixed width. Its first value counts the linked item IDs that
 follow, which name other items by their `VNUM` item ID. Buying or gifting an
 item with a positive count opens a selection of the linked items instead of the
 item itself. A count larger than the IDs present reads the missing IDs as -1,
-and IDs after the count are ignored. The count is a signed 16-bit value. A
+and IDs after the count are ignored. The client keeps the low 16 bits of the
+count as a signed value, so `65537` counts one ID and `32768` is negative. A
 negative count, including the -1 of a missing or non-numeric count, makes the
-client raise a range error while it loads the record.
+client raise a range error while it loads the record. This applies to every
+`LINK` row, including one that a later row replaces and one before the first
+`VNUM`.
 
 `TITLE1` and `TITLE2` take the trimmed rest of their row after the tag. Because
 the row is trimmed first, an indented `TITLE1<TAB>name` row sets the title
