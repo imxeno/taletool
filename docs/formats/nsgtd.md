@@ -95,13 +95,12 @@ each table.
 ## Entity Records
 
 `BCard.dat`, `Card.dat`, `Item.dat`, `monster.dat`, and `Skill.dat` share one
-reader shape. The client trims each row and splits off its tag at the first tab
-anywhere in the row, or at the first space when the row has no tab. A row such
-as `DESC x<TAB>sp  y` therefore has the tag `DESC x` and the text `sp  y`. Value
-tokens are split from the rest of the row the same way. A text field is the
-trimmed rest of the row; its inner spaces and tabs are kept. A text row replaces
-the field's earlier text, but unless a section says otherwise, a row with empty
-text leaves the earlier text in place.
+reader shape. The client splits each row into tokens as described above, and the
+first token is the row's tag. Because the tag ends at the first tab whenever the
+row has one, a row such as `DESC x<TAB>sp  y` has the tag `DESC x` and the text
+`sp  y`. A text field is the trimmed rest of the row; its inner spaces and tabs
+are kept. A text row replaces the field's earlier text, but unless a section
+says otherwise, a row with empty text leaves the earlier text in place.
 
 Most rows are selected by the first character of their tag; the sections below
 list the rows that need an exact tag. Every row whose tag begins with `V` starts
@@ -113,11 +112,12 @@ have no effect.
 
 Every row is optional. A new entry's fields are zero unless a section says
 otherwise, and an absent row leaves them unchanged. A present numeric row
-assigns every position the client reads: a missing or invalid token takes that
-position's default, which is -1 unless a section says otherwise, and the value
-is truncated to the width of its field. Tokens are parsed as Delphi integers, so
-a `$` prefix marks a hexadecimal value: `$10` reads as 16. Tokens after the
-positions the client reads are ignored.
+assigns every position the client reads. Its values are integer tokens, so `$10`
+reads as 16 and `-$1F` as -31, while a missing or non-numeric token takes that
+position's default; this includes a number followed by a space before a tab,
+which stays in its token. The default is -1 unless a section says otherwise, and
+the value is truncated to the width of its field. Tokens after the positions the
+client reads are ignored.
 
 ## `BCard.dat`
 
@@ -139,7 +139,7 @@ whatever the number of `DESC` values:
 
 - `DESC` sets the value formats of slots 0 through 4 from its first five values
   and ignores the rest. Unlike other numeric rows, it assigns only the values
-  present, and an invalid value reads as 0, so a repeated `DESC` row replaces
+  present, and a non-numeric value reads as 0, so a repeated `DESC` row replaces
   only as many formats as it has values.
 - `SUBJ<n>` stores the subject text of slot `n`, for `n` from 0 through 4.
 - `LIST<k>-<m>` stores template `m` of slot `k - 1`, for `k` from 1 through 5
@@ -147,10 +147,12 @@ whatever the number of `DESC` values:
 
 The `SUBJ` index is the part of the tag after its fourth character. The `LIST`
 indexes are the parts between the fourth character and the first `-`, and after
-that `-`. The second through fourth characters are not checked, and a row whose
-index is outside these ranges has no effect. Observed records number subjects
-`SUBJ1` through `SUBJ5`, so slot 0 has no subject and `SUBJ5` has no effect.
-Observed `DESC` rows have one through six values.
+that `-`. Each index is read as an integer token, so the row `SUBJ 0<TAB>text`,
+whose tag is `SUBJ 0`, fills slot 0. The second through fourth characters are
+not checked, and a row whose index is missing, non-numeric, or outside these
+ranges has no effect. Observed records number subjects `SUBJ1` through `SUBJ5`,
+so slot 0 has no subject and `SUBJ5` has no effect. Observed `DESC` rows have
+one through six values.
 
 An equipment option of slot `i` is displayed with template 1 of that slot for a
 non-negative option value and template 2 for a negative one. The slot's format
@@ -311,6 +313,11 @@ rows as follows:
 | `CARD`    | `C`         | 20                                              |
 | `MODE`    | `M`         | The 31st value only                             |
 | `ITEM`    | Never read  | None                                            |
+
+An `ETC` boolean is true when its token is a non-zero number or `True`, and
+false when it is zero, `False`, or other text, in any letter case. Such a number
+may be surrounded by spaces and is decimal, with an optional sign, `.` fraction,
+and `E` exponent, so `0.5` reads as true and `$1` as false.
 
 Editing `EFF`, `PARTNER`, `ITEM`, or `PETINFO` therefore has no effect in the
 client. `NAME` is selected by `N`; the client displays `^` in a name as a space.

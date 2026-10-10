@@ -1,32 +1,18 @@
-//! Row splitting shared by the entity record readers and writers.
+//! Row reading shared by the entity record readers and writers.
 //!
-//! The client trims each row and splits off its tag token at the first tab,
-//! or at the first space when the row has no tab. Value tokens are split from
-//! the rest of the row the same way, and text fields are the trimmed rest.
+//! Rows are split with the shared row tokenizer: the tag token first, then
+//! value tokens from the rest of the row. Text fields are the trimmed rest.
 
 use super::invalid;
 use crate::Result;
+use crate::gtd::row_tokens::{client_int, leading_values, split_token, tokens, trim};
 use crate::gtd::{GtdWarning, parse_i32, warning};
 
-/// Removes leading and trailing spaces and control characters, as the client
-/// trims rows and text fields.
-pub(super) fn trim(text: &str) -> &str {
-    text.trim_matches(|c: char| c <= ' ')
-}
-
-/// Splits the leading token from `text` and returns it with the untrimmed
-/// text after its delimiter.
-pub(super) fn split_token(text: &str) -> (&str, &str) {
-    let text = trim(text);
-    let delimiter = if text.contains('\t') { '\t' } else { ' ' };
-    text.split_once(delimiter).unwrap_or((text, ""))
-}
-
-/// A row split into its tag token and the text after it.
+/// A row split into its tag token and the untrimmed text after it.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct TaggedRow<'a> {
     pub(super) tag: &'a str,
-    rest: &'a str,
+    pub(super) rest: &'a str,
 }
 
 impl<'a> TaggedRow<'a> {
@@ -40,51 +26,66 @@ impl<'a> TaggedRow<'a> {
     pub(super) fn text(&self) -> &'a str {
         trim(self.rest)
     }
-
-    pub(super) fn tokens(&self) -> Tokens<'a> {
-        Tokens { rest: self.rest }
-    }
-
-    /// Reads `N` leading values with the client's defaults for missing or
-    /// non-decimal tokens. Also returns whether every value was a decimal
-    /// token, and the untrimmed text after those tokens.
-    pub(super) fn leading<const N: usize>(&self, defaults: [i32; N]) -> ([i32; N], bool, &'a str) {
-        let mut tokens = self.tokens();
-        let mut exact = true;
-        let values = defaults.map(|default| {
-            tokens.next().and_then(parse_i32).unwrap_or_else(|| {
-                exact = false;
-                default
-            })
-        });
-        (values, exact, tokens.rest())
-    }
 }
 
-/// Value tokens split from the rest of a row.
-#[derive(Debug, Clone)]
-pub(super) struct Tokens<'a> {
-    rest: &'a str,
+/// How the client converts one value of a numeric row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Value {
+    /// An integer, or the given default for a token that is not one.
+    Int(i32),
+    /// A boolean, false for a token that is not one.
+    Bool,
 }
 
-impl<'a> Tokens<'a> {
-    /// The untrimmed text after the tokens read so far.
-    pub(super) fn rest(&self) -> &'a str {
-        self.rest
+/// Converts a token the client reads as a boolean: a number is true unless it
+/// is zero, and `True` and `False` match in any letter case. A decimal integer
+/// keeps its value, which the client reads the same way. `None` marks text for
+/// which the client stores false.
+fn client_bool(token: &str) -> Option<i32> {
+    if let Some(value) = parse_i32(token) {
+        return Some(value);
     }
+    let flag = match client_number_is_nonzero(token) {
+        Some(nonzero) => nonzero,
+        None if token.eq_ignore_ascii_case("true") => true,
+        None if token.eq_ignore_ascii_case("false") => false,
+        None => return None,
+    };
+    Some(i32::from(flag))
 }
 
-impl<'a> Iterator for Tokens<'a> {
-    type Item = &'a str;
-
-    fn next(&mut self) -> Option<&'a str> {
-        let (token, rest) = split_token(self.rest);
-        if token.is_empty() {
-            return None;
+/// Reads a token as the client's floating-point numbers: spaces, an optional
+/// sign, digits with an optional `.` fraction, an optional exponent, and
+/// spaces. Returns whether the number is not zero, or `None` for text that is
+/// not a number.
+fn client_number_is_nonzero(token: &str) -> Option<bool> {
+    let text = token.trim_matches(' ');
+    let text = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let (mantissa, exponent) = match text.find(['E', 'e']) {
+        Some(at) => (&text[..at], Some(&text[at + 1..])),
+        None => (text, None),
+    };
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let digits = |text: &str| text.bytes().all(|byte| byte.is_ascii_digit());
+    if mantissa.is_empty() || !digits(whole) || !digits(fraction) {
+        return None;
+    }
+    if let Some(exponent) = exponent {
+        // The client stops reading exponent digits once the exponent
+        // reaches 500, so any further digit is unread text.
+        let mut value = 0;
+        for byte in exponent
+            .strip_prefix(['+', '-'])
+            .unwrap_or(exponent)
+            .bytes()
+        {
+            if !byte.is_ascii_digit() || value >= 500 {
+                return None;
+            }
+            value = value * 10 + u32::from(byte - b'0');
         }
-        self.rest = rest;
-        Some(token)
     }
+    Some(mantissa.bytes().any(|byte| matches!(byte, b'1'..=b'9')))
 }
 
 /// Collects the warnings for one entity record.
@@ -153,21 +154,38 @@ impl RowReader {
         current.as_mut()
     }
 
-    /// Reads every value of a numeric row, or reports a row with a
-    /// non-decimal value.
-    pub(super) fn values(&mut self, row: usize, tag: &str, tagged: &TaggedRow) -> Option<Vec<i32>> {
-        let values: Option<Vec<i32>> = tagged.tokens().map(parse_i32).collect();
-        if values.is_none() {
-            self.warn(
-                row,
-                format!("non-decimal value in {} {tag} row", self.record),
-            );
+    /// Reads every value of a numeric row with the client's conversion for
+    /// each position. A token the client cannot convert takes the default the
+    /// client stores instead, and the row is reported.
+    pub(super) fn values(
+        &mut self,
+        row: usize,
+        tag: &str,
+        tagged: &TaggedRow,
+        conversion: fn(&str, usize) -> Value,
+    ) -> Vec<i32> {
+        let mut defaulted = false;
+        let values = tokens(tagged.rest)
+            .enumerate()
+            .map(|(position, token)| {
+                let (value, default) = match conversion(tag, position) {
+                    Value::Int(default) => (client_int(token), default),
+                    Value::Bool => (client_bool(token), 0),
+                };
+                value.unwrap_or_else(|| {
+                    defaulted = true;
+                    default
+                })
+            })
+            .collect::<Vec<_>>();
+        if defaulted {
+            self.malformed(row, tag, &values);
         }
         values
     }
 
     /// Reads the single value of a `VNUM`-like row with the client's default.
-    /// A missing, non-decimal, or extra token is reported.
+    /// A missing, non-numeric, or extra token is reported.
     pub(super) fn scalar(
         &mut self,
         row: usize,
@@ -175,8 +193,8 @@ impl RowReader {
         tagged: &TaggedRow,
         default: i32,
     ) -> i32 {
-        let ([value], exact, rest) = tagged.leading([default]);
-        if !exact || !rest.is_empty() {
+        let ([value], defaulted, rest) = leading_values(tagged.rest, [default]);
+        if defaulted || !rest.is_empty() {
             self.malformed(row, tag, &[value]);
         }
         value
@@ -249,24 +267,65 @@ mod tests {
     }
 
     #[test]
-    fn tokens_keep_untrimmed_rest_after_a_value() {
-        let row = TaggedRow::parse("LINEDESC 0  two  spaces").unwrap();
-        let ([count], exact, rest) = row.leading([7]);
-        assert_eq!((count, exact, rest), (0, true, " two  spaces"));
+    fn numeric_rows_store_the_client_conversion_of_each_token() {
+        let conversion = |_: &str, position: usize| match position {
+            0 => Value::Int(-1),
+            1 => Value::Int(0),
+            _ => Value::Bool,
+        };
+        let mut rows = RowReader::new("monster");
+        let values = |rows: &mut RowReader, line: &str| {
+            let tagged = TaggedRow::parse(line).unwrap();
+            rows.values(1, "ETC", &tagged, conversion)
+        };
 
-        let row = TaggedRow::parse("LINEDESC\t0\t\tlead").unwrap();
-        let mut tokens = row.tokens();
-        assert_eq!(tokens.next(), Some("0"));
-        assert_eq!(tokens.rest(), "\tlead");
+        assert_eq!(values(&mut rows, "ETC $10 -$1F 5 0"), [16, -31, 5, 0]);
+        assert_eq!(
+            values(&mut rows, "ETC\t7\t8 TRUE false 1.5 .0e+12"),
+            [7, 8, 1, 0, 1, 0]
+        );
+        assert!(rows.warnings.is_empty());
+        assert_eq!(values(&mut rows, "ETC\tx\ty\t$1\t1 \t2"), [-1, 0, 0, 1, 2]);
+        assert_eq!(
+            rows.finish(),
+            [warning(
+                1,
+                "malformed monster ETC row stored as ETC -1 0 0 1 2"
+            )]
+        );
     }
 
     #[test]
-    fn leading_values_use_defaults_for_missing_and_invalid_tokens() {
-        let row = TaggedRow::parse("VNUM junk").unwrap();
-        assert_eq!(row.leading([-1, 0]), ([-1, 0], false, ""));
-
-        let row = TaggedRow::parse("VNUM 5 10 extra").unwrap();
-        assert_eq!(row.leading([-1, 0]), ([5, 10], true, "extra"));
+    fn booleans_follow_the_client_conversion() {
+        for (token, value) in [
+            ("-7", Some(-7)),
+            ("+0", Some(0)),
+            ("True", Some(1)),
+            ("fALSE", Some(0)),
+            ("1 ", Some(1)),
+            (" -0.00 ", Some(0)),
+            ("2.", Some(1)),
+            (".", Some(0)),
+            ("0.001", Some(1)),
+            ("1e", Some(1)),
+            ("0E-5", Some(0)),
+            ("9e0000000499", Some(1)),
+            ("1e500", Some(1)),
+            ("99999999999", Some(1)),
+            ("", None),
+            ("-", None),
+            ("$1", None),
+            ("0x1", None),
+            ("e5", None),
+            ("1.2.3", None),
+            ("1e5000", None),
+            ("1 e2", None),
+            ("\t1", None),
+            (" true", None),
+            ("yes", None),
+        ] {
+            assert_eq!(client_bool(token), value, "{token:?}");
+        }
     }
 
     #[test]

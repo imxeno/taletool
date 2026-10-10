@@ -454,7 +454,13 @@ reversible `bytes_base64` entry instead.
 
 Rows whose field counts vary between data revisions retain their complete token
 sequences in JSON. Packing writes those sequences unchanged, including empty,
-shorter, longer, and partially grouped rows.
+shorter, longer, and partially grouped rows. In BCard, Card, Item, monster, and
+Skill rows, each token is stored as the number the client reads, so `$10`
+becomes 16. A token the client cannot read as a number becomes, with a warning,
+the client's default for its position, or -1 where the client ignores the value.
+Monster `ETC` booleans keep a decimal integer, and other tokens become 1 or 0 as
+the client reads them, with a warning for text other than a number, `True`, or
+`False`.
 
 Map ID, map point, and fish rows instead follow the client's reader. A missing
 or non-numeric value becomes `-1` with a warning in map ID and map point rows

@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::row_tokens::{all_values, client_int, leading_values, trim};
 use super::{
     ParsedGtd, fields, is_ignored_line, parse_i32, push_text, push_values, values, warning,
 };
@@ -9,7 +10,7 @@ use crate::{Result, TextError};
 
 mod row;
 
-use row::{RowReader, TaggedRow, check_rest_text, check_row_text, trim};
+use row::{RowReader, TaggedRow, Value, check_rest_text, check_row_text};
 
 macro_rules! document {
     ($name:ident, $entry:ty) => {
@@ -138,14 +139,14 @@ impl BasicCardSlot {
     /// are. Returns `None` for an index outside the client's slots.
     fn parse(tag: &str) -> Option<Self> {
         let one_based = |index: &str, count: usize| {
-            parse_i32(index)?
+            client_int(index)?
                 .checked_sub(1)
                 .and_then(|index| usize::try_from(index).ok())
                 .filter(|index| *index < count)
         };
         match tag.as_bytes().first()? {
             b'S' => {
-                let slot = usize::try_from(parse_i32(tag.get(4..)?)?).ok()?;
+                let slot = usize::try_from(client_int(tag.get(4..)?)?).ok()?;
                 (slot < BASIC_CARD_SLOTS).then_some(Self::Subject(slot))
             }
             b'L' => {
@@ -228,18 +229,9 @@ pub fn decode_basic_card(text: &str) -> Result<ParsedGtd<BasicCardDocument>> {
             }
             "DESC" => {
                 // The client reads only the first five values, and a
-                // non-decimal value as 0.
-                let mut exact = true;
-                let values = tagged
-                    .tokens()
-                    .map(|token| {
-                        parse_i32(token).unwrap_or_else(|| {
-                            exact = false;
-                            0
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                if !exact {
+                // non-numeric value as 0.
+                let (values, defaulted) = all_values(tagged.rest, 0);
+                if defaulted {
                     rows.malformed(row, tag, &values);
                 }
                 // A repeated row replaces only the values it has.
@@ -433,8 +425,8 @@ pub fn decode_card(text: &str) -> Result<ParsedGtd<CardDocument>> {
         };
         match tag {
             "KIT" => {
-                let ([kit, slot], exact, rest) = tagged.leading([0, 0]);
-                if !exact {
+                let ([kit, slot], defaulted, rest) = leading_values(tagged.rest, [0, 0]);
+                if defaulted {
                     rows.malformed(row, tag, &[kit, slot]);
                 }
                 if (0..3).contains(&kit) && (0..5).contains(&slot) {
@@ -444,8 +436,8 @@ pub fn decode_card(text: &str) -> Result<ParsedGtd<CardDocument>> {
                 }
             }
             "Z_ETC" => {
-                let ([slot], exact, rest) = tagged.leading([0]);
-                if !exact {
+                let ([slot], defaulted, rest) = leading_values(tagged.rest, [0]);
+                if defaulted {
                     rows.malformed(row, tag, &[slot]);
                 }
                 if (0..20).contains(&slot) {
@@ -470,9 +462,7 @@ pub fn decode_card(text: &str) -> Result<ParsedGtd<CardDocument>> {
                     "DESC" => set_text(&mut entry.description, tagged.text()),
                     "ICON" => entry.icon = Some(rows.scalar(row, tag, &tagged, -1)),
                     _ => {
-                        let Some(values) = rows.values(row, tag, &tagged) else {
-                            continue;
-                        };
+                        let values = rows.values(row, tag, &tagged, |_, _| Value::Int(-1));
                         let field = match tag {
                             "GROUP" => &mut entry.group,
                             "STYLE" => &mut entry.style,
@@ -599,6 +589,16 @@ fn item_index_lists_type(values: &[i32]) -> bool {
     (0..4).contains(&item_type)
 }
 
+/// How the client converts each value of an Item row. All but the first
+/// `FLAG` value are flags that default to 0.
+fn item_value(tag: &str, position: usize) -> Value {
+    Value::Int(if tag == "FLAG" && (1..25).contains(&position) {
+        0
+    } else {
+        -1
+    })
+}
+
 /// Counts the signed-item labels the client appends to an Item name. Each
 /// FLAG row with the signed-item flag appends one, and a NAME row with text
 /// replaces the name. Packing writes NAME before a single FLAG row, so the
@@ -668,8 +668,8 @@ pub fn decode_item(text: &str) -> Result<ParsedGtd<ItemDocument>> {
         };
         match tag {
             "VNUM" => {
-                let ([vnum, price], exact, rest) = tagged.leading([-1, 0]);
-                if !exact || !rest.is_empty() {
+                let ([vnum, price], defaulted, rest) = leading_values(tagged.rest, [-1, 0]);
+                if defaulted || !rest.is_empty() {
                     rows.malformed(row, tag, &[vnum, price]);
                 }
                 labels.finish(&mut rows);
@@ -681,8 +681,8 @@ pub fn decode_item(text: &str) -> Result<ParsedGtd<ItemDocument>> {
                 }));
             }
             "LINEDESC" => {
-                let ([count], exact, rest) = tagged.leading([0]);
-                if !exact {
+                let ([count], defaulted, rest) = leading_values(tagged.rest, [0]);
+                if defaulted {
                     rows.malformed(row, tag, &[count]);
                 }
                 let mut description = None;
@@ -734,9 +734,7 @@ pub fn decode_item(text: &str) -> Result<ParsedGtd<ItemDocument>> {
                     set_text(&mut entry.name, tagged.text());
                     continue;
                 }
-                let Some(values) = rows.values(row, tag, &tagged) else {
-                    continue;
-                };
+                let values = rows.values(row, tag, &tagged, item_value);
                 match tag {
                     "INDEX" => {
                         if listed {
@@ -935,6 +933,17 @@ fn monster_row(tag: &str) -> Option<&'static str> {
     })
 }
 
+/// How the client converts each value of a monster row. Values it skips or
+/// never reads take -1.
+fn monster_value(tag: &str, position: usize) -> Value {
+    match (tag, position) {
+        ("ETC", 2..6) => Value::Bool,
+        ("SETTING", 3) => Value::Int(1),
+        ("SETTING", 4) | ("ZSKILL", 2..5) | ("WINFO", 2) | ("AINFO", 1) => Value::Int(0),
+        _ => Value::Int(-1),
+    }
+}
+
 pub fn decode_monster(text: &str) -> Result<ParsedGtd<MonsterDocument>> {
     let mut rows = RowReader::new("monster");
     let mut entries = Vec::new();
@@ -959,9 +968,7 @@ pub fn decode_monster(text: &str) -> Result<ParsedGtd<MonsterDocument>> {
             set_text(&mut entry.name, tagged.text());
             continue;
         }
-        let Some(values) = rows.values(row, tag, &tagged) else {
-            continue;
-        };
+        let values = rows.values(row, tag, &tagged, monster_value);
         match tag {
             "SKILL" => entry.skills = Some(chunks(values, 3)),
             "BASIC" => entry.basic = Some(chunks(values, 5)),
@@ -1102,6 +1109,16 @@ fn skill_row(tag: &str) -> Option<&'static str> {
     })
 }
 
+/// How the client converts each value of a Skill row. Values it skips or
+/// never reads take -1.
+fn skill_value(tag: &str, position: usize) -> Value {
+    let zero = matches!(
+        (tag, position),
+        ("COST", 3..33) | ("EFFECT", 6..9) | ("CELL", 2..93) | ("BASIC", 0)
+    );
+    Value::Int(if zero { 0 } else { -1 })
+}
+
 pub fn decode_skill(text: &str) -> Result<ParsedGtd<SkillDocument>> {
     let lines = text.lines().collect::<Vec<_>>();
     let mut rows = RowReader::new("Skill");
@@ -1123,8 +1140,8 @@ pub fn decode_skill(text: &str) -> Result<ParsedGtd<SkillDocument>> {
                 }));
             }
             "Z_DESC" => {
-                let ([count], exact, rest) = tagged.leading([0]);
-                if !exact {
+                let ([count], defaulted, rest) = leading_values(tagged.rest, [0]);
+                if defaulted {
                     rows.malformed(row, tag, &[count]);
                 }
                 let mut description = SkillDescription {
@@ -1164,9 +1181,7 @@ pub fn decode_skill(text: &str) -> Result<ParsedGtd<SkillDocument>> {
                     set_text(&mut entry.name, tagged.text());
                     continue;
                 }
-                let Some(values) = rows.values(row, tag, &tagged) else {
-                    continue;
-                };
+                let values = rows.values(row, tag, &tagged, skill_value);
                 let field = match tag {
                     "BASIC" => {
                         entry.basic.push(values);
@@ -1515,10 +1530,7 @@ mod tests {
                     "BCard LIST-1 row is dropped because its slot index is not plain decimal"
                 ),
                 warning(11, "unrecognized BCard row"),
-                warning(
-                    12,
-                    "BCard SUBJ 0 row is dropped because its slot index is not plain decimal"
-                ),
+                warning(12, "BCard tag SUBJ 0 is read as SUBJ0"),
             ]
         );
         let entry = &parsed.document.entries[0];
@@ -1527,7 +1539,7 @@ mod tests {
             (3, Some(7), "spaced  name")
         );
         assert_eq!(entry.description, Some(vec![1, 0, 3]));
-        assert_eq!(entry.subject_slots, ["", "one", "two", "", ""]);
+        assert_eq!(entry.subject_slots, ["spaced", "one", "two", "", ""]);
         assert_eq!(entry.list_slots[2], ["", "negative"]);
         assert!(entry.ignored_rows.is_empty());
     }
@@ -2274,15 +2286,64 @@ mod tests {
     }
 
     #[test]
-    fn non_decimal_numeric_rows_are_reported_without_dropping_the_entry() {
-        let parsed = decode_card("VNUM 1\nNAME n\nGROUP 1 x\nTIME 3 4\n").unwrap();
-
+    fn numeric_values_follow_the_client_conversion() {
+        let card = decode_card("VNUM $10\nGROUP 1 x\nTIME -$1F 0x7\nKIT\t1 \t2\tkit\n").unwrap();
         assert_eq!(
-            parsed.warnings,
-            [warning(3, "non-decimal value in Card GROUP row")]
+            card.warnings,
+            [
+                warning(2, "malformed Card GROUP row stored as GROUP 1 -1"),
+                warning(4, "malformed Card KIT row stored as KIT 0 2"),
+            ]
         );
-        assert_eq!(parsed.document.entries[0].group, None);
-        assert_eq!(parsed.document.entries[0].time, Some(vec![3, 4]));
+        let entry = &card.document.entries[0];
+        assert_eq!(entry.vnum, 16);
+        assert_eq!(entry.group, Some(vec![1, -1]));
+        assert_eq!(entry.time, Some(vec![-31, 7]));
+        assert_eq!(card.document.kits[0][2], "kit");
+
+        let item = decode_item("VNUM 1 $A\nFLAG x y\nLINEDESC $FFFF text\n").unwrap();
+        assert_eq!(
+            item.warnings,
+            [warning(2, "malformed Item FLAG row stored as FLAG -1 0")]
+        );
+        let entry = &item.document.entries[0];
+        assert_eq!(
+            (entry.price, entry.flags.as_deref()),
+            (10, Some(&[-1, 0][..]))
+        );
+        assert_eq!(entry.line_desc_count, 65535);
+        assert_eq!(entry.inline_description.as_deref(), Some("text"));
+
+        let monster = decode_monster(concat!(
+            "VNUM 1\nSETTING a b c d e f\nZSKILL a b c\nWINFO a b c\nAINFO a b\n",
+            "ETC 1 x True $1 0.5 false x\nITEM 1 x\n",
+        ))
+        .unwrap();
+        let entry = &monster.document.entries[0];
+        assert_eq!(entry.settings, Some(vec![-1, -1, -1, 1, 0, -1]));
+        assert_eq!(entry.z_skills, Some(vec![-1, -1, 0]));
+        assert_eq!(entry.weapon_info, Some(vec![-1, -1, 0]));
+        assert_eq!(entry.armor_info, Some(vec![-1, 0]));
+        assert_eq!(entry.etc, Some(vec![1, -1, 1, 0, 1, 0, -1]));
+        assert_eq!(entry.items, Some(vec![vec![1, -1]]));
+        assert_eq!(monster.warnings.len(), 6);
+
+        let skill = decode_skill(concat!(
+            "VNUM 1\nCOST a b c d\nEFFECT a b c d e f g\nCELL a b c\nBASIC x y\n",
+            "FCOMBO x\nZ_DESC x\n",
+        ))
+        .unwrap();
+        let entry = &skill.document.entries[0];
+        assert_eq!(entry.cost, Some(vec![-1, -1, -1, 0]));
+        assert_eq!(entry.effect, Some(vec![-1, -1, -1, -1, -1, -1, 0]));
+        assert_eq!(entry.cell, Some(vec![-1, -1, 0]));
+        assert_eq!(entry.basic, [vec![0, -1]]);
+        assert_eq!(entry.final_combo, Some(vec![-1]));
+        assert_eq!(entry.description.declared_count, 0);
+        assert_eq!(
+            skill.warnings.last(),
+            Some(&warning(7, "malformed Skill Z_DESC row stored as Z_DESC 0"))
+        );
     }
 
     #[test]
