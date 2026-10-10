@@ -654,7 +654,7 @@ mod tests {
                 panic!("expected Card document")
             };
             assert_eq!(
-                card.entries[0].style.len(),
+                card.entries[0].style.as_ref().map_or(0, Vec::len),
                 style.split_whitespace().count()
             );
 

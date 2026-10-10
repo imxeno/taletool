@@ -436,11 +436,16 @@ string array.
 NSgtdData JSON retains source order, duplicate entries, repeated fields, signed
 values, opaque ZTS keys, and independently declared counts. Each document has a
 `schema_version` and a filename-selected `kind`. Item documents keep
-`line_desc_count` independent from their optional singular `description`,
-including historical rows whose physical description exists with a non-positive
-declaration. Abuse documents distinguish a zero-byte payload from a counted
-empty list; undecodable legacy text uses a reversible `bytes_base64` entry
-instead.
+`line_desc_count` independent from their description. `description` holds the
+rows read after a positive count; with a non-positive count, the client reads
+only the text after the count on the `LINEDESC` row, stored as
+`inline_description`. Packing rejects a non-empty `description` with a
+non-positive count. Likewise, a Skill description with a non-positive count has
+at most one line, the text on its `Z_DESC` row. Card, Item, monster, and Skill
+entries omit numeric rows that their source entry lacks, and Card entries keep
+an `ICON` row as `icon`. Abuse documents distinguish a zero-byte payload from a
+counted empty list; undecodable legacy text uses a reversible `bytes_base64`
+entry instead.
 
 Rows whose field counts vary between data revisions retain their complete token
 sequences in JSON. Packing writes those sequences unchanged, including empty,
@@ -472,9 +477,10 @@ description scan, as a tagged row.
 
 Decorative `END`, `end`, `E`, and `~` rows are not exposed as JSON framing.
 Reader-visible exceptions are normalized semantically: tutorial `~` becomes a
-step `-1` command, shop-type `~` becomes a vnum `-1` row, and Skill output adds
-the leading-`#` boundary required to keep a positive description from consuming
-the following skill.
+step `-1` command, shop-type `~` becomes a vnum `-1` row, Skill `END` outside a
+description becomes an empty `effect` row, and Skill output adds the leading-`#`
+boundary required to keep a positive description from consuming the following
+skill.
 
 The recognized core filenames are `act_desc.dat`, `BCard.dat`, `Card.dat`,
 `Item.dat`, `monster.dat`, `npctalk.dat`, `Skill.dat`, `quest.dat`,

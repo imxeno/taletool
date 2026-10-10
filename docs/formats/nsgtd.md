@@ -10,11 +10,11 @@ otherwise independent.
 | ---------------------- | ------- | ------------------------------------------------- |
 | `act_desc.dat`         | DAT     | Independent `Data`/`A` rows; observed `end`, `~`  |
 | `BCard.dat`            | DAT     | Next `VNUM` or end of payload                     |
-| `Card.dat`             | DAT     | Global indexed rows plus `VNUM`-started entries   |
-| `Item.dat`             | DAT     | Next `VNUM` or end; `END` stops description scan  |
-| `monster.dat`          | DAT     | Next `VNUM` or end of payload                     |
+| `Card.dat`             | DAT     | Global indexed rows plus `V`-started entries      |
+| `Item.dat`             | DAT     | Next `V` row or end; `END` stops description scan |
+| `monster.dat`          | DAT     | Next `V` row or end of payload                    |
 | `npctalk.dat`          | DAT     | `%` selects a key; `s` appends a state            |
-| `Skill.dat`            | DAT     | Next `VNUM` or end; leading `#` ends descriptions |
+| `Skill.dat`            | DAT     | Next `V` row or end; leading `#` ends description |
 | `quest.dat`            | DAT     | `BEGIN` starts the next entry                     |
 | `qstprize.dat`         | DAT     | `BEGIN` starts the next entry                     |
 | `tutorial.dat`         | DAT     | `script` starts the next entry; `end` is a no-op  |
@@ -92,6 +92,29 @@ reader treats both markers as ignorable framing rows: it recognizes `Data` or
 `A` rows on either side. Source order and duplicate rows are significant within
 each table.
 
+## Entity Records
+
+`BCard.dat`, `Card.dat`, `Item.dat`, `monster.dat`, and `Skill.dat` share one
+reader shape. The client trims each row and splits off its tag at the first tab
+anywhere in the row, or at the first space when the row has no tab. A row such
+as `DESC x<TAB>sp  y` therefore has the tag `DESC x` and the text `sp  y`. Value
+tokens are split from the rest of the row the same way. A text field is the
+trimmed rest of the row; its inner spaces and tabs are kept.
+
+Most rows are selected by the first character of their tag; the sections below
+list the rows that need an exact tag. Every row whose tag begins with `V` starts
+a new zero-filled entry, even when its values are missing or malformed, and the
+following rows belong to that entry. The next `V` row, or end of payload, closes
+it. Rows before the first `V` row fill a placeholder record that the client
+discards. Rows whose tag selects nothing, such as `END` and `~` in most of these
+records, have no effect.
+
+Every row is optional. An absent numeric row leaves the entry's zero-filled
+fields. A present row assigns every position the client reads: a missing or
+non-decimal token takes that position's default, which is -1 unless a section
+says otherwise, and the value is truncated to the width of its field. Tokens
+after the positions the client reads are ignored.
+
 ## `BCard.dat`
 
 Each `BasicCardData` entry is stored on a keyword-prefixed row. The reader
@@ -142,6 +165,7 @@ NAME <text>
 GROUP <i32> <i32>
 STYLE <i32> ...
 EFFECT <i32> <i32> [<i32>]
+[ICON <icon>]
 TIME <i32> <i32>
 1ST <i32> ...
 2ST <i32> ...
@@ -152,15 +176,19 @@ END
 
 `KIT` addresses a 3-by-5 table: kit indices are 0 through 2 inclusive and slot
 indices are 0 through 4 inclusive. `Z_ETC` addresses 20 independent text slots
-numbered 0 through 19 inclusive. A card's `1ST` row contains 18 integers and
-`2ST` contains 12. `STYLE` and `EFFECT` contain arbitrary numbers of integers;
-the client consumes their first five and three values respectively into
-zero-initialized slots.
+numbered 0 through 19 inclusive. Their indices default to 0, and a row outside
+the table has no effect. These global rows may appear anywhere in the file.
 
-`VNUM` starts a card entry. The next `VNUM`, or end of payload, leaves the
-current entry loaded. The client does not commit on `END`: both the extra
-initial `END` in the current file and the per-entry `END` rows have no effect.
-The final `~` is likewise unrecognized and has no effect.
+`EFFECT` is the only row that needs its exact tag; every other row is selected
+by its first character. The client reads 2 values of `GROUP`, `TIME`, and
+`LAST`, 5 of `STYLE`, 3 of `EFFECT`, 18 of `1ST`, and 12 of `2ST`. Observed
+`STYLE` rows hold five values and `EFFECT` rows two or three. The second
+`EFFECT` value and the `ICON` value both set the card's icon, so whichever of
+the two rows comes later wins.
+
+The client does not commit on `END`: both the extra initial `END` in the current
+file and the per-entry `END` rows have no effect. The final `~` is likewise
+unrecognized and has no effect.
 
 ## `Item.dat`
 
@@ -172,40 +200,56 @@ TYPE <i32> <i32>
 FLAG <i32> ...
 DATA <20 integers>
 BUFF <25 integers>
-LINEDESC <declared_count>
+LINEDESC <declared_count> [<text>]
 [<description>]
+...
 END
 ```
 
-`FLAG` contains an arbitrary number of integers; the client consumes the first
-25 into zero-initialized slots. `BUFF` is physically one 25-integer row, viewed
-as five groups of five. `LINEDESC` stores its declared source value
-independently; it is not derived from the physical description row.
+Every row is selected by its first character. A missing price reads as 0. The
+client reads 6 values of `INDEX`, 2 of `TYPE`, and 20 of `DATA`. It reads 25
+`FLAG` values: the first defaults to -1, and the other 24 are flags that default
+to 0. A non-zero 23rd `FLAG` value appends the signed-item label to the name
+loaded so far; a later `NAME` row replaces the labeled name. `BUFF` is
+physically one 25-integer row, viewed as five groups of five; the client reads
+the first four values of each group and skips the fifth.
 
-If the declaration is positive, the client consumes the next physical row and
-then up to 100 additional rows, stopping at `END`, end of payload, or a
-subsequent row beginning with `#` in column one. Blank rows are appended. A
-non-positive declaration consumes no description row. Outside the description
-scan, `END` and the final `~` have no effect. The next `VNUM`, or end of
-payload, is the entry boundary.
+The `LINEDESC` count is kept in a 16-bit word, and the client reads description
+rows only when its signed 16-bit value is positive. For example, `65536` reads
+as 0, `32768` through `65535` read as negative, and `-65535` reads as 1.
+
+A positive count makes the client consume the next physical row as the first
+description line, then up to 100 additional rows, stopping at `END`, end of
+payload, or a row beginning with `#` in column one. The `END` row is consumed;
+the `#` row is not. Rows are trimmed, and blank rows are appended. Text after a
+positive count on the `LINEDESC` row is ignored. If the first consumed row is
+`END`, the description starts empty and the additional scan reuses the limit of
+an earlier description: none before any positive description whose first row was
+not `END`, and 100 afterwards. Without a following `#` row, that scan can
+consume the next item's rows.
+
+A non-positive count consumes no row. The description is the text after the
+count on the `LINEDESC` row itself; its leading whitespace is kept. An empty
+description clears the item's description and resets the count to 0. Outside the
+description scan, `END` and the final `~` have no effect.
 
 ## `monster.dat`
 
-A `VNUM` row starts an entry. The next `VNUM`, or end of payload, closes it;
-there is no `END` row.
+A `V` row starts an entry. The next `V` row, or end of payload, closes it; there
+is no `END` row.
 
 ```text
 VNUM <vnum>
 NAME <text>
 LEVEL <1 integer>
-RACE <i32> ...
+RACE <3 integers>
 ATTRIB <6 integers>
 HP/MP <2 integers>
 EXP <2 integers>
 PREATT <5 integers>
-SETTING <i32> ...
-ETC <i32> ...
-PETINFO <i32> ...
+SETTING <6 integers>
+ETC <8 integers>
+PETINFO <5 integers>
 EFF <3 integers>
 ZSKILL <7 integers>
 WINFO <3 integers>
@@ -216,57 +260,91 @@ SKILL <15 integers>
 PARTNER <20 integers>
 BASIC <50 integers>
 CARD <20 integers>
-MODE <i32> ...
-ITEM <i32> ...
+MODE <32 integers>
+ITEM <60 integers>
 ```
 
-The wider rows contain fixed repeated groups: `SKILL` is five groups of three,
-`BASIC` is ten groups of five, `CARD` is four groups of five, and `ITEM` is 20
-groups of three. All tagged rows are required for a complete entry.
+The widths above are those of observed records. The wider rows contain repeated
+groups: `SKILL` is five groups of three, `BASIC` is ten groups of five, `CARD`
+is four groups of five, and `ITEM` is 20 groups of three. The client reads the
+rows as follows:
 
-Those six rows accept arbitrary token counts. The client consumes prefixes of 3,
-6, 8, 5, 32, and 60 tokens respectively. `ITEM` is interpreted in groups of
-three; a source row may end with a partial group, and that partial group remains
-part of the row. All other monster rows have one fixed width. A standalone final
-`~` is ignored.
+| Row       | Selected by | Values read                                     |
+| --------- | ----------- | ----------------------------------------------- |
+| `LEVEL`   | `L`         | 1                                               |
+| `RACE`    | `R`         | 2                                               |
+| `ATTRIB`  | Exact tag   | 1                                               |
+| `HP/MP`   | `H`         | 2                                               |
+| `EXP`     | Exact tag   | 2                                               |
+| `PREATT`  | Exact tag   | 3                                               |
+| `SETTING` | Exact tag   | 5; the fourth defaults to 1 and the fifth to 0  |
+| `ETC`     | Exact tag   | 2 integers, then 4 booleans defaulting to false |
+| `PETINFO` | Exact tag   | None                                            |
+| `EFF`     | Never read  | None                                            |
+| `ZSKILL`  | `Z`         | 3 after skipping 2; defaults are 0              |
+| `WINFO`   | Exact tag   | 3; the third defaults to 0                      |
+| `WEAPON`  | Exact tag   | 7                                               |
+| `AINFO`   | Exact tag   | 2; the second defaults to 0                     |
+| `ARMOR`   | Exact tag   | 5                                               |
+| `SKILL`   | Exact tag   | 15                                              |
+| `PARTNER` | Never read  | None                                            |
+| `BASIC`   | `B`         | 50                                              |
+| `CARD`    | `C`         | 20                                              |
+| `MODE`    | `M`         | The 31st value only                             |
+| `ITEM`    | Never read  | None                                            |
+
+Editing `EFF`, `PARTNER`, `ITEM`, or `PETINFO` therefore has no effect in the
+client. `NAME` is selected by `N`; the client displays `^` in a name as a space.
+A standalone final `~` is ignored.
 
 ## `Skill.dat`
 
-Like monsters, skills are delimited by the next `VNUM` or end of payload.
+Like monsters, skills are delimited by the next `V` row or end of payload.
 
 ```text
 VNUM <vnum>
 NAME <text>
 TYPE <6 integers>
-COST <i32> ...
+COST <33 integers>
 LEVEL <5 integers>
-EFFECT <i32> ...
+EFFECT <9 integers>
 TARGET <5 integers>
 DATA <15 integers>
-BASIC <6 integers>
-BASIC <6 integers>
-BASIC <6 integers>
-BASIC <6 integers>
-BASIC <6 integers>
+BASIC <slot> <i32> <i32> <i32> <i32> [<i32>]
+...
 FCOMBO <16 integers>
-CELL <i32> ...
-Z_DESC <declared_count>
-<description row>
+CELL <93 integers>
+Z_DESC <declared_count> [<text>]
+[<description row>]
 ...
 <blank row>
 ```
 
-`COST`, `EFFECT`, and `CELL` accept arbitrary token counts. The client consumes
-prefixes of 33, 9, and 93 integers respectively into zero-initialized slots.
-`BASIC` is a repeated physical row; audited records contain five rows per skill.
-`Z_DESC` stores an independent declared count. A positive count causes the
-client to consume the immediately following row and then up to 100 more rows,
-stopping only at end of payload or a subsequent row whose first physical
-character is `#`. Blank rows, `VNUM`, `END`, and `~` are description data while
-that scan is active. In both audited layouts, a leading-`#` divider ultimately
-ends every positive description; intervening blank rows become trailing line
-breaks in the loaded text. A non-positive declaration consumes no following row.
-A final `~` has no effect only when it reaches the outer tagged-row reader.
+`TYPE`, `TARGET`, `COST`, and `CELL` need their exact tags; the other rows are
+selected by their first character. Any tag beginning with `E`, including `END`,
+is read as `EFFECT`. The client never reads `FCOMBO`. It reads 6 values of
+`TYPE`, 5 of `TARGET` and `LEVEL`, 15 of `DATA`, and 9 of `EFFECT`, whose last
+three default to 0. It reads 33 `COST` values, all after the third defaulting to
+0, and skips two `CELL` values before reading 91 that default to 0.
+
+`BASIC` is a repeated row. Its first value selects slot 0 through 4 and defaults
+to 0; the next four values fill that slot. A row naming another slot has no
+effect, and a later row for the same slot replaces the earlier one. Observed
+records contain five rows per skill, one for each slot, with a sixth value the
+client ignores.
+
+The `Z_DESC` count is kept in a 16-bit word like the `Item.dat` count, and only
+a positive signed 16-bit value starts a description scan. A positive count
+causes the client to consume the immediately following row and then up to 100
+more rows, stopping only at end of payload or a subsequent row whose first
+physical character is `#`. Blank rows, `VNUM`, `END`, and `~` are description
+data while that scan is active. In both observed layouts, a leading-`#` divider
+ultimately ends every positive description; intervening blank rows become
+trailing line breaks in the loaded text. Text after a positive count on the
+`Z_DESC` row is ignored. A non-positive count consumes no following row; the
+description is the text after the count on the `Z_DESC` row, with its leading
+whitespace kept. A final `~` has no effect only when it reaches the outer
+tagged-row reader.
 
 ## `npctalk.dat`
 

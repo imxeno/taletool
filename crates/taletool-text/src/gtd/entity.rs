@@ -7,6 +7,10 @@ use super::{
 };
 use crate::{Result, TextError};
 
+mod row;
+
+use row::{RowReader, check_rest_text, check_row_text, trim};
+
 macro_rules! document {
     ($name:ident, $entry:ty) => {
         #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -291,18 +295,27 @@ pub fn encode_basic_card(document: &BasicCardDocument) -> Result<String> {
     Ok(out)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CardEntry {
     pub vnum: i32,
     pub name: String,
-    pub group: Vec<i32>,
-    pub style: Vec<i32>,
-    pub effect: Vec<i32>,
-    pub time: Vec<i32>,
-    pub first_stage: Vec<i32>,
-    pub second_stage: Vec<i32>,
-    pub last: Vec<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_stage: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub second_stage: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<Vec<i32>>,
     pub description: String,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -313,108 +326,108 @@ pub struct CardDocument {
     pub entries: Vec<CardEntry>,
 }
 
+/// Maps a Card tag to the row the client reads it as.
+fn card_row(tag: &str) -> Option<&'static str> {
+    Some(match tag.as_bytes()[0] {
+        b'K' => "KIT",
+        b'Z' => "Z_ETC",
+        b'E' if tag == "EFFECT" => "EFFECT",
+        b'V' => "VNUM",
+        b'I' => "ICON",
+        b'N' => "NAME",
+        b'G' => "GROUP",
+        b'S' => "STYLE",
+        b'T' => "TIME",
+        b'1' => "1ST",
+        b'2' => "2ST",
+        b'L' => "LAST",
+        b'D' => "DESC",
+        _ => return None,
+    })
+}
+
 pub fn decode_card(text: &str) -> Result<ParsedGtd<CardDocument>> {
     let mut kits = vec![vec![String::new(); 5]; 3];
     let mut extra_texts = vec![String::new(); 20];
+    let mut rows = RowReader::new("Card");
     let mut entries = Vec::new();
-    let mut warnings = Vec::new();
-    let mut map = std::collections::BTreeMap::<String, Vec<i32>>::new();
-    let mut strings = std::collections::BTreeMap::<String, String>::new();
-    let finish = |map: &mut std::collections::BTreeMap<String, Vec<i32>>,
-                  strings: &mut std::collections::BTreeMap<String, String>|
-     -> Option<CardEntry> {
-        Some(CardEntry {
-            vnum: *map.remove("VNUM")?.first()?,
-            name: strings.remove("NAME")?,
-            group: map.remove("GROUP")?,
-            style: map.remove("STYLE")?,
-            effect: map.remove("EFFECT")?,
-            time: map.remove("TIME")?,
-            first_stage: map.remove("1ST")?,
-            second_stage: map.remove("2ST")?,
-            last: map.remove("LAST")?,
-            description: strings.remove("DESC")?,
-        })
-    };
+    let mut current = None;
     for (index, line) in text.lines().enumerate() {
         let row = index + 1;
-        if matches!(line.trim(), "END" | "~") {
+        let Some((tag, tagged)) = rows.read(row, line, card_row) else {
             continue;
-        }
-        if is_ignored_line(line) {
-            continue;
-        }
-        let f = fields(line);
-        if f.is_empty() {
-            continue;
-        }
-        if f[0] == "VNUM" && map.contains_key("VNUM") {
-            if let Some(entry) = finish(&mut map, &mut strings) {
-                entries.push(entry);
-            } else {
-                warnings.push(warning(row, "incomplete Card entry"));
-                map.clear();
-                strings.clear();
-            }
-        }
-        match f[0] {
-            "KIT" if f.len() >= 3 => {
-                match (parse_i32(f[1]), parse_i32(f[2])) {
-                    (Some(a), Some(b)) if (0..3).contains(&a) && (0..5).contains(&b) => {
-                        kits[a as usize][b as usize] = f.get(3..).unwrap_or_default().join(" ");
-                        continue;
-                    }
-                    _ => {}
+        };
+        match tag {
+            "KIT" => {
+                let ([kit, slot], exact, rest) = tagged.leading([0, 0]);
+                if !exact {
+                    rows.malformed(row, tag, &[kit, slot]);
                 }
-                warnings.push(warning(row, "invalid KIT row"))
-            }
-            "Z_ETC" if f.len() >= 2 => {
-                match parse_i32(f[1]) {
-                    Some(i) if (0..20).contains(&i) => {
-                        extra_texts[i as usize] = f.get(2..).unwrap_or_default().join(" ");
-                        continue;
-                    }
-                    _ => {}
-                }
-                warnings.push(warning(row, "invalid Z_ETC row"))
-            }
-            "NAME" | "DESC" => {
-                strings.insert(f[0].into(), f.get(1..).unwrap_or_default().join(" "));
-            }
-            "VNUM" | "GROUP" | "STYLE" | "EFFECT" | "TIME" | "1ST" | "2ST" | "LAST" => {
-                let expected = match f[0] {
-                    "VNUM" => 1,
-                    "GROUP" | "TIME" | "LAST" => 2,
-                    "STYLE" => f.len().saturating_sub(1),
-                    "1ST" => 18,
-                    "2ST" => 12,
-                    "EFFECT" => f.len().saturating_sub(1),
-                    _ => unreachable!(),
-                };
-                let parsed = numeric_row(&f, expected);
-                if let Some(v) = parsed {
-                    map.insert(f[0].into(), v);
+                if (0..3).contains(&kit) && (0..5).contains(&slot) {
+                    kits[kit as usize][slot as usize] = trim(rest).to_owned();
                 } else {
-                    warnings.push(warning(row, "invalid Card numeric row or arity"))
+                    rows.warn(row, "invalid KIT row");
                 }
             }
-            _ => warnings.push(warning(row, "unrecognized Card row")),
+            "Z_ETC" => {
+                let ([slot], exact, rest) = tagged.leading([0]);
+                if !exact {
+                    rows.malformed(row, tag, &[slot]);
+                }
+                if (0..20).contains(&slot) {
+                    extra_texts[slot as usize] = trim(rest).to_owned();
+                } else {
+                    rows.warn(row, "invalid Z_ETC row");
+                }
+            }
+            "VNUM" => {
+                let vnum = rows.scalar(row, tag, &tagged, -1);
+                entries.extend(current.replace(CardEntry {
+                    vnum,
+                    ..CardEntry::default()
+                }));
+            }
+            _ => {
+                let Some(entry) = rows.entry(row, &mut current) else {
+                    continue;
+                };
+                match tag {
+                    "NAME" => entry.name = tagged.text().to_owned(),
+                    "DESC" => entry.description = tagged.text().to_owned(),
+                    "ICON" => entry.icon = Some(rows.scalar(row, tag, &tagged, -1)),
+                    _ => {
+                        let Some(values) = rows.values(row, tag, &tagged) else {
+                            continue;
+                        };
+                        let field = match tag {
+                            "GROUP" => &mut entry.group,
+                            "STYLE" => &mut entry.style,
+                            "EFFECT" => {
+                                // EFFECT's second value replaces the icon set
+                                // by an earlier ICON row.
+                                entry.icon = None;
+                                &mut entry.effect
+                            }
+                            "TIME" => &mut entry.time,
+                            "1ST" => &mut entry.first_stage,
+                            "2ST" => &mut entry.second_stage,
+                            "LAST" => &mut entry.last,
+                            _ => unreachable!(),
+                        };
+                        *field = Some(values);
+                    }
+                }
+            }
         }
     }
-    if map.contains_key("VNUM") {
-        if let Some(entry) = finish(&mut map, &mut strings) {
-            entries.push(entry);
-        } else {
-            warnings.push(warning(text.lines().count(), "incomplete Card entry"));
-        }
-    }
+    entries.extend(current);
     Ok(ParsedGtd {
         document: CardDocument {
             kits,
             extra_texts,
             entries,
         },
-        warnings,
+        warnings: rows.finish(),
     })
 }
 
@@ -425,400 +438,415 @@ pub fn encode_card(d: &CardDocument) -> Result<String> {
     for (i, r) in d.kits.iter().enumerate() {
         exact(r, 5, "Card KIT row")?;
         for (j, s) in r.iter().enumerate() {
+            check_row_text(s, &format!("Card KIT {i} {j} text"))?;
             push_text(&mut out, "KIT", &format!("{i}\t{j}\t{s}"))
         }
     }
     for (i, s) in d.extra_texts.iter().enumerate() {
+        check_row_text(s, &format!("Card Z_ETC {i} text"))?;
         push_text(&mut out, "Z_ETC", &format!("{i}\t{s}"))
     }
     for e in &d.entries {
-        exact(&e.group, 2, "Card GROUP")?;
-        exact(&e.time, 2, "Card TIME")?;
-        exact(&e.first_stage, 18, "Card 1ST")?;
-        exact(&e.second_stage, 12, "Card 2ST")?;
-        exact(&e.last, 2, "Card LAST")?;
+        check_row_text(&e.name, &format!("Card entry {} name", e.vnum))?;
+        check_row_text(&e.description, &format!("Card entry {} DESC", e.vnum))?;
         push_values(&mut out, "VNUM", &[e.vnum]);
         push_text(&mut out, "NAME", &e.name);
-        push_values(&mut out, "GROUP", &e.group);
-        push_values(&mut out, "STYLE", &e.style);
-        push_values(&mut out, "EFFECT", &e.effect);
-        push_values(&mut out, "TIME", &e.time);
-        push_values(&mut out, "1ST", &e.first_stage);
-        push_values(&mut out, "2ST", &e.second_stage);
-        push_values(&mut out, "LAST", &e.last);
+        push_optional_values(&mut out, "GROUP", &e.group);
+        push_optional_values(&mut out, "STYLE", &e.style);
+        push_optional_values(&mut out, "EFFECT", &e.effect);
+        if let Some(icon) = e.icon {
+            push_values(&mut out, "ICON", &[icon]);
+        }
+        push_optional_values(&mut out, "TIME", &e.time);
+        push_optional_values(&mut out, "1ST", &e.first_stage);
+        push_optional_values(&mut out, "2ST", &e.second_stage);
+        push_optional_values(&mut out, "LAST", &e.last);
         push_text(&mut out, "DESC", &e.description);
         out.push_str("END\n")
     }
     Ok(out)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ItemEntry {
     pub vnum: i32,
     pub price: i32,
     pub name: String,
-    pub index: Vec<i32>,
-    #[serde(rename = "type")]
-    pub item_type: Vec<i32>,
-    pub flags: Vec<i32>,
-    pub data: Vec<i32>,
-    pub buffs: Vec<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<Vec<i32>>,
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub item_type: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flags: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub buffs: Option<Vec<Vec<i32>>>,
     pub line_desc_count: i32,
+    /// Rows read after a positive `LINEDESC` count, joined with line feeds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Text after a non-positive count on the `LINEDESC` row itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inline_description: Option<String>,
 }
 document!(ItemDocument, ItemEntry);
 
+/// Position of the FLAG value that makes the client append the signed-item
+/// label to the name loaded so far.
+const ITEM_SIGNED_FLAG: usize = 22;
+
+/// Maps an Item tag to the row the client reads it as.
+fn item_row(tag: &str) -> Option<&'static str> {
+    Some(match tag.as_bytes()[0] {
+        b'V' => "VNUM",
+        b'N' => "NAME",
+        b'I' => "INDEX",
+        b'T' => "TYPE",
+        b'F' => "FLAG",
+        b'D' => "DATA",
+        b'B' => "BUFF",
+        b'L' => "LINEDESC",
+        _ => return None,
+    })
+}
+
+/// The client keeps Item and Skill description counts in a 16-bit word and
+/// reads description rows only when its signed value is positive.
+fn description_count_is_positive(count: i32) -> bool {
+    count as i16 > 0
+}
+
 pub fn decode_item(text: &str) -> Result<ParsedGtd<ItemDocument>> {
-    #[derive(Clone, Copy)]
-    enum DescriptionState {
-        None,
-        First { append_client_rows: bool },
-        Additional { remaining: usize },
-    }
-
-    fn finish(
-        n: &mut std::collections::BTreeMap<String, Vec<i32>>,
-        name: &mut Option<String>,
-        description: &mut Option<String>,
-    ) -> Option<ItemEntry> {
-        let vnum = n.remove("VNUM")?;
-        Some(ItemEntry {
-            vnum: *vnum.first()?,
-            price: *vnum.get(1)?,
-            name: name.take()?,
-            index: n.remove("INDEX")?,
-            item_type: n.remove("TYPE")?,
-            flags: n.remove("FLAG")?,
-            data: n.remove("DATA")?,
-            buffs: chunks(n.remove("BUFF")?, 5),
-            line_desc_count: *n.remove("LINEDESC")?.first()?,
-            description: description.take(),
-        })
-    }
-
+    let lines = text.lines().collect::<Vec<_>>();
+    let mut rows = RowReader::new("Item");
     let mut entries = Vec::new();
-    let mut warnings = Vec::new();
-    let mut n = std::collections::BTreeMap::<String, Vec<i32>>::new();
-    let mut name = None;
-    let mut desc = None;
-    let mut description_state = DescriptionState::None;
-    for (index, line) in text.lines().enumerate() {
-        let row = index + 1;
-        let t = line.trim();
-        match description_state {
-            DescriptionState::First { append_client_rows } => {
-                if t == "END" {
-                    description_state = DescriptionState::None;
-                    continue;
+    let mut current: Option<ItemEntry> = None;
+    let mut signed_flag = false;
+    // The client sets its append limit only for a description whose first
+    // row is not END, and later scans reuse it.
+    let mut append_limit = 0;
+    let mut next = 0;
+    while let Some(line) = lines.get(next) {
+        let row = next + 1;
+        next += 1;
+        let Some((tag, tagged)) = rows.read(row, line, item_row) else {
+            continue;
+        };
+        match tag {
+            "VNUM" => {
+                let ([vnum, price], exact, rest) = tagged.leading([-1, 0]);
+                if !exact || !rest.is_empty() {
+                    rows.malformed(row, tag, &[vnum, price]);
                 }
-                if !append_client_rows && line.starts_with('#') {
-                    continue;
-                }
-                if !append_client_rows && (t == "~" || fields(line).first() == Some(&"VNUM")) {
-                    description_state = DescriptionState::None;
-                } else {
-                    desc = Some(t.to_owned());
-                    description_state = if append_client_rows {
-                        DescriptionState::Additional { remaining: 100 }
-                    } else {
-                        DescriptionState::None
-                    };
-                    continue;
-                }
+                entries.extend(current.replace(ItemEntry {
+                    vnum,
+                    price,
+                    ..ItemEntry::default()
+                }));
+                signed_flag = false;
             }
-            DescriptionState::Additional { remaining } => {
-                if line.starts_with('#') || t == "END" {
-                    description_state = DescriptionState::None;
-                    continue;
+            "LINEDESC" => {
+                let ([count], exact, rest) = tagged.leading([0]);
+                if !exact {
+                    rows.malformed(row, tag, &[count]);
                 }
-                let description = desc.get_or_insert_default();
-                description.push('\n');
-                description.push_str(t);
-                description_state = if remaining == 1 {
-                    DescriptionState::None
-                } else {
-                    DescriptionState::Additional {
-                        remaining: remaining - 1,
+                let mut description = None;
+                let mut inline_description = None;
+                if description_count_is_positive(count) {
+                    if !rest.is_empty() {
+                        rows.warn(row, "text after a positive Item LINEDESC count is ignored");
                     }
+                    if let Some(first) = lines.get(next) {
+                        next += 1;
+                        let mut text = String::new();
+                        if trim(first) != "END" {
+                            text.push_str(trim(first));
+                            append_limit = 100;
+                        }
+                        for _ in 0..append_limit {
+                            let Some(line) = lines.get(next) else {
+                                break;
+                            };
+                            if line.starts_with('#') {
+                                break;
+                            }
+                            next += 1;
+                            if trim(line) == "END" {
+                                break;
+                            }
+                            text.push('\n');
+                            text.push_str(trim(line));
+                        }
+                        description = (!text.is_empty()).then_some(text);
+                    }
+                } else if !rest.is_empty() {
+                    inline_description = Some(rest.to_owned());
+                }
+                if let Some(entry) = rows.entry(row, &mut current) {
+                    entry.line_desc_count = count;
+                    entry.description = description;
+                    entry.inline_description = inline_description;
+                }
+            }
+            _ => {
+                let Some(entry) = rows.entry(row, &mut current) else {
+                    continue;
                 };
-                continue;
-            }
-            DescriptionState::None => {}
-        }
-        if matches!(t, "END" | "~") {
-            continue;
-        }
-        if is_ignored_line(line) {
-            continue;
-        }
-        let f = fields(line);
-        if f.is_empty() {
-            continue;
-        }
-        if f[0] == "VNUM" && n.contains_key("VNUM") {
-            if let Some(entry) = finish(&mut n, &mut name, &mut desc) {
-                entries.push(entry);
-            } else {
-                warnings.push(warning(row, "incomplete Item entry"));
-                n.clear();
-                name = None;
-                desc = None;
-            }
-            description_state = DescriptionState::None;
-        }
-        match f[0] {
-            "VNUM" | "INDEX" | "TYPE" | "FLAG" | "DATA" | "BUFF" | "LINEDESC" => {
-                let expected = match f[0] {
-                    "VNUM" | "TYPE" => 2,
-                    "INDEX" => 6,
-                    "FLAG" => f.len().saturating_sub(1),
-                    "DATA" => 20,
-                    "BUFF" => 25,
-                    "LINEDESC" => 1,
+                if tag == "NAME" {
+                    if signed_flag {
+                        rows.warn(
+                            row,
+                            "Item NAME follows a FLAG row with the signed-item flag; packing writes NAME first, so the client appends the signed-item label",
+                        );
+                    }
+                    entry.name = tagged.text().to_owned();
+                    continue;
+                }
+                let Some(values) = rows.values(row, tag, &tagged) else {
+                    continue;
+                };
+                match tag {
+                    "INDEX" => entry.index = Some(values),
+                    "TYPE" => entry.item_type = Some(values),
+                    "FLAG" => {
+                        signed_flag = values.get(ITEM_SIGNED_FLAG).is_some_and(|flag| *flag != 0);
+                        entry.flags = Some(values);
+                    }
+                    "DATA" => entry.data = Some(values),
+                    "BUFF" => entry.buffs = Some(chunks(values, 5)),
                     _ => unreachable!(),
-                };
-                let parsed = numeric_row(&f, expected);
-                if let Some(v) = parsed {
-                    let line_desc_count = (f[0] == "LINEDESC").then(|| v[0]);
-                    n.insert(f[0].into(), v);
-                    if let Some(declared_count) = line_desc_count {
-                        description_state = DescriptionState::First {
-                            append_client_rows: declared_count > 0,
-                        };
-                    }
-                } else {
-                    warnings.push(warning(row, "invalid Item numeric row"))
                 }
             }
-            "NAME" => name = Some(f.get(1..).unwrap_or_default().join(" ")),
-            _ => warnings.push(warning(row, "unrecognized Item row")),
         }
     }
-    if n.contains_key("VNUM") {
-        if let Some(entry) = finish(&mut n, &mut name, &mut desc) {
-            entries.push(entry);
-        } else {
-            warnings.push(warning(text.lines().count(), "incomplete Item entry"));
-        }
-    }
+    entries.extend(current);
     Ok(ParsedGtd {
         document: ItemDocument { entries },
-        warnings,
+        warnings: rows.finish(),
     })
 }
 
 pub fn encode_item(d: &ItemDocument) -> Result<String> {
     let mut out = String::new();
     for e in &d.entries {
-        exact(&e.index, 6, "Item INDEX")?;
-        exact(&e.item_type, 2, "Item TYPE")?;
-        exact(&e.data, 20, "Item DATA")?;
-        exact(&e.buffs, 5, "Item BUFF")?;
-        let mut flat = Vec::new();
-        for b in &e.buffs {
-            exact(b, 5, "Item BUFF group")?;
-            flat.extend(b)
-        }
-        if let Some(description) = &e.description {
-            if description.contains('\r') {
-                return invalid("Item description contains a carriage return");
-            }
-            let lines = description.split('\n').collect::<Vec<_>>();
-            if lines.iter().any(|line| line.trim() == "END") {
-                return invalid("Item description contains its END boundary");
-            }
-            if e.line_desc_count > 0 {
-                if lines.len() > 101 {
-                    return invalid("Item description cannot contain more than 101 physical rows");
-                }
-                if lines.iter().skip(1).any(|line| line.starts_with('#')) {
-                    return invalid("Item description continuation rows cannot start with '#'");
-                }
-            } else if lines.len() != 1
-                || lines[0].trim().starts_with('#')
-                || lines[0].trim() == "~"
-                || fields(lines[0]).first().copied() == Some("VNUM")
-            {
-                return invalid(
-                    "Item description with a non-positive LINEDESC is not one representable source row",
-                );
-            }
-        }
+        check_row_text(&e.name, &format!("Item entry {} name", e.vnum))?;
         push_values(&mut out, "VNUM", &[e.vnum, e.price]);
         push_text(&mut out, "NAME", &e.name);
-        push_values(&mut out, "INDEX", &e.index);
-        push_values(&mut out, "TYPE", &e.item_type);
-        push_values(&mut out, "FLAG", &e.flags);
-        push_values(&mut out, "DATA", &e.data);
-        push_values(&mut out, "BUFF", &flat);
-        push_values(&mut out, "LINEDESC", &[e.line_desc_count]);
-        if let Some(s) = &e.description {
-            out.push_str(s);
-            out.push('\n')
-        }
+        push_optional_values(&mut out, "INDEX", &e.index);
+        push_optional_values(&mut out, "TYPE", &e.item_type);
+        push_optional_values(&mut out, "FLAG", &e.flags);
+        push_optional_values(&mut out, "DATA", &e.data);
+        push_optional_groups(&mut out, "BUFF", &e.buffs, 5)?;
+        push_item_description(&mut out, e)?;
         out.push_str("END\n")
     }
     Ok(out)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+fn push_item_description(out: &mut String, e: &ItemEntry) -> Result<()> {
+    let count = e.line_desc_count;
+    if !description_count_is_positive(count) {
+        if e.description
+            .as_deref()
+            .is_some_and(|text| !text.is_empty())
+        {
+            return invalid(format!(
+                "Item entry {} has a description, but its LINEDESC count {count} is not positive; the client reads only inline_description from the LINEDESC row",
+                e.vnum
+            ));
+        }
+        match e.inline_description.as_deref() {
+            Some(text) if !text.is_empty() => {
+                check_rest_text(text, &format!("Item entry {} inline_description", e.vnum))?;
+                push_text(out, "LINEDESC", &format!("{count}\t{text}"));
+            }
+            _ => push_values(out, "LINEDESC", &[count]),
+        }
+        return Ok(());
+    }
+
+    if e.inline_description
+        .as_deref()
+        .is_some_and(|text| !text.is_empty())
+    {
+        return invalid(format!(
+            "Item entry {} has inline_description, but its LINEDESC count {count} is positive; the client reads only the rows after LINEDESC",
+            e.vnum
+        ));
+    }
+    // A blank first row keeps an empty description from reading later rows.
+    let description = e.description.as_deref().unwrap_or_default();
+    let lines = description.split('\n').collect::<Vec<_>>();
+    if lines.len() > 101 {
+        return invalid("Item description cannot contain more than 101 physical rows");
+    }
+    for (index, line) in lines.iter().enumerate() {
+        check_row_text(
+            line,
+            &format!("Item entry {} description row {}", e.vnum, index + 1),
+        )?;
+        if *line == "END" {
+            return invalid("Item description contains its END boundary");
+        }
+        if index > 0 && line.starts_with('#') {
+            return invalid("Item description continuation rows cannot start with '#'");
+        }
+    }
+    push_values(out, "LINEDESC", &[count]);
+    out.push_str(description);
+    out.push('\n');
+    Ok(())
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MonsterEntry {
     pub vnum: i32,
     pub name: String,
-    pub level: Vec<i32>,
-    pub race: Vec<i32>,
-    pub attributes: Vec<i32>,
-    pub hp_mp: Vec<i32>,
-    pub experience: Vec<i32>,
-    pub pre_attack: Vec<i32>,
-    pub settings: Vec<i32>,
-    pub etc: Vec<i32>,
-    pub pet_info: Vec<i32>,
-    pub effects: Vec<i32>,
-    pub z_skills: Vec<i32>,
-    pub weapon_info: Vec<i32>,
-    pub weapon: Vec<i32>,
-    pub armor_info: Vec<i32>,
-    pub armor: Vec<i32>,
-    pub skills: Vec<Vec<i32>>,
-    pub partner: Vec<i32>,
-    pub basic: Vec<Vec<i32>>,
-    pub cards: Vec<Vec<i32>>,
-    pub mode: Vec<i32>,
-    pub items: Vec<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub race: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attributes: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hp_mp: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experience: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_attack: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub etc: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pet_info: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effects: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_skills: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weapon_info: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weapon: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armor_info: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armor: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skills: Option<Vec<Vec<i32>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partner: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub basic: Option<Vec<Vec<i32>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cards: Option<Vec<Vec<i32>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<Vec<Vec<i32>>>,
 }
 document!(MonsterDocument, MonsterEntry);
 
-fn monster_row_has_arbitrary_width(tag: &str) -> bool {
-    matches!(
-        tag,
-        "RACE" | "SETTING" | "ETC" | "PETINFO" | "MODE" | "ITEM"
-    )
+impl MonsterEntry {
+    fn values_mut(&mut self, tag: &str) -> &mut Option<Vec<i32>> {
+        match tag {
+            "LEVEL" => &mut self.level,
+            "RACE" => &mut self.race,
+            "ATTRIB" => &mut self.attributes,
+            "HP/MP" => &mut self.hp_mp,
+            "EXP" => &mut self.experience,
+            "PREATT" => &mut self.pre_attack,
+            "SETTING" => &mut self.settings,
+            "ETC" => &mut self.etc,
+            "PETINFO" => &mut self.pet_info,
+            "EFF" => &mut self.effects,
+            "ZSKILL" => &mut self.z_skills,
+            "WINFO" => &mut self.weapon_info,
+            "WEAPON" => &mut self.weapon,
+            "AINFO" => &mut self.armor_info,
+            "ARMOR" => &mut self.armor,
+            "PARTNER" => &mut self.partner,
+            "MODE" => &mut self.mode,
+            _ => unreachable!(),
+        }
+    }
 }
 
-const MONSTER_TAGS: [(&str, usize); 21] = [
-    ("LEVEL", 1),
-    ("RACE", 3),
-    ("ATTRIB", 6),
-    ("HP/MP", 2),
-    ("EXP", 2),
-    ("PREATT", 5),
-    ("SETTING", 6),
-    ("ETC", 8),
-    ("PETINFO", 5),
-    ("EFF", 3),
-    ("ZSKILL", 7),
-    ("WINFO", 3),
-    ("WEAPON", 7),
-    ("AINFO", 2),
-    ("ARMOR", 5),
-    ("SKILL", 15),
-    ("PARTNER", 20),
-    ("BASIC", 50),
-    ("CARD", 20),
-    ("MODE", 32),
-    ("ITEM", 60),
+/// Monster tags the client matches exactly. It never reads `EFF`, `PARTNER`,
+/// or `ITEM`; they are kept as source rows.
+const MONSTER_EXACT_TAGS: [&str; 14] = [
+    "ATTRIB", "AINFO", "ARMOR", "WINFO", "WEAPON", "EXP", "ETC", "EFF", "PREATT", "PETINFO",
+    "PARTNER", "SETTING", "SKILL", "ITEM",
 ];
+
+/// Maps a monster tag to the row the client reads it as.
+fn monster_row(tag: &str) -> Option<&'static str> {
+    Some(match tag.as_bytes()[0] {
+        b'V' => "VNUM",
+        b'N' => "NAME",
+        b'L' => "LEVEL",
+        b'R' => "RACE",
+        b'H' => "HP/MP",
+        b'Z' => "ZSKILL",
+        b'B' => "BASIC",
+        b'C' => "CARD",
+        b'M' => "MODE",
+        _ => return MONSTER_EXACT_TAGS.into_iter().find(|exact| *exact == tag),
+    })
+}
+
 pub fn decode_monster(text: &str) -> Result<ParsedGtd<MonsterDocument>> {
+    let mut rows = RowReader::new("monster");
     let mut entries = Vec::new();
-    let mut warnings = Vec::new();
-    let mut n = std::collections::BTreeMap::<String, Vec<i32>>::new();
-    let mut name = None;
-    fn finish(
-        n: &mut std::collections::BTreeMap<String, Vec<i32>>,
-        name: &mut Option<String>,
-    ) -> Option<MonsterEntry> {
-        Some(MonsterEntry {
-            vnum: *n.remove("VNUM")?.first()?,
-            name: name.take()?,
-            level: n.remove("LEVEL")?,
-            race: n.remove("RACE")?,
-            attributes: n.remove("ATTRIB")?,
-            hp_mp: n.remove("HP/MP")?,
-            experience: n.remove("EXP")?,
-            pre_attack: n.remove("PREATT")?,
-            settings: n.remove("SETTING")?,
-            etc: n.remove("ETC")?,
-            pet_info: n.remove("PETINFO")?,
-            effects: n.remove("EFF")?,
-            z_skills: n.remove("ZSKILL")?,
-            weapon_info: n.remove("WINFO")?,
-            weapon: n.remove("WEAPON")?,
-            armor_info: n.remove("AINFO")?,
-            armor: n.remove("ARMOR")?,
-            skills: chunks(n.remove("SKILL")?, 3),
-            partner: n.remove("PARTNER")?,
-            basic: chunks(n.remove("BASIC")?, 5),
-            cards: chunks(n.remove("CARD")?, 5),
-            mode: n.remove("MODE")?,
-            items: chunks(n.remove("ITEM")?, 3),
-        })
-    }
+    let mut current = None;
     for (index, line) in text.lines().enumerate() {
         let row = index + 1;
-        if matches!(line.trim(), "END" | "~") {
+        let Some((tag, tagged)) = rows.read(row, line, monster_row) else {
+            continue;
+        };
+        if tag == "VNUM" {
+            let vnum = rows.scalar(row, tag, &tagged, -1);
+            entries.extend(current.replace(MonsterEntry {
+                vnum,
+                ..MonsterEntry::default()
+            }));
             continue;
         }
-        if is_ignored_line(line) {
+        let Some(entry) = rows.entry(row, &mut current) else {
+            continue;
+        };
+        if tag == "NAME" {
+            entry.name = tagged.text().to_owned();
             continue;
         }
-        let f = fields(line);
-        if f.is_empty() {
+        let Some(values) = rows.values(row, tag, &tagged) else {
             continue;
-        }
-        if f[0] == "VNUM" && n.contains_key("VNUM") {
-            if let Some(e) = finish(&mut n, &mut name) {
-                entries.push(e)
-            } else {
-                warnings.push(warning(row, "incomplete monster entry"));
-                n.clear();
-                name = None
-            }
-        }
-        match f[0] {
-            "NAME" => name = Some(f.get(1..).unwrap_or_default().join(" ")),
-            tag if tag == "VNUM" || MONSTER_TAGS.iter().any(|x| x.0 == tag) => {
-                let expected = if tag == "VNUM" {
-                    1
-                } else {
-                    MONSTER_TAGS.iter().find(|x| x.0 == tag).unwrap().1
-                };
-                let parsed = if monster_row_has_arbitrary_width(tag) {
-                    values(&f[1..])
-                } else {
-                    numeric_row(&f, expected)
-                };
-                if let Some(v) = parsed {
-                    n.insert(tag.into(), v);
-                } else {
-                    warnings.push(warning(row, "invalid monster numeric row"))
-                }
-            }
-            _ => warnings.push(warning(row, "unrecognized monster row")),
+        };
+        match tag {
+            "SKILL" => entry.skills = Some(chunks(values, 3)),
+            "BASIC" => entry.basic = Some(chunks(values, 5)),
+            "CARD" => entry.cards = Some(chunks(values, 5)),
+            "ITEM" => entry.items = Some(chunks(values, 3)),
+            _ => *entry.values_mut(tag) = Some(values),
         }
     }
-    if n.contains_key("VNUM") {
-        if let Some(e) = finish(&mut n, &mut name) {
-            entries.push(e)
-        } else {
-            warnings.push(warning(text.lines().count(), "incomplete monster entry"))
-        }
-    }
+    entries.extend(current);
     Ok(ParsedGtd {
         document: MonsterDocument { entries },
-        warnings,
+        warnings: rows.finish(),
     })
 }
 
 pub fn encode_monster(d: &MonsterDocument) -> Result<String> {
     let mut out = String::new();
     for e in &d.entries {
+        check_row_text(&e.name, &format!("monster entry {} name", e.vnum))?;
         push_values(&mut out, "VNUM", &[e.vnum]);
         push_text(&mut out, "NAME", &e.name);
-        let groups: [(&str, &Vec<i32>); 15] = [
+        let rows: [(&str, &Option<Vec<i32>>); 15] = [
             ("LEVEL", &e.level),
             ("RACE", &e.race),
             ("ATTRIB", &e.attributes),
@@ -835,240 +863,172 @@ pub fn encode_monster(d: &MonsterDocument) -> Result<String> {
             ("AINFO", &e.armor_info),
             ("ARMOR", &e.armor),
         ];
-        for (tag, v) in groups {
-            if !monster_row_has_arbitrary_width(tag) {
-                let len = MONSTER_TAGS.iter().find(|x| x.0 == tag).unwrap().1;
-                exact(v, len, tag)?;
-            }
-            push_values(&mut out, tag, v)
+        for (tag, values) in rows {
+            push_optional_values(&mut out, tag, values);
         }
-        exact(&e.skills, 5, "SKILL")?;
-        let mut skills = Vec::new();
-        for row in &e.skills {
-            exact(row, 3, "SKILL")?;
-            skills.extend(row);
-        }
-        push_values(&mut out, "SKILL", &skills);
-        exact(&e.partner, 20, "PARTNER")?;
-        push_values(&mut out, "PARTNER", &e.partner);
-        for (tag, rows, count, width) in [("BASIC", &e.basic, 10, 5), ("CARD", &e.cards, 4, 5)] {
-            exact(rows, count, tag)?;
-            let mut flat = Vec::new();
-            for r in rows {
-                exact(r, width, tag)?;
-                flat.extend(r)
-            }
-            push_values(&mut out, tag, &flat)
-        }
-        push_values(&mut out, "MODE", &e.mode);
-        let mut items = Vec::new();
-        for row in &e.items {
-            items.extend(row);
-        }
-        push_values(&mut out, "ITEM", &items)
+        push_optional_groups(&mut out, "SKILL", &e.skills, 3)?;
+        push_optional_values(&mut out, "PARTNER", &e.partner);
+        push_optional_groups(&mut out, "BASIC", &e.basic, 5)?;
+        push_optional_groups(&mut out, "CARD", &e.cards, 5)?;
+        push_optional_values(&mut out, "MODE", &e.mode);
+        push_optional_groups(&mut out, "ITEM", &e.items, 3)?;
     }
     Ok(out)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SkillDescription {
     pub declared_count: i32,
+    /// Rows read after a positive count, or at most one line holding the text
+    /// after a non-positive count on the `Z_DESC` row itself.
     pub lines: Vec<String>,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SkillEntry {
     pub vnum: i32,
     pub name: String,
-    #[serde(rename = "type")]
-    pub skill_type: Vec<i32>,
-    pub cost: Vec<i32>,
-    pub level: Vec<i32>,
-    pub effect: Vec<i32>,
-    pub target: Vec<i32>,
-    pub data: Vec<i32>,
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub skill_type: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Vec<i32>>,
+    /// Physical `BASIC` rows in source order.
     pub basic: Vec<Vec<i32>>,
-    pub final_combo: Vec<i32>,
-    pub cell: Vec<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_combo: Option<Vec<i32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell: Option<Vec<i32>>,
     pub description: SkillDescription,
 }
 document!(SkillDocument, SkillEntry);
 
-fn skill_row_has_arbitrary_width(tag: &str) -> bool {
-    matches!(tag, "COST" | "EFFECT" | "CELL")
+/// Maps a Skill tag to the row the client reads it as. Any tag beginning
+/// with `E`, including `END`, is read as EFFECT. The client never reads
+/// `FCOMBO`; it is kept as a source row.
+fn skill_row(tag: &str) -> Option<&'static str> {
+    Some(match tag.as_bytes()[0] {
+        b'V' => "VNUM",
+        b'N' => "NAME",
+        b'L' => "LEVEL",
+        b'E' => "EFFECT",
+        b'D' => "DATA",
+        b'B' => "BASIC",
+        b'Z' => "Z_DESC",
+        _ => {
+            return ["TYPE", "TARGET", "COST", "CELL", "FCOMBO"]
+                .into_iter()
+                .find(|exact| *exact == tag);
+        }
+    })
 }
 
 pub fn decode_skill(text: &str) -> Result<ParsedGtd<SkillDocument>> {
+    let lines = text.lines().collect::<Vec<_>>();
+    let mut rows = RowReader::new("Skill");
     let mut entries = Vec::new();
-    let mut warnings = Vec::new();
-    let mut n = std::collections::BTreeMap::<String, Vec<i32>>::new();
-    let mut name = None;
-    let mut basic = Vec::new();
-    let mut desc: Option<SkillDescription> = None;
-    let mut description_rows_remaining = None;
-    fn finish(
-        n: &mut std::collections::BTreeMap<String, Vec<i32>>,
-        name: &mut Option<String>,
-        basic: &mut Vec<Vec<i32>>,
-        desc: &mut Option<SkillDescription>,
-    ) -> Option<SkillEntry> {
-        Some(SkillEntry {
-            vnum: *n.remove("VNUM")?.first()?,
-            name: name.take()?,
-            skill_type: n.remove("TYPE")?,
-            cost: n.remove("COST")?,
-            level: n.remove("LEVEL")?,
-            effect: n.remove("EFFECT")?,
-            target: n.remove("TARGET")?,
-            data: n.remove("DATA")?,
-            basic: std::mem::take(basic),
-            final_combo: n.remove("FCOMBO")?,
-            cell: n.remove("CELL")?,
-            description: desc.take()?,
-        })
-    }
-    for (index, line) in text.lines().enumerate() {
-        let row = index + 1;
-        if let Some(remaining) = description_rows_remaining {
-            if remaining < 101 && line.starts_with('#') {
-                description_rows_remaining = None;
-                continue;
-            }
-            desc.as_mut().unwrap().lines.push(line.trim().to_owned());
-            description_rows_remaining = if remaining == 1 {
-                None
-            } else {
-                Some(remaining - 1)
-            };
+    let mut current: Option<SkillEntry> = None;
+    let mut next = 0;
+    while let Some(line) = lines.get(next) {
+        let row = next + 1;
+        next += 1;
+        let Some((tag, tagged)) = rows.read(row, line, skill_row) else {
             continue;
-        }
-        if matches!(line.trim(), "END" | "~") {
-            continue;
-        }
-        if is_ignored_line(line) {
-            continue;
-        }
-        let f = fields(line);
-        if f.is_empty() {
-            continue;
-        }
-        if f[0] == "VNUM" && n.contains_key("VNUM") {
-            if let Some(e) = finish(&mut n, &mut name, &mut basic, &mut desc) {
-                entries.push(e)
-            } else {
-                warnings.push(warning(row, "incomplete Skill entry"));
-                n.clear();
-                name = None;
-                basic.clear();
-                desc = None
-            }
-        }
-        match f[0] {
-            "NAME" => name = Some(f.get(1..).unwrap_or_default().join(" ")),
-            "BASIC" => {
-                if let Some(v) = numeric_row(&f, 6) {
-                    basic.push(v)
-                } else {
-                    warnings.push(warning(row, "invalid Skill BASIC row"))
-                }
+        };
+        match tag {
+            "VNUM" => {
+                let vnum = rows.scalar(row, tag, &tagged, -1);
+                entries.extend(current.replace(SkillEntry {
+                    vnum,
+                    ..SkillEntry::default()
+                }));
             }
             "Z_DESC" => {
-                if let Some(v) = one(&f) {
-                    desc = Some(SkillDescription {
-                        declared_count: v,
-                        lines: Vec::new(),
-                    });
-                    description_rows_remaining = (v > 0).then_some(101)
-                } else {
-                    warnings.push(warning(row, "invalid Skill Z_DESC row"))
+                let ([count], exact, rest) = tagged.leading([0]);
+                if !exact {
+                    rows.malformed(row, tag, &[count]);
+                }
+                let mut description = Vec::new();
+                if description_count_is_positive(count) {
+                    if !rest.is_empty() {
+                        rows.warn(row, "text after a positive Skill Z_DESC count is ignored");
+                    }
+                    if let Some(first) = lines.get(next) {
+                        next += 1;
+                        description.push(trim(first).to_owned());
+                        for _ in 0..100 {
+                            let Some(line) = lines.get(next) else {
+                                break;
+                            };
+                            if line.starts_with('#') {
+                                break;
+                            }
+                            next += 1;
+                            description.push(trim(line).to_owned());
+                        }
+                    }
+                } else if !rest.is_empty() {
+                    description.push(rest.to_owned());
+                }
+                if let Some(entry) = rows.entry(row, &mut current) {
+                    entry.description = SkillDescription {
+                        declared_count: count,
+                        lines: description,
+                    };
                 }
             }
-            "VNUM" | "TYPE" | "COST" | "LEVEL" | "EFFECT" | "TARGET" | "DATA" | "FCOMBO"
-            | "CELL" => {
-                let expected = match f[0] {
-                    "VNUM" => 1,
-                    "TYPE" => 6,
-                    "COST" => 33,
-                    "LEVEL" | "TARGET" => 5,
-                    "EFFECT" => 9,
-                    "DATA" => 15,
-                    "FCOMBO" => 16,
-                    "CELL" => 93,
+            _ => {
+                let Some(entry) = rows.entry(row, &mut current) else {
+                    continue;
+                };
+                if tag == "NAME" {
+                    entry.name = tagged.text().to_owned();
+                    continue;
+                }
+                let Some(values) = rows.values(row, tag, &tagged) else {
+                    continue;
+                };
+                let field = match tag {
+                    "BASIC" => {
+                        entry.basic.push(values);
+                        continue;
+                    }
+                    "TYPE" => &mut entry.skill_type,
+                    "COST" => &mut entry.cost,
+                    "LEVEL" => &mut entry.level,
+                    "EFFECT" => &mut entry.effect,
+                    "TARGET" => &mut entry.target,
+                    "DATA" => &mut entry.data,
+                    "FCOMBO" => &mut entry.final_combo,
+                    "CELL" => &mut entry.cell,
                     _ => unreachable!(),
                 };
-                let parsed = if skill_row_has_arbitrary_width(f[0]) {
-                    values(&f[1..])
-                } else {
-                    numeric_row(&f, expected)
-                };
-                if let Some(v) = parsed {
-                    n.insert(f[0].into(), v);
-                } else {
-                    warnings.push(warning(row, "invalid Skill numeric row"))
-                }
+                *field = Some(values);
             }
-            _ => warnings.push(warning(row, "unrecognized Skill row")),
         }
     }
-    if n.contains_key("VNUM") {
-        if let Some(e) = finish(&mut n, &mut name, &mut basic, &mut desc) {
-            entries.push(e)
-        } else {
-            warnings.push(warning(text.lines().count(), "incomplete Skill entry"))
-        }
-    }
+    entries.extend(current);
     Ok(ParsedGtd {
         document: SkillDocument { entries },
-        warnings,
+        warnings: rows.finish(),
     })
 }
 
 pub fn encode_skill(d: &SkillDocument) -> Result<String> {
     let mut out = String::new();
     for e in &d.entries {
-        if e.description.declared_count <= 0 && !e.description.lines.is_empty() {
-            return invalid("Skill Z_DESC with a non-positive count cannot contain lines");
-        }
-        if e.description.declared_count > 0 && e.description.lines.is_empty() {
-            return invalid("Skill Z_DESC with a positive count requires a description row");
-        }
-        if e.description.lines.len() > 101 {
-            return invalid("Skill Z_DESC cannot contain more than 101 physical rows");
-        }
-        if e.description
-            .lines
-            .iter()
-            .skip(1)
-            .any(|line| line.starts_with('#'))
-        {
-            return invalid("Skill Z_DESC continuation rows cannot start with '#'");
-        }
-        if e.description
-            .lines
-            .iter()
-            .any(|line| line.contains(['\r', '\n']))
-        {
-            return invalid("Skill Z_DESC line contains a physical line break");
-        }
-        for (v, len, tag) in [
-            (&e.skill_type, 6, "TYPE"),
-            (&e.cost, 33, "COST"),
-            (&e.level, 5, "LEVEL"),
-            (&e.effect, 9, "EFFECT"),
-            (&e.target, 5, "TARGET"),
-            (&e.data, 15, "DATA"),
-            (&e.final_combo, 16, "FCOMBO"),
-            (&e.cell, 93, "CELL"),
-        ] {
-            if !skill_row_has_arbitrary_width(tag) {
-                exact(v, len, tag)?
-            }
-        }
-        exact(&e.basic, 5, "Skill BASIC")?;
+        check_row_text(&e.name, &format!("Skill entry {} name", e.vnum))?;
         push_values(&mut out, "VNUM", &[e.vnum]);
         push_text(&mut out, "NAME", &e.name);
-        for (tag, v) in [
+        for (tag, values) in [
             ("TYPE", &e.skill_type),
             ("COST", &e.cost),
             ("LEVEL", &e.level),
@@ -1076,29 +1036,98 @@ pub fn encode_skill(d: &SkillDocument) -> Result<String> {
             ("TARGET", &e.target),
             ("DATA", &e.data),
         ] {
-            push_values(&mut out, tag, v)
+            push_optional_values(&mut out, tag, values)
         }
         for b in &e.basic {
-            exact(b, 6, "Skill BASIC row")?;
             push_values(&mut out, "BASIC", b)
         }
-        push_values(&mut out, "FCOMBO", &e.final_combo);
-        push_values(&mut out, "CELL", &e.cell);
-        push_values(&mut out, "Z_DESC", &[e.description.declared_count]);
-        for line in &e.description.lines {
-            out.push_str(line);
-            out.push('\n')
-        }
+        push_optional_values(&mut out, "FCOMBO", &e.final_combo);
+        push_optional_values(&mut out, "CELL", &e.cell);
+        push_skill_description(&mut out, e)?;
         out.push_str("#\n")
     }
     Ok(out)
 }
 
+fn push_skill_description(out: &mut String, e: &SkillEntry) -> Result<()> {
+    let count = e.description.declared_count;
+    let lines = &e.description.lines;
+    if !description_count_is_positive(count) {
+        match lines.as_slice() {
+            [] => push_values(out, "Z_DESC", &[count]),
+            [text] if text.is_empty() => push_values(out, "Z_DESC", &[count]),
+            [text] => {
+                check_rest_text(text, &format!("Skill entry {} Z_DESC text", e.vnum))?;
+                push_text(out, "Z_DESC", &format!("{count}\t{text}"));
+            }
+            _ => {
+                return invalid(format!(
+                    "Skill entry {} Z_DESC count {count} is not positive, so its description is one line on the Z_DESC row",
+                    e.vnum
+                ));
+            }
+        }
+        return Ok(());
+    }
+
+    if lines.is_empty() {
+        return invalid("Skill Z_DESC with a positive count requires a description row");
+    }
+    if lines.len() > 101 {
+        return invalid("Skill Z_DESC cannot contain more than 101 physical rows");
+    }
+    for (index, line) in lines.iter().enumerate() {
+        check_row_text(
+            line,
+            &format!("Skill entry {} Z_DESC row {}", e.vnum, index + 1),
+        )?;
+        if index > 0 && line.starts_with('#') {
+            return invalid("Skill Z_DESC continuation rows cannot start with '#'");
+        }
+    }
+    push_values(out, "Z_DESC", &[count]);
+    for line in lines {
+        out.push_str(line);
+        out.push('\n')
+    }
+    Ok(())
+}
+
+fn push_optional_values(out: &mut String, tag: &str, values: &Option<Vec<i32>>) {
+    if let Some(values) = values {
+        push_values(out, tag, values);
+    }
+}
+
+/// Writes grouped values as one row. Every group but the last must be full,
+/// so the client reads the same groups back.
+fn push_optional_groups(
+    out: &mut String,
+    tag: &str,
+    groups: &Option<Vec<Vec<i32>>>,
+    width: usize,
+) -> Result<()> {
+    let Some(groups) = groups else {
+        return Ok(());
+    };
+    let mut flat = Vec::new();
+    for (index, group) in groups.iter().enumerate() {
+        let last = index + 1 == groups.len();
+        if group.is_empty() || group.len() > width || (!last && group.len() != width) {
+            return invalid(format!(
+                "{tag} group {} has {} values; groups hold {width} values and only the last may be shorter",
+                index + 1,
+                group.len()
+            ));
+        }
+        flat.extend(group);
+    }
+    push_values(out, tag, &flat);
+    Ok(())
+}
+
 fn one(f: &[&str]) -> Option<i32> {
     if f.len() == 2 { parse_i32(f[1]) } else { None }
-}
-fn numeric_row(f: &[&str], expected: usize) -> Option<Vec<i32>> {
-    (f.len() == expected + 1).then(|| values(&f[1..])).flatten()
 }
 fn chunks(v: Vec<i32>, width: usize) -> Vec<Vec<i32>> {
     v.chunks(width).map(<[i32]>::to_vec).collect()
@@ -1243,19 +1272,20 @@ mod tests {
             entries: vec![CardEntry {
                 vnum: 1,
                 name: "n".into(),
-                group: vec![0; 2],
-                style: vec![0; 5],
-                effect: vec![],
-                time: vec![0; 2],
-                first_stage: vec![0; 18],
-                second_stage: vec![0; 12],
-                last: vec![0; 2],
+                group: Some(vec![0; 2]),
+                style: Some(vec![0; 5]),
+                effect: Some(vec![]),
+                icon: None,
+                time: Some(vec![0; 2]),
+                first_stage: Some(vec![0; 18]),
+                second_stage: Some(vec![0; 12]),
+                last: Some(vec![0; 2]),
                 description: "d".into(),
             }],
         };
         assert!(encode_card(&base).is_ok());
         let mut long = base;
-        long.entries[0].effect = vec![1, 2, 3, 4, 5, 6, 7];
+        long.entries[0].effect = Some(vec![1, 2, 3, 4, 5, 6, 7]);
         let native = encode_card(&long).unwrap();
         assert!(native.contains("EFFECT\t1\t2\t3\t4\t5\t6\t7\n"));
         assert_eq!(decode_card(&native).unwrap().document, long)
@@ -1309,7 +1339,7 @@ mod tests {
             );
             let parsed = decode_card(&source).unwrap();
             assert!(parsed.warnings.is_empty());
-            assert_eq!(parsed.document.entries[0].style, style);
+            assert_eq!(parsed.document.entries[0].style, Some(style));
             assert_eq!(
                 decode_card(&encode_card(&parsed.document).unwrap())
                     .unwrap()
@@ -1336,7 +1366,7 @@ mod tests {
             let parsed = decode_item(&source).unwrap();
             let entry = &parsed.document.entries[0];
             assert!(parsed.warnings.is_empty());
-            assert_eq!(entry.flags, flags);
+            assert_eq!(entry.flags, Some(flags));
             assert_eq!(entry.line_desc_count, 23);
             assert_eq!(entry.description.as_deref(), Some("zts2e"));
             assert_eq!(
@@ -1375,12 +1405,12 @@ mod tests {
         let parsed = decode_monster(&source).unwrap();
         let entry = &parsed.document.entries[0];
         assert!(parsed.warnings.is_empty());
-        assert!(entry.race.is_empty());
-        assert_eq!(entry.settings, [1, 2, 3, 4, 5, 6, 7]);
-        assert_eq!(entry.etc, [-9]);
-        assert_eq!(entry.pet_info, [1, 2, 3, 4, 5, 6]);
-        assert_eq!(entry.mode.len(), 33);
-        assert_eq!(entry.items, [vec![2000, 9000, 1], vec![-1]]);
+        assert_eq!(entry.race, Some(vec![]));
+        assert_eq!(entry.settings, Some(vec![1, 2, 3, 4, 5, 6, 7]));
+        assert_eq!(entry.etc, Some(vec![-9]));
+        assert_eq!(entry.pet_info, Some(vec![1, 2, 3, 4, 5, 6]));
+        assert_eq!(entry.mode.as_ref().map(|mode| mode.len()), Some(33));
+        assert_eq!(entry.items, Some(vec![vec![2000, 9000, 1], vec![-1]]));
         assert_eq!(
             decode_monster(&encode_monster(&parsed.document).unwrap())
                 .unwrap()
@@ -1405,9 +1435,9 @@ mod tests {
         let parsed = decode_skill(&source).unwrap();
         let entry = &parsed.document.entries[0];
         assert!(parsed.warnings.is_empty());
-        assert!(entry.cost.is_empty());
-        assert_eq!(entry.effect, [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4]);
-        assert_eq!(entry.cell, [-1, 2]);
+        assert_eq!(entry.cost, Some(vec![]));
+        assert_eq!(entry.effect, Some(vec![-5, -4, -3, -2, -1, 0, 1, 2, 3, 4]));
+        assert_eq!(entry.cell, Some(vec![-1, 2]));
         assert_eq!(
             decode_skill(&encode_skill(&parsed.document).unwrap())
                 .unwrap()
@@ -1472,32 +1502,448 @@ mod tests {
     }
 
     #[test]
-    fn item_entries_end_on_vnum_or_eof_and_keep_non_positive_descriptions() {
+    fn item_non_positive_descriptions_are_the_rest_of_the_linedesc_row() {
         let source = format!(
-            "{}zero count\n{}negative count\n",
-            item_record(1, 0),
-            item_record(2, -7),
+            "{} zero  count\n{}",
+            item_record(1, 0).trim_end(),
+            item_record(2, -7).replace("LINEDESC -7", "LINEDESC\t-7\tnegative\tcount"),
         );
         let parsed = decode_item(&source).unwrap();
 
         assert!(parsed.warnings.is_empty());
+        let [first, second] = parsed.document.entries.as_slice() else {
+            panic!("expected two Item entries");
+        };
+        assert_eq!(first.line_desc_count, 0);
+        assert_eq!(first.description, None);
+        assert_eq!(first.inline_description.as_deref(), Some("zero  count"));
+        assert_eq!(second.line_desc_count, -7);
+        assert_eq!(
+            second.inline_description.as_deref(),
+            Some("negative\tcount")
+        );
+
+        let encoded = encode_item(&parsed.document).unwrap();
+        assert!(encoded.contains("LINEDESC\t0\tzero  count\nEND\n"));
+        assert_eq!(decode_item(&encoded).unwrap().document, parsed.document);
+    }
+
+    #[test]
+    fn item_non_positive_linedesc_reads_no_following_row() {
+        let source = format!("{}NAME override\nEND\n", item_record(1, 0));
+        let parsed = decode_item(&source).unwrap();
+
+        assert!(parsed.warnings.is_empty());
+        let entry = &parsed.document.entries[0];
+        assert_eq!(entry.name, "override");
+        assert_eq!(entry.description, None);
+        assert_eq!(entry.inline_description, None);
+    }
+
+    #[test]
+    fn description_counts_use_the_signed_low_word() {
+        for (count, positive) in [
+            (65536, false),
+            (32768, false),
+            (65535, false),
+            (-65535, true),
+        ] {
+            let item = decode_item(&format!("{}NAME renamed\nEND\n", item_record(1, count)))
+                .unwrap()
+                .document;
+            let skill = decode_skill(&format!("{}NAME renamed\n#\n", skill_record(1, count)))
+                .unwrap()
+                .document;
+            let (item, skill) = (&item.entries[0], &skill.entries[0]);
+            assert_eq!(item.line_desc_count, count);
+            assert_eq!(skill.description.declared_count, count);
+            if positive {
+                assert_eq!(
+                    (item.name.as_str(), item.description.as_deref()),
+                    ("n1", Some("NAME renamed"))
+                );
+                assert_eq!(
+                    (skill.name.as_str(), skill.description.lines.as_slice()),
+                    ("n1", ["NAME renamed".to_owned()].as_slice())
+                );
+            } else {
+                assert_eq!(
+                    (item.name.as_str(), item.description.as_deref()),
+                    ("renamed", None)
+                );
+                assert_eq!(
+                    (skill.name.as_str(), skill.description.lines.len()),
+                    ("renamed", 0)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn item_writer_places_descriptions_where_the_client_reads_them() {
+        let source = format!(
+            "{} Dragon blade\nEND\n{} Very rare\nEND\n",
+            item_record(1, 0).trim_end(),
+            item_record(2, 0).trim_end(),
+        );
+        let mut document = decode_item(&source).unwrap().document;
+        let encoded = encode_item(&document).unwrap();
+        assert!(encoded.contains("LINEDESC\t0\tDragon blade\nEND\nVNUM\t2\t10\n"));
+        assert_eq!(decode_item(&encoded).unwrap().document, document);
+
+        document.entries[0].description = Some("Dragon blade".to_owned());
+        document.entries[0].inline_description = None;
+        let error = encode_item(&document).unwrap_err().to_string();
+        assert!(error.contains("inline_description"), "{error}");
+
+        document.entries[0].line_desc_count = 65536;
+        assert!(encode_item(&document).is_err());
+
+        document.entries[0].line_desc_count = 1;
+        document.entries[0].inline_description = Some("inline".to_owned());
+        assert!(encode_item(&document).is_err());
+
+        document.entries[0].inline_description = None;
+        document.entries[0].description = Some("first\n second".to_owned());
+        assert!(encode_item(&document).is_err());
+    }
+
+    #[test]
+    fn item_positive_count_without_description_keeps_the_next_item() {
+        let mut document = decode_item(&format!("{}first\nEND\n", item_record(1, 1)))
+            .unwrap()
+            .document;
+        document.entries[0].description = None;
+        document.entries.push(document.entries[0].clone());
+        document.entries[1].vnum = 2;
+
+        let encoded = encode_item(&document).unwrap();
+        assert!(encoded.contains("LINEDESC\t1\n\nEND\nVNUM\t2\t10\n"));
+        assert_eq!(decode_item(&encoded).unwrap().document, document);
+    }
+
+    #[test]
+    fn item_description_starting_with_end_reuses_the_previous_append_limit() {
+        let source = format!(
+            "{}desc one\nEND\n{}END\n{}desc three\nEND\n",
+            item_record(1, 1),
+            item_record(2, 5),
+            item_record(3, 1),
+        );
+        let parsed = decode_item(&source).unwrap();
+
         assert_eq!(parsed.document.entries.len(), 2);
-        assert_eq!(parsed.document.entries[0].line_desc_count, 0);
-        assert_eq!(
-            parsed.document.entries[0].description.as_deref(),
-            Some("zero count")
-        );
-        assert_eq!(parsed.document.entries[1].line_desc_count, -7);
-        assert_eq!(
-            parsed.document.entries[1].description.as_deref(),
-            Some("negative count")
-        );
+        let description = parsed.document.entries[1].description.as_deref().unwrap();
+        assert!(description.starts_with("\nVNUM 3 10\nNAME n3\n"));
+        assert!(description.ends_with("\nLINEDESC 1\ndesc three"));
         assert_eq!(
             decode_item(&encode_item(&parsed.document).unwrap())
                 .unwrap()
                 .document,
             parsed.document
         );
+    }
+
+    #[test]
+    fn item_vnum_rows_always_start_a_new_entry() {
+        let source = format!(
+            "NAME orphan\nVNUM 5\nNAME five\nLINEDESC 1\nfive desc\nEND\nVNUM 6 10\nLINEDESC 0\nEND\n{}",
+            "~\n"
+        );
+        let parsed = decode_item(&source).unwrap();
+
+        assert_eq!(
+            parsed.warnings,
+            [
+                warning(1, "Item row before the first VNUM has no entry"),
+                warning(2, "malformed Item VNUM row stored as VNUM 5 0"),
+            ]
+        );
+        let [five, six] = parsed.document.entries.as_slice() else {
+            panic!("expected two Item entries");
+        };
+        assert_eq!((five.vnum, five.price, five.name.as_str()), (5, 0, "five"));
+        assert_eq!(five.description.as_deref(), Some("five desc"));
+        assert_eq!((six.vnum, six.price, six.name.as_str()), (6, 10, ""));
+        assert_eq!(six.description, None);
+        assert_eq!(six.index, None);
+
+        let reparsed = decode_item(&encode_item(&parsed.document).unwrap()).unwrap();
+        assert!(reparsed.warnings.is_empty());
+        assert_eq!(reparsed.document, parsed.document);
+    }
+
+    #[test]
+    fn item_name_after_a_signed_flag_is_reported() {
+        let mut flags = [0; 25];
+        flags[ITEM_SIGNED_FLAG] = 1;
+        let flags = flags
+            .iter()
+            .map(i32::to_string)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let parsed = decode_item(&format!("VNUM 1 0\nFLAG {flags}\nNAME late\n")).unwrap();
+        assert_eq!(parsed.warnings.len(), 1);
+        assert_eq!(parsed.warnings[0].row, 3);
+        assert_eq!(parsed.document.entries[0].name, "late");
+    }
+
+    #[test]
+    fn old_item_documents_load_unless_a_description_follows_a_non_positive_count() {
+        let entry = |line_desc_count: i32, description: &str| {
+            serde_json::json!({
+                "vnum": 1, "price": 10, "name": "n",
+                "index": [0, 0, 0, 0, 0, 0], "type": [0, 1], "flags": [0],
+                "data": [0], "buffs": [[0, 0, 0, 0, 0]],
+                "line_desc_count": line_desc_count, "description": description,
+            })
+        };
+        let document = |entry| {
+            serde_json::from_value::<ItemDocument>(serde_json::json!({ "entries": [entry] }))
+                .unwrap()
+        };
+
+        let blank = encode_item(&document(entry(0, ""))).unwrap();
+        assert!(blank.ends_with("LINEDESC\t0\nEND\n"));
+        let positive = encode_item(&document(entry(3, "a\nb"))).unwrap();
+        assert!(positive.ends_with("LINEDESC\t3\na\nb\nEND\n"));
+        let error = encode_item(&document(entry(0, "historical row")))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not positive"), "{error}");
+    }
+
+    #[test]
+    fn card_keeps_physical_text_icon_and_entries_without_optional_rows() {
+        let source = concat!(
+            "KIT 1 2 kit  text\nZ_ETC 3  lead\n",
+            "VNUM 1\nNAME A  B\nEFFECT 0 5 0\nICON 77\nDESC x\tsp  y\nEND\n",
+            "VNUM 2\nNAME second\nICON 9\nEFFECT 1 2 3\nEND\n~\n",
+        );
+        let parsed = decode_card(source).unwrap();
+
+        assert_eq!(
+            parsed.warnings,
+            [warning(7, "Card tag DESC x is read as DESC")]
+        );
+        assert_eq!(parsed.document.kits[1][2], "kit  text");
+        assert_eq!(parsed.document.extra_texts[3], "lead");
+        let [first, second] = parsed.document.entries.as_slice() else {
+            panic!("expected two Card entries");
+        };
+        assert_eq!(first.name, "A  B");
+        assert_eq!(first.icon, Some(77));
+        assert_eq!(first.description, "sp  y");
+        assert_eq!(first.group, None);
+        assert_eq!(second.icon, None);
+        assert_eq!(second.effect, Some(vec![1, 2, 3]));
+        assert_eq!(second.description, "");
+
+        let encoded = encode_card(&parsed.document).unwrap();
+        assert!(encoded.contains("EFFECT\t0\t5\t0\nICON\t77\nDESC\tsp  y\nEND\n"));
+        let reparsed = decode_card(&encoded).unwrap();
+        assert!(reparsed.warnings.is_empty());
+        assert_eq!(reparsed.document, parsed.document);
+    }
+
+    #[test]
+    fn card_vnum_rows_always_start_a_new_entry() {
+        let source = format!("NAME orphan\nVNUM 5 junk\nNAME five\n{}", card_record(6));
+        let parsed = decode_card(&source).unwrap();
+
+        assert_eq!(
+            parsed.warnings,
+            [
+                warning(1, "Card row before the first VNUM has no entry"),
+                warning(2, "malformed Card VNUM row stored as VNUM 5"),
+            ]
+        );
+        let [five, six] = parsed.document.entries.as_slice() else {
+            panic!("expected two Card entries");
+        };
+        assert_eq!(
+            (five.vnum, five.name.as_str(), five.description.as_str()),
+            (5, "five", "")
+        );
+        assert_eq!(
+            (six.vnum, six.name.as_str(), six.description.as_str()),
+            (6, "n6", "d6")
+        );
+    }
+
+    #[test]
+    fn card_rows_are_read_by_their_first_character() {
+        let parsed = decode_card("VALUE 3\nNOTE renamed\nGRP 1 2\nEFF 1\n").unwrap();
+
+        assert_eq!(
+            parsed.warnings,
+            [
+                warning(1, "Card tag VALUE is read as VNUM"),
+                warning(2, "Card tag NOTE is read as NAME"),
+                warning(3, "Card tag GRP is read as GROUP"),
+                warning(4, "unrecognized Card row"),
+            ]
+        );
+        let entry = &parsed.document.entries[0];
+        assert_eq!((entry.vnum, entry.name.as_str()), (3, "renamed"));
+        assert_eq!(entry.group, Some(vec![1, 2]));
+        assert_eq!(entry.effect, None);
+    }
+
+    #[test]
+    fn non_decimal_numeric_rows_are_reported_without_dropping_the_entry() {
+        let parsed = decode_card("VNUM 1\nNAME n\nGROUP 1 x\nTIME 3 4\n").unwrap();
+
+        assert_eq!(
+            parsed.warnings,
+            [warning(3, "non-decimal value in Card GROUP row")]
+        );
+        assert_eq!(parsed.document.entries[0].group, None);
+        assert_eq!(parsed.document.entries[0].time, Some(vec![3, 4]));
+    }
+
+    #[test]
+    fn entity_writers_reject_text_the_client_reads_differently() {
+        let mut card = decode_card(&card_record(1)).unwrap().document;
+        card.entries[0].name = " padded".to_owned();
+        assert!(encode_card(&card).is_err());
+        card.entries[0].name = "n".to_owned();
+        card.kits[0][0] = "split\nrow".to_owned();
+        assert!(encode_card(&card).is_err());
+
+        let mut monster = decode_monster("VNUM 1\nNAME n\n").unwrap().document;
+        monster.entries[0].name = "trailing\t".to_owned();
+        assert!(encode_monster(&monster).is_err());
+
+        let mut skill = decode_skill(&skill_record(1, 0)).unwrap().document;
+        skill.entries[0].description.lines = vec!["inline ".to_owned()];
+        assert!(encode_skill(&skill).is_err());
+        skill.entries[0].description.lines = vec!["  inline".to_owned()];
+        assert!(
+            encode_skill(&skill)
+                .unwrap()
+                .contains("Z_DESC\t0\t  inline\n#\n")
+        );
+        skill.entries[0].description.lines = vec!["one".to_owned(), "two".to_owned()];
+        assert!(encode_skill(&skill).is_err());
+        skill.entries[0].description.declared_count = 65536;
+        assert!(encode_skill(&skill).is_err());
+        skill.entries[0].description.declared_count = 2;
+        assert!(encode_skill(&skill).is_ok());
+        skill.entries[0].description.lines[1] = "two ".to_owned();
+        assert!(encode_skill(&skill).is_err());
+    }
+
+    #[test]
+    fn monster_entries_need_only_the_rows_the_client_reads() {
+        let source = concat!(
+            "VNUM 1\nNAME first  monster\nATTRIB 3\nPREATT 1 2 3\nZSKILL 0 0 1 2 3\n",
+            "VNUM 5 7\nVALUE 6\nSKILL 1 2 3 4\n~\n",
+        );
+        let parsed = decode_monster(source).unwrap();
+
+        assert_eq!(
+            parsed.warnings,
+            [
+                warning(6, "malformed monster VNUM row stored as VNUM 5"),
+                warning(7, "monster tag VALUE is read as VNUM"),
+            ]
+        );
+        let [first, five, six] = parsed.document.entries.as_slice() else {
+            panic!("expected three monster entries");
+        };
+        assert_eq!(first.name, "first  monster");
+        assert_eq!(first.attributes, Some(vec![3]));
+        assert_eq!(first.z_skills, Some(vec![0, 0, 1, 2, 3]));
+        assert_eq!(
+            (
+                first.effects.as_ref(),
+                first.partner.as_ref(),
+                first.items.as_ref()
+            ),
+            (None, None, None)
+        );
+        assert_eq!(five.vnum, 5);
+        assert_eq!(five.skills, None);
+        assert_eq!(six.skills, Some(vec![vec![1, 2, 3], vec![4]]));
+
+        let reparsed = decode_monster(&encode_monster(&parsed.document).unwrap()).unwrap();
+        assert!(reparsed.warnings.is_empty());
+        assert_eq!(reparsed.document, parsed.document);
+    }
+
+    #[test]
+    fn monster_writer_rejects_groups_the_client_reads_differently() {
+        let mut document = decode_monster("VNUM 1\nNAME n\nCARD 1 2 3 4 5 6\n")
+            .unwrap()
+            .document;
+        assert_eq!(
+            document.entries[0].cards,
+            Some(vec![vec![1, 2, 3, 4, 5], vec![6]])
+        );
+        document.entries[0].cards = Some(vec![vec![1, 2], vec![3, 4, 5, 6, 7]]);
+        assert!(encode_monster(&document).is_err());
+    }
+
+    #[test]
+    fn skill_basic_rows_keep_their_physical_widths_and_order() {
+        let source = concat!(
+            "VNUM 1\nNAME n\nBASIC 4 1 2 3 4\nBASIC 0 0 0 0 0 0\nBASIC 7 1 1 1 1\n",
+            "BASIC 1 0 0 0 0 0\nBASIC 2 0 0 0 0 0\nBASIC 4 5 6 7 8 9\n",
+            "Z_DESC 0\n#\nVNUM 2\nNAME second\n",
+        );
+        let parsed = decode_skill(source).unwrap();
+
+        assert!(parsed.warnings.is_empty());
+        let [first, second] = parsed.document.entries.as_slice() else {
+            panic!("expected two Skill entries");
+        };
+        assert_eq!(
+            first.basic,
+            [
+                vec![4, 1, 2, 3, 4],
+                vec![0; 6],
+                vec![7, 1, 1, 1, 1],
+                vec![1, 0, 0, 0, 0, 0],
+                vec![2, 0, 0, 0, 0, 0],
+                vec![4, 5, 6, 7, 8, 9]
+            ]
+        );
+        assert_eq!(first.final_combo, None);
+        assert!(second.basic.is_empty());
+
+        let encoded = encode_skill(&parsed.document).unwrap();
+        assert!(encoded.contains("BASIC\t4\t1\t2\t3\t4\nBASIC\t0\t0\t0\t0\t0\t0\n"));
+        assert_eq!(decode_skill(&encoded).unwrap().document, parsed.document);
+    }
+
+    #[test]
+    fn skill_vnum_and_end_rows_follow_the_client_tags() {
+        let source = concat!(
+            "BASIC 0 1 1 1 1\nVNUM\nNAME bare\nEFFECT 1 2 3\nEND\n",
+            "VNUM 2\nNAME two\nZ_DESC 0  inline  text\n~\n",
+        );
+        let parsed = decode_skill(source).unwrap();
+
+        assert_eq!(
+            parsed.warnings,
+            [
+                warning(1, "Skill row before the first VNUM has no entry"),
+                warning(2, "malformed Skill VNUM row stored as VNUM -1"),
+                warning(5, "Skill tag END is read as EFFECT"),
+            ]
+        );
+        let [bare, two] = parsed.document.entries.as_slice() else {
+            panic!("expected two Skill entries");
+        };
+        assert_eq!(bare.vnum, -1);
+        assert!(bare.basic.is_empty());
+        assert_eq!(bare.effect, Some(vec![]));
+        assert_eq!(two.description.lines, [" inline  text"]);
+
+        let reparsed = decode_skill(&encode_skill(&parsed.document).unwrap()).unwrap();
+        assert!(reparsed.warnings.is_empty());
+        assert_eq!(reparsed.document, parsed.document);
     }
 
     #[test]
