@@ -464,11 +464,11 @@ the fish.
 
 NosMall entries require only `vnum`; rows absent from the source are omitted. A
 NosMall row value that is not a plain decimal integer, such as a `True` VNUM
-flag, stays a JSON string, and `link` holds the LINK count followed by the
-linked IDs. Packing rejects a LINK count that the client reads as a negative
-16-bit value, ID and title values that start with whitespace, and description
-lines that the client would read as a terminator or, past its 20-row description
-scan, as a tagged row.
+flag or a `+$2` LINK count, stays a JSON string, and `link` holds the LINK count
+followed by the linked IDs. Packing rejects a LINK count that the client reads
+as a negative 16-bit value, ID and title values that start with whitespace, and
+description lines that the client would read as a terminator or, past its 20-row
+description scan, as a tagged row.
 
 Decorative `END`, `end`, `E`, and `~` rows are not exposed as JSON framing.
 Reader-visible exceptions are normalized semantically: tutorial `~` becomes a

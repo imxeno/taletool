@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::row_tokens::{client_int, split_token, tokens, trim};
 use super::{GtdLocale, GtdWarning, ParsedGtd, warning};
 use crate::{
     Result, TextEncoding, TextError, TextPayloadKind, decode_legacy_text, decode_text_rows,
@@ -57,37 +58,10 @@ pub enum NosMallValue {
 
 impl NosMallValue {
     fn from_token(token: &str) -> Self {
-        match token.parse::<i32>() {
-            Ok(value) if value.to_string() == token => Self::Integer(value),
+        match client_int(token) {
+            Some(value) if value.to_string() == token => Self::Integer(value),
             _ => Self::Text(token.to_owned()),
         }
-    }
-
-    /// The integer the client reads from this value, or -1 when it reads none.
-    ///
-    /// The client accepts a 32-bit decimal with an optional sign, or up to 32
-    /// bits of hexadecimal after a `$`, `x` or `0x` prefix. It skips leading
-    /// spaces and stops at a NUL.
-    fn client_integer(&self) -> i32 {
-        let text = match self {
-            Self::Integer(value) => return *value,
-            Self::Text(text) => text,
-        };
-        let text = text.split('\0').next().unwrap_or_default();
-        let text = text.trim_start_matches(' ');
-        let hex = ["$", "x", "X", "0x", "0X"]
-            .iter()
-            .find_map(|prefix| text.strip_prefix(prefix));
-        let value = match hex {
-            Some(digits) if digits.bytes().all(|byte| byte.is_ascii_hexdigit()) => {
-                u32::from_str_radix(digits, 16)
-                    .ok()
-                    .map(|value| value as i32)
-            }
-            Some(_) => None,
-            None => text.parse().ok(),
-        };
-        value.unwrap_or(-1)
     }
 }
 
@@ -120,11 +94,11 @@ pub fn decode_nos_mall(
         let line = lines[index];
         let row = index + 1;
         index += 1;
-        let (token, rest) = client_token(line);
+        let (token, rest) = split_token(line);
         if token.is_empty() || token.starts_with('#') {
             continue;
         }
-        let tag = client_trim(token).to_ascii_uppercase();
+        let tag = trim(token).to_ascii_uppercase();
         if tag == "VNUM" {
             entries.extend(current.take().map(|builder| builder.entry));
             current = Some(EntryBuilder::new(rest, row, &mut warnings));
@@ -165,7 +139,7 @@ pub fn decode_nos_mall(
             _ => {
                 warnings.push(warning(
                     row,
-                    format!("ignored unknown NosMall row {}", client_trim(token)),
+                    format!("ignored unknown NosMall row {}", trim(token)),
                 ));
                 continue;
             }
@@ -249,12 +223,12 @@ fn scan_description(
 }
 
 fn ends_description_scan(line: &str) -> bool {
-    line.starts_with('#') || client_trim(line).eq_ignore_ascii_case("DEND")
+    line.starts_with('#') || trim(line).eq_ignore_ascii_case("DEND")
 }
 
 /// Whether the client's row parser loads data from this row.
 fn is_client_tag_row(line: &str) -> bool {
-    let tag = client_trim(client_token(line).0).to_ascii_uppercase();
+    let tag = trim(split_token(line).0).to_ascii_uppercase();
     matches!(
         tag.as_str(),
         "VNUM" | "ITEM" | "TITLE1" | "TITLE2" | "COST" | "LINK" | "DSTART"
@@ -263,56 +237,33 @@ fn is_client_tag_row(line: &str) -> bool {
 
 /// Whether the client can size the linked-ID list from this LINK row's count.
 ///
-/// The client keeps the low 16 bits of the count as a signed value, reads a
-/// missing count as -1, and raises a range error for a negative count.
+/// The client reads a missing or non-numeric count as -1, stores the count in
+/// a signed 16-bit field, and raises a range error when that is negative.
 fn is_client_link_count(link: &[NosMallValue]) -> bool {
-    link.first().map_or(-1, NosMallValue::client_integer) as i16 >= 0
+    let count = match link.first() {
+        Some(NosMallValue::Integer(value)) => *value,
+        Some(NosMallValue::Text(token)) => client_int(token).unwrap_or(-1),
+        None => -1,
+    };
+    count as i16 >= 0
 }
 
-/// Split off the first token the way the client does: trim the text, then cut
-/// it at the first tab, or at the first space when it has no tab.
-fn client_token(text: &str) -> (&str, &str) {
-    let text = client_trim(text);
-    match delimiter(text) {
-        Some(index) => (&text[..index], &text[index + 1..]),
-        None => (text, ""),
-    }
-}
-
-fn delimiter(text: &str) -> Option<usize> {
-    text.find('\t').or_else(|| text.find(' '))
-}
-
-/// Trim spaces and control characters, as the client trims rows and tokens.
-fn client_trim(text: &str) -> &str {
-    text.trim_matches(|c: char| c <= ' ')
-}
-
-fn client_trim_start(text: &str) -> &str {
-    text.trim_start_matches(|c: char| c <= ' ')
-}
-
-/// Read the client's values from a row remainder one token at a time.
-fn row_values(mut rest: &str) -> Vec<NosMallValue> {
-    let mut values = Vec::new();
-    loop {
-        let (token, next) = client_token(rest);
-        if token.is_empty() {
-            return values;
-        }
-        values.push(NosMallValue::from_token(token));
-        rest = next;
-    }
+/// The values of a row remainder, read one client token at a time.
+fn row_values(rest: &str) -> Vec<NosMallValue> {
+    tokens(rest).map(NosMallValue::from_token).collect()
 }
 
 /// The text after a row's tag, cut where the client cuts it. Trailing
 /// whitespace, which the client trims when loading, is kept for rewriting.
 fn row_text(line: &str) -> &str {
-    let start = line.len() - client_trim_start(line).len();
-    match delimiter(client_trim(line)) {
-        Some(index) => client_trim_start(&line[start + index + 1..]),
-        None => "",
+    let text = trim(split_token(line).1);
+    if text.is_empty() {
+        return "";
     }
+    // The text ends with the trimmed row, so it extends over the row's
+    // trailing whitespace.
+    let end = line.trim_end_matches(|c: char| c <= ' ').len();
+    &line[end - text.len()..]
 }
 
 /// Encode a NosMall document using canonical native framing and DAT encoding.
@@ -822,42 +773,6 @@ mod tests {
     }
 
     #[test]
-    fn nos_mall_reads_integers_like_the_client() {
-        for (token, value) in [
-            ("7", 7),
-            ("+7", 7),
-            ("-7", -7),
-            ("07", 7),
-            ("-0", 0),
-            ("  7", 7),
-            ("7\0junk", 7),
-            ("2147483647", i32::MAX),
-            ("-2147483648", i32::MIN),
-            ("$1F", 31),
-            ("$1f", 31),
-            ("x1F", 31),
-            ("X1F", 31),
-            ("0x1F", 31),
-            ("0X1F", 31),
-            ("$FFFFFFFF", -1),
-            ("$7FFFFFFF", i32::MAX),
-            ("2147483648", -1),
-            ("$100000000", -1),
-            ("", -1),
-            ("+", -1),
-            ("$", -1),
-            ("0x", -1),
-            ("-$3", -1),
-            ("$+3", -1),
-            ("7 ", -1),
-            ("1e3", -1),
-            ("True", -1),
-        ] {
-            assert_eq!(text(token).client_integer(), value, "{token:?}");
-        }
-    }
-
-    #[test]
     fn nos_mall_link_counts_must_fit_the_client_array() {
         let parsed = decode_uk(concat!(
             "VNUM 1\nLINK -1 5\n",
@@ -879,7 +794,8 @@ mod tests {
             assert!(encode_uk(&document).is_err(), "{:?}", entry.link);
         }
 
-        // The client reads hexadecimal counts and keeps the low 16 bits.
+        // The client reads signed and hexadecimal counts and keeps the low 16
+        // bits.
         let native = concat!(
             "VNUM\t1\nLINK\t$3\t10\t11\t12\nEND\n",
             "VNUM\t2\nLINK\t65537\t10\nEND\n",
@@ -888,6 +804,8 @@ mod tests {
             "VNUM\t5\nLINK\t03\t1\t2\t3\nEND\n",
             "VNUM\t6\nLINK\t65536\nEND\n",
             "VNUM\t7\nLINK\t32767\nEND\n",
+            "VNUM\t8\nLINK\t+$2\t1\t2\nEND\n",
+            "VNUM\t9\nLINK\t-$FFFFFFFF\t1\nEND\n",
         );
         let parsed = decode_uk(native);
         assert!(parsed.warnings.is_empty());
