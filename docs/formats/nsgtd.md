@@ -517,13 +517,13 @@ follow them, so a count may differ from its row count.
 All localized NosMall DAT records use this block grammar:
 
 ```text
-VNUM <item ID> <i32> <flag> <flag> <i32> <flag> <flag>
+VNUM <item_id> <i32> <flag> <flag> <i32> <flag> <flag>
 ITEM <6 integers>
 ID <text>
 TITLE1 <text>
 TITLE2 <text>
 COST <6 integers>
-LINK <count> <linked item ID>...
+LINK <count> <linked_item_id>...
 DSTART
 <description row>
 ...
@@ -534,17 +534,18 @@ END
 Each `VNUM` row starts a new item whose fields are zero and whose texts are
 empty. Every other row is optional and sets fields of the current item; rows
 before the first `VNUM` are discarded. A repeated row replaces the earlier row's
-values. Tags are compared after trimming and in any letter case, so `vnum` also
-starts an item. The client never reads `ID`, and it ignores `END`, unknown tags,
-blank rows, and rows whose first token begins with `#`. `END` is therefore not
-an entry boundary.
+values, but a `TITLE1`, `TITLE2`, or `DSTART` row that reads no text leaves the
+earlier text. Tags are compared after trimming and in any letter case, so `vnum`
+also starts an item. The client never reads `ID`, and it ignores `END`, unknown
+tags, blank rows, and rows whose first token begins with `#`. `END` is therefore
+not an entry boundary.
 
 The client splits rows into tags and values like most readers, so a space before
 a tab stays inside the token: `ITEM 1<TAB>2` has the tag `ITEM 1` and is
 ignored, and `COST<TAB>1 2<TAB>3` reads `1 2` as one value.
 
 Numeric fields take the row's values in order as integers. A missing or
-non-numeric value becomes -1, and values after the last field are ignored.
+non-numeric value becomes `-1`, and values after the last field are ignored.
 `VNUM` holds three integers and four flags in the order shown. A flag is true
 for a nonzero number or `True` and false for zero or `False`, in any letter
 case. A missing or other flag value leaves the first three flags false and the
@@ -553,13 +554,13 @@ last one true.
 `LINK` has no fixed width. Its first value counts the linked item IDs that
 follow, which name other items by their `VNUM` item ID. Buying or gifting an
 item with a positive count opens a selection of the linked items instead of the
-item itself. A count larger than the IDs present reads the missing IDs as -1,
+item itself. A count larger than the IDs present reads the missing IDs as `-1`,
 and IDs after the count are ignored. The client keeps the low 16 bits of the
 count as a signed value, so `65537` and `-$FFFFFFFF` count one ID and `32768` is
-negative. A negative count, including the -1 of a missing or non-numeric count,
-makes the client raise a range error while it loads the record. This applies to
-every `LINK` row, including one that a later row replaces and one before the
-first `VNUM`.
+negative. A negative count, including the `-1` of a missing or non-numeric
+count, makes the client raise a range error while it loads the record. This
+applies to every `LINK` row, including one that a later row replaces and one
+before the first `VNUM`.
 
 `TITLE1` and `TITLE2` take the trimmed rest of their row after the tag. Because
 the row is trimmed first, an indented `TITLE1<TAB>name` row sets the title
@@ -572,7 +573,7 @@ with line breaks; blank rows before the first text add nothing. Row parsing then
 resumes at the row where the scan stopped, so the closing `DEND` is an ignored
 row. Rows after a column-one `#` row or after the 20th row are ordinary tagged
 rows: `VNUM` starts the next item, `ITEM`, `COST`, `LINK`, `TITLE1`, `TITLE2`,
-and `DSTART` replace values, and other rows are ignored. The current archive
+and `DSTART` set values, and other rows are ignored. The current archive
 contains 62 regions with 21 to 25 rows, all in `kr_nosmall.dat`. Their extra
 rows have no tag, so the client ignores them.
 

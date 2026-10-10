@@ -111,9 +111,13 @@ pub fn decode_nos_mall(
         } else {
             None
         };
+        let link = (tag == "LINK").then(|| row_values(rest));
         // The client applies every LINK row, even one that a later row
         // replaces or that precedes the first VNUM.
-        if tag == "LINK" && !is_client_link_count(&row_values(rest)) {
+        if link
+            .as_deref()
+            .is_some_and(|link| !is_client_link_count(link))
+        {
             warnings.push(warning(
                 row,
                 "NosMall LINK count reads as a negative 16-bit value, so the client raises a range error",
@@ -127,13 +131,33 @@ pub fn decode_nos_mall(
         };
 
         let entry = &mut builder.entry;
+        // A title or description row without text leaves the earlier text.
+        let (held_text, read_text) = match tag.as_str() {
+            "TITLE1" => (has_text(&entry.title1), has_text([row_text(line)])),
+            "TITLE2" => (has_text(&entry.title2), has_text([row_text(line)])),
+            "DSTART" => (
+                has_text(entry.description_lines.iter().flatten()),
+                has_text(description.iter().flatten()),
+            ),
+            _ => (false, true),
+        };
+        if held_text && !read_text {
+            warnings.push(warning(
+                row,
+                format!(
+                    "NosMall {tag} row reads no text, so the client keeps row {}",
+                    builder.rows[&tag]
+                ),
+            ));
+            continue;
+        }
         match tag.as_str() {
             "ITEM" => entry.item = Some(row_values(rest)),
             "ID" => entry.id = Some(row_text(line).to_owned()),
             "TITLE1" => entry.title1 = Some(row_text(line).to_owned()),
             "TITLE2" => entry.title2 = Some(row_text(line).to_owned()),
             "COST" => entry.cost = Some(row_values(rest)),
-            "LINK" => entry.link = Some(row_values(rest)),
+            "LINK" => entry.link = link,
             "DSTART" => entry.description_lines = description,
             "DEND" | "END" | "~" => continue,
             _ => {
@@ -220,6 +244,15 @@ fn scan_description(
         index += 1;
     }
     (description, index)
+}
+
+/// Whether the client stores text from title or description rows. It stores
+/// nothing when every row it reads trims to empty, which keeps the item's
+/// earlier text.
+fn has_text<S: AsRef<str>>(rows: impl IntoIterator<Item = S>) -> bool {
+    rows.into_iter()
+        .take(DESCRIPTION_SCAN_ROWS)
+        .any(|row| !trim(row.as_ref()).is_empty())
 }
 
 fn ends_description_scan(line: &str) -> bool {
@@ -320,7 +353,9 @@ fn unwritable_entry(entry: &NosMallEntry) -> Option<String> {
         let Some(value) = value else {
             continue;
         };
-        if value.contains(['\r', '\n']) {
+        // A packed row ends only at its terminator, so a value may hold a
+        // carriage return.
+        if value.contains('\n') {
             return Some(format!("{field} contains a line break"));
         }
         // The row trim and the client's title trim drop leading whitespace.
@@ -354,7 +389,7 @@ fn unwritable_entry(entry: &NosMallEntry) -> Option<String> {
         );
     }
     for (position, line) in entry.description_lines.iter().flatten().enumerate() {
-        if line.contains(['\r', '\n']) {
+        if line.contains('\n') {
             return Some("description line contains a line break".into());
         }
         if ends_description_scan(line) {
@@ -381,9 +416,9 @@ fn unwritable_value<'a>(values: impl IntoIterator<Item = &'a NosMallValue>) -> O
         };
         let last = values.peek().is_none();
         let separators: &[char] = if last {
-            &['\t', '\r', '\n', ' ']
+            &['\t', '\n', ' ']
         } else {
-            &['\t', '\r', '\n']
+            &['\t', '\n']
         };
         let readable = !text.contains(separators)
             && text.starts_with(|c: char| c > ' ')
@@ -937,6 +972,56 @@ mod tests {
     }
 
     #[test]
+    fn nos_mall_keeps_earlier_text_over_rows_without_text() {
+        let parsed = decode_uk(concat!(
+            "VNUM 1\n",
+            "TITLE1 foo\nTITLE1\n",
+            "TITLE2 bar\nTITLE2   \n",
+            "DSTART\ntext\nDEND\n",
+            "DSTART\nDEND\n",
+            "DSTART\n\n  \nDEND\n",
+            "TITLE1 baz\n",
+        ));
+
+        assert_eq!(warning_rows(&parsed), [3, 5, 9, 11, 2]);
+        assert!(parsed.warnings[0].message.contains("keeps row 2"));
+        assert!(parsed.warnings[3].message.contains("keeps row 6"));
+        let entry = &parsed.document.entries[0];
+        assert_eq!(entry.title1.as_deref(), Some("baz"));
+        assert_eq!(entry.title2.as_deref(), Some("bar"));
+        assert_eq!(entry.description_lines, lines(&["text"]));
+        assert_eq!(
+            encode_uk(&parsed.document).unwrap(),
+            "VNUM\t1\nTITLE1\tbaz\nTITLE2\tbar\nDSTART\ntext\nDEND\nEND\n"
+        );
+
+        // Text past the 20-row scan is not read, and a row without text
+        // replaces a row that also has none.
+        let blank = "\n".repeat(20);
+        let parsed = decode_uk(&format!(
+            "VNUM 2\nDSTART\ntext\nDEND\nDSTART\n{blank}late\nDEND\nTITLE1\nTITLE1\n"
+        ));
+        assert_eq!(warning_rows(&parsed), [26, 5, 28]);
+        let entry = &parsed.document.entries[0];
+        assert_eq!(entry.description_lines, lines(&["text"]));
+        assert_eq!(entry.title1.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn nos_mall_keeps_carriage_returns_inside_rows() {
+        let native = "VNUM\t1\t2\r3\t0\nID\ta\rb\nTITLE1\ta\rb\nDSTART\nx\ry\nDEND\nEND\n";
+        let parsed = decode_uk(native);
+
+        assert!(parsed.warnings.is_empty());
+        let entry = &parsed.document.entries[0];
+        assert_eq!(entry.vnum_fields, [text("2\r3"), 0.into()]);
+        assert_eq!(entry.id.as_deref(), Some("a\rb"));
+        assert_eq!(entry.title1.as_deref(), Some("a\rb"));
+        assert_eq!(entry.description_lines, lines(&["x\ry"]));
+        assert_eq!(encode_uk(&parsed.document).unwrap(), native);
+    }
+
+    #[test]
     fn nos_mall_writer_rejects_text_the_client_reads_differently() {
         let entry = |description: Vec<String>| NosMallDocument {
             locale: GtdLocale::Uk,
@@ -975,6 +1060,7 @@ mod tests {
             ("   ", false),
             ("trail  ", true),
             ("", true),
+            ("a\nb", false),
         ] {
             document.entries[0].title1 = Some(title.into());
             assert_eq!(encode_uk(&document).is_ok(), writable, "{title:?}");
