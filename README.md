@@ -462,6 +462,13 @@ map, only the last is kept, with a warning. Fish `ITEM` rows with a slot outside
 packing rejects such slots, because the client writes them into other fields of
 the fish.
 
+NosMall entries require only `vnum`; rows absent from the source are omitted. A
+NosMall row value that is not a plain decimal integer, such as a `True` VNUM
+flag, stays a JSON string, and `link` holds the LINK count followed by the
+linked IDs. Packing rejects LINK counts outside 0 to 32767 and description lines
+that the client would read as a terminator or, past its 20-row description scan,
+as a tagged row.
+
 Decorative `END`, `end`, `E`, and `~` rows are not exposed as JSON framing.
 Reader-visible exceptions are normalized semantically: tutorial `~` becomes a
 step `-1` command, shop-type `~` becomes a vnum `-1` row, and Skill output adds

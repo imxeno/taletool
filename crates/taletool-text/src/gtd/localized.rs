@@ -1,10 +1,17 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
-use super::{GtdLocale, GtdWarning, ParsedGtd, fields, is_ignored_line, values, warning};
+use super::{GtdLocale, GtdWarning, ParsedGtd, warning};
 use crate::{
     Result, TextEncoding, TextError, TextPayloadKind, decode_legacy_text, decode_text_rows,
     encode_dat_payload, encode_legacy_text,
 };
+
+/// Most rows the client's `DSTART` scan reads as description text.
+const DESCRIPTION_SCAN_ROWS: usize = 20;
+/// Largest `LINK` count the client's signed 16-bit count can hold.
+const MAX_LINK_COUNT: i32 = i16::MAX as i32;
 
 /// Contents of one localized `*_nosmall.dat` record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -14,22 +21,66 @@ pub struct NosMallDocument {
     pub entries: Vec<NosMallEntry>,
 }
 
-/// One native NosMall entry
+/// One native NosMall entry.
+///
+/// Only `VNUM` is required. An absent row is omitted, and the client keeps the
+/// item's zero values or empty text for it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NosMallEntry {
-    pub vnum: i32,
-    pub vnum_fields: [i32; 6],
-    pub item: [i32; 6],
-    pub id: String,
-    pub title1: String,
-    pub title2: String,
-    pub cost: [i32; 6],
-    pub link: [i32; 6],
-    pub description_lines: Vec<String>,
+    pub vnum: NosMallValue,
+    #[serde(default)]
+    pub vnum_fields: Vec<NosMallValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<Vec<NosMallValue>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title1: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title2: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<Vec<NosMallValue>>,
+    /// The linked-item count followed by the row's linked item IDs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<Vec<NosMallValue>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_lines: Option<Vec<String>>,
 }
 
-/// Decode a NosMall DAT payload, retaining valid entries in order.
+/// One NosMall row value: a decimal integer, or the source token itself when it
+/// is not one, such as a `True` VNUM flag.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum NosMallValue {
+    Integer(i32),
+    Text(String),
+}
+
+impl NosMallValue {
+    fn from_token(token: &str) -> Self {
+        match token.parse::<i32>() {
+            Ok(value) if value.to_string() == token => Self::Integer(value),
+            _ => Self::Text(token.to_owned()),
+        }
+    }
+
+    /// The integer the client reads from a plain signed decimal value.
+    fn decimal(&self) -> Option<i32> {
+        match self {
+            Self::Integer(value) => Some(*value),
+            Self::Text(text) => text.parse().ok(),
+        }
+    }
+}
+
+impl From<i32> for NosMallValue {
+    fn from(value: i32) -> Self {
+        Self::Integer(value)
+    }
+}
+
+/// Decode a NosMall DAT payload with the client's item, row and description rules.
 pub fn decode_nos_mall(
     data: &[u8],
     kind: TextPayloadKind,
@@ -44,41 +95,73 @@ pub fn decode_nos_mall(
         .collect::<Vec<_>>();
     let mut entries = Vec::new();
     let mut warnings = Vec::new();
+    // The client applies rows before the first VNUM to an item it discards.
+    let mut current: Option<EntryBuilder> = None;
     let mut index = 0;
 
     while index < lines.len() {
         let line = lines[index];
-        if is_ignored_line(line) || line.trim() == "~" {
-            index += 1;
+        let row = index + 1;
+        index += 1;
+        let (token, rest) = client_token(line);
+        if token.is_empty() || token.starts_with('#') {
             continue;
         }
-        if fields(line).first().copied() != Some("VNUM") {
-            warnings.push(warning(index + 1, "expected VNUM entry start"));
-            index += 1;
+        let tag = client_trim(token).to_ascii_uppercase();
+        if tag == "VNUM" {
+            entries.extend(current.take().map(|builder| builder.entry));
+            current = Some(EntryBuilder::new(rest, row, &mut warnings));
             continue;
         }
-
-        let start = index;
-        let mut end = index + 1;
-        let mut in_description = false;
-        while end < lines.len() {
-            match lines[end].trim() {
-                "DSTART" => in_description = true,
-                "DEND" => in_description = false,
-                _ if !in_description && fields(lines[end]).first().copied() == Some("VNUM") => {
-                    break;
-                }
-                _ => {}
+        let description = if tag == "DSTART" {
+            let (description, next) = scan_description(&lines, index, &mut warnings);
+            index = next;
+            Some(description)
+        } else {
+            None
+        };
+        let Some(builder) = current.as_mut() else {
+            if !matches!(tag.as_str(), "DEND" | "END" | "~") {
+                warnings.push(warning(row, "expected VNUM entry start"));
             }
-            end += 1;
-        }
+            continue;
+        };
 
-        match parse_nos_mall_entry(&lines[start..end], start + 1, &mut warnings) {
-            Some(entry) => entries.push(entry),
-            None => warnings.push(warning(start + 1, "skipped incomplete NosMall entry")),
+        let entry = &mut builder.entry;
+        match tag.as_str() {
+            "ITEM" => entry.item = Some(row_values(rest)),
+            "ID" => entry.id = Some(row_text(line).to_owned()),
+            "TITLE1" => entry.title1 = Some(row_text(line).to_owned()),
+            "TITLE2" => entry.title2 = Some(row_text(line).to_owned()),
+            "COST" => entry.cost = Some(row_values(rest)),
+            "LINK" => {
+                let link = row_values(rest);
+                if !is_client_link_count(&link) {
+                    warnings.push(warning(
+                        row,
+                        format!("NosMall LINK count is not an integer from 0 to {MAX_LINK_COUNT}"),
+                    ));
+                }
+                entry.link = Some(link);
+            }
+            "DSTART" => entry.description_lines = description,
+            "DEND" | "END" | "~" => continue,
+            _ => {
+                warnings.push(warning(
+                    row,
+                    format!("ignored unknown NosMall row {}", client_trim(token)),
+                ));
+                continue;
+            }
         }
-        index = end;
+        if let Some(earlier) = builder.rows.insert(tag.clone(), row) {
+            warnings.push(warning(
+                earlier,
+                format!("NosMall {tag} row replaced by row {row}"),
+            ));
+        }
     }
+    entries.extend(current.map(|builder| builder.entry));
 
     Ok(ParsedGtd {
         document: NosMallDocument { locale, entries },
@@ -86,149 +169,268 @@ pub fn decode_nos_mall(
     })
 }
 
-fn parse_nos_mall_entry(
+struct EntryBuilder {
+    entry: NosMallEntry,
+    /// Source row of each singleton row the entry holds, keyed by tag.
+    rows: HashMap<String, usize>,
+}
+
+impl EntryBuilder {
+    fn new(rest: &str, row: usize, warnings: &mut Vec<GtdWarning>) -> Self {
+        let mut values = row_values(rest).into_iter();
+        let vnum = values.next().unwrap_or_else(|| {
+            warnings.push(warning(row, "VNUM row without an item ID stored as -1"));
+            NosMallValue::Integer(-1)
+        });
+        Self {
+            entry: NosMallEntry {
+                vnum,
+                vnum_fields: values.collect(),
+                item: None,
+                id: None,
+                title1: None,
+                title2: None,
+                cost: None,
+                link: None,
+                description_lines: None,
+            },
+            rows: HashMap::new(),
+        }
+    }
+}
+
+/// Read the rows after `DSTART` the way the client's description scan does.
+///
+/// The scan reads at most 20 rows and stops before a column-one `#`, a `DEND`
+/// in any letter case, or the end of the payload. The client then parses later
+/// rows as tagged rows, so rows past the scan stay description text only while
+/// the client ignores them.
+fn scan_description(
     lines: &[&str],
-    first_row: usize,
+    mut index: usize,
     warnings: &mut Vec<GtdWarning>,
-) -> Option<NosMallEntry> {
-    let mut vnum = None;
-    let mut vnum_fields = None;
-    let mut item = None;
-    let mut id = None;
-    let mut title1 = None;
-    let mut title2 = None;
-    let mut cost = None;
-    let mut link = None;
-    let mut description_lines = Vec::new();
-    let mut in_description = false;
-
-    for (offset, line) in lines.iter().enumerate() {
-        let row = first_row + offset;
-        if in_description {
-            if line.trim() == "DEND" {
-                in_description = false;
-            } else {
-                description_lines.push((*line).to_owned());
+) -> (Vec<String>, usize) {
+    let mut description = Vec::new();
+    while let Some(line) = lines.get(index) {
+        if ends_description_scan(line) {
+            break;
+        }
+        if description.len() >= DESCRIPTION_SCAN_ROWS {
+            if is_client_tag_row(line) {
+                break;
             }
-            continue;
-        }
-        if is_ignored_line(line) || line.trim() == "~" {
-            continue;
-        }
-        let tokens = fields(line);
-        let tag = tokens.first().copied().unwrap_or_default();
-        match tag {
-            "VNUM" => {
-                if let Some(all) = parse_array::<7>(&tokens[1..]) {
-                    vnum = Some(all[0]);
-                    vnum_fields = all[1..].try_into().ok();
-                } else {
-                    warnings.push(warning(row, "VNUM must contain seven integers"));
-                }
+            if description.len() == DESCRIPTION_SCAN_ROWS {
+                warnings.push(warning(
+                    index + 1,
+                    "NosMall description continues past the client's 20-row scan",
+                ));
             }
-            "ITEM" => parse_fixed_row::<6>(&tokens, row, "ITEM", warnings, &mut item),
-            "ID" => id = Some(text_after_tag(line, "ID").to_owned()),
-            "TITLE1" => title1 = Some(text_after_tag(line, "TITLE1").to_owned()),
-            "TITLE2" => title2 = Some(text_after_tag(line, "TITLE2").to_owned()),
-            "COST" => parse_fixed_row::<6>(&tokens, row, "COST", warnings, &mut cost),
-            "LINK" => parse_fixed_row::<6>(&tokens, row, "LINK", warnings, &mut link),
-            "DSTART" => in_description = true,
-            "DEND" | "END" => {}
-            _ => warnings.push(warning(row, format!("ignored unknown NosMall row {tag}"))),
         }
+        description.push((*line).to_owned());
+        index += 1;
     }
-
-    Some(NosMallEntry {
-        vnum: vnum?,
-        vnum_fields: vnum_fields?,
-        item: item?,
-        id: id?,
-        title1: title1?,
-        title2: title2?,
-        cost: cost?,
-        link: link?,
-        description_lines,
-    })
+    (description, index)
 }
 
-fn parse_fixed_row<const N: usize>(
-    tokens: &[&str],
-    row: usize,
-    tag: &str,
-    warnings: &mut Vec<GtdWarning>,
-    target: &mut Option<[i32; N]>,
-) {
-    if let Some(parsed) = parse_array::<N>(&tokens[1..]) {
-        *target = Some(parsed);
-    } else {
-        warnings.push(warning(row, format!("{tag} must contain {N} integers")));
+fn ends_description_scan(line: &str) -> bool {
+    line.starts_with('#') || client_trim(line).eq_ignore_ascii_case("DEND")
+}
+
+/// Whether the client's row parser loads data from this row.
+fn is_client_tag_row(line: &str) -> bool {
+    let tag = client_trim(client_token(line).0).to_ascii_uppercase();
+    matches!(
+        tag.as_str(),
+        "VNUM" | "ITEM" | "TITLE1" | "TITLE2" | "COST" | "LINK" | "DSTART"
+    )
+}
+
+/// Whether the client can size the linked-ID list from this LINK row's count.
+fn is_client_link_count(link: &[NosMallValue]) -> bool {
+    link.first()
+        .and_then(NosMallValue::decimal)
+        .is_some_and(|count| (0..=MAX_LINK_COUNT).contains(&count))
+}
+
+/// Split off the first token the way the client does: trim the text, then cut
+/// it at the first tab, or at the first space when it has no tab.
+fn client_token(text: &str) -> (&str, &str) {
+    let text = client_trim(text);
+    match delimiter(text) {
+        Some(index) => (&text[..index], &text[index + 1..]),
+        None => (text, ""),
     }
 }
 
-fn parse_array<const N: usize>(tokens: &[&str]) -> Option<[i32; N]> {
-    if tokens.len() != N {
-        return None;
-    }
-    values(tokens)?.try_into().ok()
+fn delimiter(text: &str) -> Option<usize> {
+    text.find('\t').or_else(|| text.find(' '))
 }
 
-fn text_after_tag<'a>(line: &'a str, tag: &str) -> &'a str {
-    line.get(tag.len()..)
-        .unwrap_or_default()
-        .trim_start_matches([' ', '\t'])
+/// Trim spaces and control characters, as the client trims rows and tokens.
+fn client_trim(text: &str) -> &str {
+    text.trim_matches(|c: char| c <= ' ')
+}
+
+fn client_trim_start(text: &str) -> &str {
+    text.trim_start_matches(|c: char| c <= ' ')
+}
+
+/// Read the client's values from a row remainder one token at a time.
+fn row_values(mut rest: &str) -> Vec<NosMallValue> {
+    let mut values = Vec::new();
+    loop {
+        let (token, next) = client_token(rest);
+        if token.is_empty() {
+            return values;
+        }
+        values.push(NosMallValue::from_token(token));
+        rest = next;
+    }
+}
+
+/// The text after a row's tag, cut where the client cuts it. Trailing
+/// whitespace, which the client trims when loading, is kept for rewriting.
+fn row_text(line: &str) -> &str {
+    let start = line.len() - client_trim_start(line).len();
+    match delimiter(client_trim(line)) {
+        Some(index) => client_trim_start(&line[start + index + 1..]),
+        None => "",
+    }
 }
 
 /// Encode a NosMall document using canonical native framing and DAT encoding.
 pub fn encode_nos_mall(document: &NosMallDocument, encoding: TextEncoding) -> Result<Vec<u8>> {
     let mut text = String::new();
     for (index, entry) in document.entries.iter().enumerate() {
-        for (field, value) in [
-            ("id", &entry.id),
-            ("title1", &entry.title1),
-            ("title2", &entry.title2),
+        if let Some(message) = unwritable_entry(entry) {
+            return Err(TextError::InvalidGtdDocument {
+                message: format!("NosMall entry {index} {message}"),
+            });
+        }
+        push_value_row(
+            &mut text,
+            "VNUM",
+            std::iter::once(&entry.vnum).chain(&entry.vnum_fields),
+        );
+        if let Some(item) = &entry.item {
+            push_value_row(&mut text, "ITEM", item);
+        }
+        for (tag, value) in [
+            ("ID", &entry.id),
+            ("TITLE1", &entry.title1),
+            ("TITLE2", &entry.title2),
         ] {
-            if value.contains(['\r', '\n']) {
-                return Err(TextError::InvalidGtdDocument {
-                    message: format!("NosMall entry {index} {field} contains a line break"),
-                });
+            if let Some(value) = value {
+                push_raw_row(&mut text, tag, value);
             }
         }
-        for line in &entry.description_lines {
-            if line.contains(['\r', '\n']) || line == "DEND" {
-                return Err(TextError::InvalidGtdDocument {
-                    message: format!(
-                        "NosMall entry {index} has an unrepresentable description line"
-                    ),
-                });
+        for (tag, values) in [("COST", &entry.cost), ("LINK", &entry.link)] {
+            if let Some(values) = values {
+                push_value_row(&mut text, tag, values);
             }
         }
-        text.push_str("VNUM");
-        for value in std::iter::once(&entry.vnum).chain(entry.vnum_fields.iter()) {
-            text.push('\t');
-            text.push_str(&value.to_string());
+        if let Some(lines) = &entry.description_lines {
+            text.push_str("DSTART\n");
+            for line in lines {
+                text.push_str(line);
+                text.push('\n');
+            }
+            text.push_str("DEND\n");
         }
-        text.push('\n');
-        push_numeric_row(&mut text, "ITEM", &entry.item);
-        push_raw_row(&mut text, "ID", &entry.id);
-        push_raw_row(&mut text, "TITLE1", &entry.title1);
-        push_raw_row(&mut text, "TITLE2", &entry.title2);
-        push_numeric_row(&mut text, "COST", &entry.cost);
-        push_numeric_row(&mut text, "LINK", &entry.link);
-        text.push_str("DSTART\n");
-        for line in &entry.description_lines {
-            text.push_str(line);
-            text.push('\n');
-        }
-        text.push_str("DEND\nEND\n");
+        text.push_str("END\n");
     }
     encode_dat_payload(&encode_legacy_text(&text, encoding)?)
 }
 
-fn push_numeric_row<const N: usize>(out: &mut String, tag: &str, row: &[i32; N]) {
+/// Describe the first value the client would read differently once written.
+fn unwritable_entry(entry: &NosMallEntry) -> Option<String> {
+    for (field, value) in [
+        ("id", &entry.id),
+        ("title1", &entry.title1),
+        ("title2", &entry.title2),
+    ] {
+        if value
+            .as_ref()
+            .is_some_and(|value| value.contains(['\r', '\n']))
+        {
+            return Some(format!("{field} contains a line break"));
+        }
+    }
+    if let Some(text) = unwritable_value(std::iter::once(&entry.vnum).chain(&entry.vnum_fields)) {
+        return Some(format!("VNUM value {text:?} is not one client token"));
+    }
+    for (tag, values) in [
+        ("ITEM", &entry.item),
+        ("COST", &entry.cost),
+        ("LINK", &entry.link),
+    ] {
+        if let Some(text) = values.iter().find_map(unwritable_value) {
+            return Some(format!("{tag} value {text:?} is not one client token"));
+        }
+    }
+    if entry
+        .link
+        .as_ref()
+        .is_some_and(|link| !is_client_link_count(link))
+    {
+        return Some(format!(
+            "LINK count must be an integer from 0 to {MAX_LINK_COUNT}"
+        ));
+    }
+    for (position, line) in entry.description_lines.iter().flatten().enumerate() {
+        if line.contains(['\r', '\n']) {
+            return Some("description line contains a line break".into());
+        }
+        if ends_description_scan(line) {
+            return Some(format!(
+                "description line {line:?} would end the client's description scan"
+            ));
+        }
+        if position >= DESCRIPTION_SCAN_ROWS && is_client_tag_row(line) {
+            return Some(format!(
+                "description line {line:?} is past the client's 20-row scan and would be read as a tagged row"
+            ));
+        }
+    }
+    None
+}
+
+/// Find a text value that the client would not read back as one token from a
+/// tab-separated row. Only the last value of a row is also cut at spaces.
+fn unwritable_value<'a>(values: impl IntoIterator<Item = &'a NosMallValue>) -> Option<&'a str> {
+    let mut values = values.into_iter().peekable();
+    while let Some(value) = values.next() {
+        let NosMallValue::Text(text) = value else {
+            continue;
+        };
+        let last = values.peek().is_none();
+        let separators: &[char] = if last {
+            &['\t', '\r', '\n', ' ']
+        } else {
+            &['\t', '\r', '\n']
+        };
+        let readable = !text.contains(separators)
+            && text.starts_with(|c: char| c > ' ')
+            && (!last || text.ends_with(|c: char| c > ' '));
+        if !readable {
+            return Some(text);
+        }
+    }
+    None
+}
+
+fn push_value_row<'a>(
+    out: &mut String,
+    tag: &str,
+    values: impl IntoIterator<Item = &'a NosMallValue>,
+) {
     out.push_str(tag);
-    for value in row {
+    for value in values {
         out.push('\t');
-        out.push_str(&value.to_string());
+        match value {
+            NosMallValue::Integer(value) => out.push_str(&value.to_string()),
+            NosMallValue::Text(text) => out.push_str(text),
+        }
     }
     out.push('\n');
 }
@@ -455,6 +657,38 @@ mod tests {
     use super::*;
     use crate::decode_dat_payload;
 
+    fn decode_uk(native: &str) -> ParsedGtd<NosMallDocument> {
+        let payload = encode_dat_payload(native.as_bytes()).unwrap();
+        decode_nos_mall(
+            &payload,
+            TextPayloadKind::Dat,
+            GtdLocale::Uk,
+            TextEncoding::Windows1252,
+        )
+        .unwrap()
+    }
+
+    fn encode_uk(document: &NosMallDocument) -> Result<String> {
+        let encoded = encode_nos_mall(document, TextEncoding::Windows1252)?;
+        Ok(String::from_utf8(decode_dat_payload(&encoded)?).unwrap())
+    }
+
+    fn warning_rows(parsed: &ParsedGtd<NosMallDocument>) -> Vec<usize> {
+        parsed.warnings.iter().map(|warning| warning.row).collect()
+    }
+
+    fn values(values: &[i32]) -> Option<Vec<NosMallValue>> {
+        Some(values.iter().copied().map(NosMallValue::from).collect())
+    }
+
+    fn text(value: &str) -> NosMallValue {
+        NosMallValue::Text(value.into())
+    }
+
+    fn lines(lines: &[&str]) -> Option<Vec<String>> {
+        Some(lines.iter().map(|line| (*line).to_owned()).collect())
+    }
+
     #[test]
     fn nos_mall_preserves_multiline_and_blank_descriptions() {
         let native = concat!(
@@ -472,22 +706,14 @@ mod tests {
             "DEND\n",
             "END\n",
         );
-        let payload = encode_dat_payload(native.as_bytes()).unwrap();
-        let parsed = decode_nos_mall(
-            &payload,
-            TextPayloadKind::Dat,
-            GtdLocale::Uk,
-            TextEncoding::Windows1252,
-        )
-        .unwrap();
+        let parsed = decode_uk(native);
         assert!(parsed.warnings.is_empty());
-        assert_eq!(parsed.document.entries[0].id, "00001  ");
+        assert_eq!(parsed.document.entries[0].id.as_deref(), Some("00001  "));
         assert_eq!(
             parsed.document.entries[0].description_lines,
-            ["zts3e", "", "literal trailing  "]
+            lines(&["zts3e", "", "literal trailing  "])
         );
-        let encoded = encode_nos_mall(&parsed.document, TextEncoding::Windows1252).unwrap();
-        assert_eq!(decode_dat_payload(&encoded).unwrap(), native.as_bytes());
+        assert_eq!(encode_uk(&parsed.document).unwrap(), native);
     }
 
     #[test]
@@ -500,19 +726,287 @@ mod tests {
             "ITEM 0 0 0 0 0 0\nID two\nTITLE1 c\nTITLE2 d\n",
             "COST 0 0 0 0 0 0\nLINK 0 0 0 0 0 0\nDSTART\nsecond\nDEND\n",
         );
-        let payload = encode_dat_payload(native.as_bytes()).unwrap();
-        let parsed = decode_nos_mall(
-            &payload,
-            TextPayloadKind::Dat,
-            GtdLocale::Uk,
-            TextEncoding::Windows1252,
-        )
-        .unwrap();
+        let parsed = decode_uk(native);
 
         assert!(parsed.warnings.is_empty());
         assert_eq!(parsed.document.entries.len(), 2);
-        assert_eq!(parsed.document.entries[0].id, "one");
-        assert_eq!(parsed.document.entries[1].description_lines, ["second"]);
+        assert_eq!(parsed.document.entries[0].id.as_deref(), Some("one"));
+        assert_eq!(
+            parsed.document.entries[1].description_lines,
+            lines(&["second"])
+        );
+    }
+
+    #[test]
+    fn nos_mall_keeps_items_with_any_row_missing() {
+        let parsed = decode_uk("VNUM 1\nVNUM 2 0\nTITLE1 only a title\nDSTART\nDEND\n");
+
+        assert!(parsed.warnings.is_empty());
+        let entries = &parsed.document.entries;
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries[0],
+            NosMallEntry {
+                vnum: 1.into(),
+                vnum_fields: Vec::new(),
+                item: None,
+                id: None,
+                title1: None,
+                title2: None,
+                cost: None,
+                link: None,
+                description_lines: None,
+            }
+        );
+        assert_eq!(entries[1].id, None);
+        assert_eq!(entries[1].title1.as_deref(), Some("only a title"));
+        assert_eq!(entries[1].description_lines, Some(Vec::new()));
+        assert_eq!(
+            encode_uk(&parsed.document).unwrap(),
+            "VNUM\t1\nEND\nVNUM\t2\t0\nTITLE1\tonly a title\nDSTART\nDEND\nEND\n"
+        );
+    }
+
+    #[test]
+    fn nos_mall_link_is_a_counted_list_of_any_length() {
+        let native = concat!(
+            "VNUM\t1\nLINK\t0\nEND\n",
+            "VNUM\t2\nLINK\t1\t99\nEND\n",
+            "VNUM\t3\nLINK\t7\t1\t2\t3\t4\t5\t6\t7\nEND\n",
+            "VNUM\t4\nLINK\t3\t10\nEND\n",
+        );
+        let parsed = decode_uk(native);
+
+        assert!(parsed.warnings.is_empty());
+        let links = parsed
+            .document
+            .entries
+            .iter()
+            .map(|entry| entry.link.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            links,
+            [
+                values(&[0]),
+                values(&[1, 99]),
+                values(&[7, 1, 2, 3, 4, 5, 6, 7]),
+                values(&[3, 10]),
+            ]
+        );
+        assert_eq!(encode_uk(&parsed.document).unwrap(), native);
+    }
+
+    #[test]
+    fn nos_mall_link_counts_must_fit_the_client_array() {
+        let parsed = decode_uk("VNUM 1\nLINK -1 5\nVNUM 2\nLINK\nVNUM 3\nLINK many\n");
+
+        assert_eq!(warning_rows(&parsed), [2, 4, 6]);
+        assert_eq!(parsed.document.entries[0].link, values(&[-1, 5]));
+        for entry in &parsed.document.entries {
+            let document = NosMallDocument {
+                locale: GtdLocale::Uk,
+                entries: vec![entry.clone()],
+            };
+            assert!(encode_uk(&document).is_err());
+        }
+
+        let mut document = parsed.document;
+        document.entries.truncate(1);
+        document.entries[0].link = values(&[32767]);
+        assert!(encode_uk(&document).is_ok());
+        document.entries[0].link = values(&[32768]);
+        assert!(encode_uk(&document).is_err());
+        document.entries[0].link = Some(vec![text("03"), 1.into()]);
+        assert!(encode_uk(&document).is_ok());
+    }
+
+    #[test]
+    fn nos_mall_vnum_keeps_flag_text_and_short_rows() {
+        let native = concat!(
+            "VNUM\t3\t999\tTrue\tfalse\t0\tFalse\tTRUE\nEND\n",
+            "VNUM\t5\t5\nEND\n",
+            "VNUM\t07\t+1\nEND\n",
+        );
+        let parsed = decode_uk(native);
+
+        assert!(parsed.warnings.is_empty());
+        let entries = &parsed.document.entries;
+        assert_eq!(
+            entries[0].vnum_fields,
+            [
+                999.into(),
+                text("True"),
+                text("false"),
+                0.into(),
+                text("False"),
+                text("TRUE")
+            ]
+        );
+        assert_eq!(entries[1].vnum_fields, [5.into()]);
+        assert_eq!(entries[2].vnum, text("07"));
+        assert_eq!(
+            serde_json::to_string(&entries[0].vnum_fields).unwrap(),
+            r#"[999,"True","false",0,"False","TRUE"]"#
+        );
+        assert_eq!(encode_uk(&parsed.document).unwrap(), native);
+
+        let empty = decode_uk("VNUM\nTITLE1 a\n");
+        assert_eq!(warning_rows(&empty), [1]);
+        assert_eq!(empty.document.entries[0].vnum, NosMallValue::Integer(-1));
+    }
+
+    #[test]
+    fn nos_mall_matches_tags_and_terminators_in_any_case() {
+        let parsed = decode_uk(concat!(
+            "VNUM 1\n",
+            "DSTART\nfirst\n dend \n",
+            "COST 9 9 9 9 9 9\n",
+            "vnum 2\n",
+            "id two\n",
+            "Dstart\ntext\n#note\nitem 7 7 7 7 7 7\n",
+            "  DEND  \nEnd\n",
+        ));
+
+        assert!(parsed.warnings.is_empty());
+        let entries = &parsed.document.entries;
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].description_lines, lines(&["first"]));
+        assert_eq!(entries[0].cost, values(&[9; 6]));
+        assert_eq!(entries[1].vnum, NosMallValue::Integer(2));
+        assert_eq!(entries[1].id.as_deref(), Some("two"));
+        assert_eq!(entries[1].description_lines, lines(&["text"]));
+        assert_eq!(entries[1].item, values(&[7; 6]));
+    }
+
+    #[test]
+    fn nos_mall_trims_rows_before_cutting_the_tag() {
+        let parsed = decode_uk("VNUM 1\n  TITLE1\tindented\n\tID\t00001\n");
+
+        assert!(parsed.warnings.is_empty());
+        let entry = &parsed.document.entries[0];
+        assert_eq!(entry.title1.as_deref(), Some("indented"));
+        assert_eq!(entry.id.as_deref(), Some("00001"));
+        assert_eq!(
+            encode_uk(&parsed.document).unwrap(),
+            "VNUM\t1\nID\t00001\nTITLE1\tindented\nEND\n"
+        );
+    }
+
+    #[test]
+    fn nos_mall_splits_rows_at_a_tab_before_any_space() {
+        let parsed = decode_uk("VNUM 1\nITEM 1\t2\nCOST\t1 2\t3\nTITLE1 Two\twords\n");
+
+        assert_eq!(warning_rows(&parsed), [2, 4]);
+        let entry = &parsed.document.entries[0];
+        assert_eq!(entry.item, None);
+        assert_eq!(entry.cost, Some(vec![text("1 2"), 3.into()]));
+        assert_eq!(entry.title1, None);
+        assert_eq!(
+            encode_uk(&parsed.document).unwrap(),
+            "VNUM\t1\nCOST\t1 2\t3\nEND\n"
+        );
+    }
+
+    #[test]
+    fn nos_mall_description_scan_reads_at_most_twenty_rows() {
+        let description = (1..=20)
+            .map(|row| format!("row {row}\n"))
+            .collect::<String>();
+        let parsed = decode_uk(&format!(
+            "VNUM 1\nITEM 1 1 1 1 1 1\nDSTART\n{description}Item 9 9 9 9 9 9\nextra text\nDEND\n"
+        ));
+
+        let entry = &parsed.document.entries[0];
+        assert_eq!(entry.description_lines.as_ref().unwrap().len(), 20);
+        assert_eq!(entry.item, values(&[9; 6]));
+        assert_eq!(warning_rows(&parsed), [2, 25]);
+
+        let parsed = decode_uk(&format!(
+            "VNUM 2\nDSTART\n{description}row 21\n  #row 22\nDEND\n"
+        ));
+        assert_eq!(warning_rows(&parsed), [23]);
+        let entry = &parsed.document.entries[0];
+        assert_eq!(entry.description_lines.as_ref().unwrap().len(), 22);
+        assert_eq!(
+            encode_uk(&parsed.document).unwrap(),
+            format!("VNUM\t2\nDSTART\n{description}row 21\n  #row 22\nDEND\nEND\n")
+        );
+    }
+
+    #[test]
+    fn nos_mall_writer_rejects_text_the_client_reads_differently() {
+        let entry = |description: Vec<String>| NosMallDocument {
+            locale: GtdLocale::Uk,
+            entries: vec![NosMallEntry {
+                vnum: 1.into(),
+                vnum_fields: Vec::new(),
+                item: None,
+                id: None,
+                title1: None,
+                title2: None,
+                cost: None,
+                link: None,
+                description_lines: Some(description),
+            }],
+        };
+        let twenty = (1..=20).map(|row| format!("row {row}")).collect::<Vec<_>>();
+
+        for terminator in ["dend", "  DEND ", "#note"] {
+            let document = entry(vec!["first".into(), terminator.into()]);
+            assert!(encode_uk(&document).is_err(), "{terminator:?}");
+        }
+        let mut overflow = twenty.clone();
+        overflow.push("ITEM 7 7 7 7 7 7".into());
+        assert!(encode_uk(&entry(overflow)).is_err());
+        let mut overflow = twenty.clone();
+        overflow.push("plain text".into());
+        assert!(encode_uk(&entry(overflow)).is_ok());
+        let mut tagged = twenty;
+        tagged[19] = "ITEM 7 7 7 7 7 7".into();
+        assert!(encode_uk(&entry(tagged)).is_ok());
+
+        let mut document = entry(Vec::new());
+        for (fields, writable) in [
+            (vec![text("a b"), 1.into()], true),
+            (vec![1.into(), text("a b")], false),
+            (vec![text(""), 1.into()], false),
+            (vec![text(" a"), 1.into()], false),
+            (vec![text("a\tb")], false),
+        ] {
+            document.entries[0].vnum_fields = fields.clone();
+            assert_eq!(encode_uk(&document).is_ok(), writable, "{fields:?}");
+        }
+    }
+
+    #[test]
+    fn nos_mall_reads_fixed_width_json_documents() {
+        let document: NosMallDocument = serde_json::from_str(
+            r#"{"locale":"uk","entries":[{"vnum":1,"vnum_fields":[999999,0,0,0,1,1],
+            "item":[0,0,1115,1115,1,1],"id":"00001","title1":"zts1e","title2":"zts2e",
+            "cost":[999999,0,1,1,0,30],"link":[0,0,0,0,0,0],"description_lines":["zts3e"]}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            encode_uk(&document).unwrap(),
+            concat!(
+                "VNUM\t1\t999999\t0\t0\t0\t1\t1\n",
+                "ITEM\t0\t0\t1115\t1115\t1\t1\n",
+                "ID\t00001\nTITLE1\tzts1e\nTITLE2\tzts2e\n",
+                "COST\t999999\t0\t1\t1\t0\t30\n",
+                "LINK\t0\t0\t0\t0\t0\t0\n",
+                "DSTART\nzts3e\nDEND\nEND\n",
+            )
+        );
+    }
+
+    #[test]
+    fn nos_mall_ignores_rows_before_the_first_vnum() {
+        let parsed = decode_uk("# header\nITEM 1 1 1 1 1 1\nDSTART\nVNUM 9\nDEND\nVNUM 1\n");
+
+        assert_eq!(warning_rows(&parsed), [2, 3]);
+        assert_eq!(parsed.document.entries.len(), 1);
+        assert_eq!(parsed.document.entries[0].vnum, NosMallValue::Integer(1));
     }
 
     #[test]
