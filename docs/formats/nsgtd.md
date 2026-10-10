@@ -53,12 +53,12 @@ token. Sections note readers that split rows differently.
 An integer token may start with spaces and a sign, followed by a decimal number
 or by a hexadecimal number after a `$`, `x`/`X`, or `0x`/`0X` prefix, so `-$1F`
 reads as `-31`. A decimal number must fit in a signed 32-bit integer, while a
-hexadecimal number may use all 32 bits. A missing or non-numeric token reads as
-a default value, usually `-1`. Observed records write integers in signed
-decimal, and fields which permit negative values frequently use them as
-sentinels. Formats which constrain declared counts say so explicitly. Text such
-as `zts1e` is an opaque key; its apparent structure does not change how it is
-stored.
+hexadecimal number may use all 32 bits. Conversion stops at a NUL character. A
+missing or non-numeric token reads as a default value, usually `-1`. Observed
+records write integers in signed decimal, and fields which permit negative
+values frequently use them as sentinels. Formats which constrain declared counts
+say so explicitly. Text such as `zts1e` is an opaque key; its apparent structure
+does not change how it is stored.
 
 Unless a format says otherwise, blank rows and rows whose first non-whitespace
 character is `#` are ignored. Singleton tagged rows are positional source

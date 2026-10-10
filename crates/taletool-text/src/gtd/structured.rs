@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::row_tokens::{all_values, client_int, leading_values, split_token, trim};
+use super::row_tokens::{all_values, client_int, is_trimmed, leading_values, split_token, trim};
 use super::{
     GtdWarning, ParsedGtd, fields, is_ignored_line, push_text, push_values, values, warning,
 };
@@ -627,7 +627,7 @@ fn remainder_text(value: &str, field: &str) -> Result<()> {
     if value.contains('\n') {
         return Err(invalid(format!("{field} contains a line break")));
     }
-    if value.ends_with(|c: char| c <= ' ') {
+    if value.ends_with(is_trimmed) {
         return Err(invalid(format!("{field} ends with whitespace")));
     }
     Ok(())

@@ -4,10 +4,16 @@
 //! with [`split_token`], and convert integer tokens with [`client_int`],
 //! storing a per-field default when a token is missing or not a number.
 
+/// Whether the client strips `c` when it trims rows and text fields: spaces
+/// and control characters.
+pub(super) fn is_trimmed(c: char) -> bool {
+    c <= ' '
+}
+
 /// Trims the characters the client strips from both ends of rows and text
-/// fields: spaces and control characters.
+/// fields.
 pub(super) fn trim(text: &str) -> &str {
-    text.trim_matches(|c: char| c <= ' ')
+    text.trim_matches(is_trimmed)
 }
 
 /// Splits off the leading token of a row the way the client does: the row is
@@ -33,10 +39,12 @@ pub(super) fn tokens(mut text: &str) -> impl Iterator<Item = &str> {
 /// Parses a token the way the client converts integers: leading spaces, an
 /// optional sign, then a decimal number or a hexadecimal number prefixed with
 /// `$`, `x`/`X`, or `0x`/`0X`. Decimal numbers must fit in an `i32`, while
-/// hexadecimal numbers may use all 32 bits. `None` marks text for which the
-/// client stores the field's default instead.
+/// hexadecimal numbers may use all 32 bits. The client stops reading at a NUL
+/// character. `None` marks text for which the client stores the field's
+/// default instead.
 pub(super) fn client_int(token: &str) -> Option<i32> {
-    let text = token.trim_start_matches(' ');
+    let text = token.split('\0').next().unwrap_or_default();
+    let text = text.trim_start_matches(' ');
     let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
     let hex = unsigned
         .strip_prefix(['$', 'x', 'X'])
@@ -128,9 +136,13 @@ mod tests {
         assert_eq!(client_int("+0x10"), Some(16));
         assert_eq!(client_int(" -x2"), Some(-2));
         assert_eq!(client_int("-$FFFFFFFF"), Some(1));
+        assert_eq!(client_int("7\0junk"), Some(7));
+        assert_eq!(client_int("$1f\0 "), Some(31));
         for token in [
             "",
+            "\0",
             "-",
+            "-\0",
             "$",
             "0x",
             "-$",
