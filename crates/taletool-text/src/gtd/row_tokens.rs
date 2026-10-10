@@ -30,20 +30,24 @@ pub(super) fn tokens(mut text: &str) -> Vec<&str> {
     }
 }
 
-/// Parses a token like the client's `StrToIntDef`: leading spaces, then a
-/// signed decimal number or a hexadecimal number prefixed with `$`, `x` or
-/// `0x`. `None` marks text for which the client falls back to its default.
+/// Parses a token like the client's `StrToIntDef`: leading spaces, an optional
+/// sign, then a decimal number or a hexadecimal number prefixed with `$`, `x`
+/// or `0x`. `None` marks text for which the client falls back to its default.
 pub(super) fn client_int(token: &str) -> Option<i32> {
     let text = token.trim_start_matches(' ');
-    let hex = text
+    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let hex = unsigned
         .strip_prefix(['$', 'x', 'X'])
-        .or_else(|| text.strip_prefix("0x"))
-        .or_else(|| text.strip_prefix("0X"));
+        .or_else(|| unsigned.strip_prefix("0x"))
+        .or_else(|| unsigned.strip_prefix("0X"));
     match hex {
         Some(digits) if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_hexdigit()) => {
-            u32::from_str_radix(digits, 16)
-                .ok()
-                .map(|value| value as i32)
+            let value = u32::from_str_radix(digits, 16).ok()? as i32;
+            Some(if text.starts_with('-') {
+                value.wrapping_neg()
+            } else {
+                value
+            })
         }
         Some(_) => None,
         None => text.parse().ok(),
@@ -91,11 +95,18 @@ mod tests {
         assert_eq!(client_int("0x10"), Some(16));
         assert_eq!(client_int("$FFFFFFFF"), Some(-1));
         assert_eq!(client_int("-2147483648"), Some(i32::MIN));
+        assert_eq!(client_int("-$1F"), Some(-31));
+        assert_eq!(client_int("+0x10"), Some(16));
+        assert_eq!(client_int(" -x2"), Some(-2));
+        assert_eq!(client_int("-$FFFFFFFF"), Some(1));
         for token in [
             "",
             "-",
             "$",
             "0x",
+            "-$",
+            "+-5",
+            "-+$5",
             "1 ",
             "\t2",
             "2 // c",

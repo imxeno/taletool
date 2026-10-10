@@ -982,6 +982,7 @@ pub fn decode_fish(text: &str) -> Result<ParsedGtd<FishDocument>> {
             }
             "MAP" => {
                 let ([slot, map_vnum], unread) = fish_values(rest, row, &mut warnings);
+                fish_slot("MAP", slot, FISH_MAP_SLOTS, row, &mut warnings);
                 e.maps.push(FishMap {
                     slot,
                     map_vnum,
@@ -998,6 +999,7 @@ pub fn decode_fish(text: &str) -> Result<ParsedGtd<FishDocument>> {
             }
             "ITEM" => {
                 let ([slot, vnum], unread) = fish_values(rest, row, &mut warnings);
+                fish_slot("ITEM", slot, FISH_ITEM_SLOTS, row, &mut warnings);
                 let (token, after) = split_token(unread);
                 let weight = client_int(token);
                 e.items.push(FishItem { slot, vnum, weight });
@@ -1067,6 +1069,22 @@ fn fish_values<'a, const N: usize>(
         warnings.push(warning(row, "invalid fish value normalized to -1"));
     }
     (values, unread)
+}
+
+const FISH_MAP_SLOTS: i32 = 3;
+const FISH_ITEM_SLOTS: i32 = 62;
+
+/// Reports a slot outside the client's fixed table. The client does not check
+/// the slot and writes the value into another field of the fish, so the result
+/// depends on row order, which packing does not keep.
+fn fish_slot(tag: &str, slot: i32, slots: i32, row: usize, warnings: &mut Vec<GtdWarning>) {
+    if !(0..slots).contains(&slot) {
+        let message = format!(
+            "fish {tag} slot outside 0-{} overwrites another field; row order not kept",
+            slots - 1
+        );
+        warnings.push(warning(row, message));
+    }
 }
 
 /// Reports tokens the client ignores after a fish row's values. A trailing
@@ -1179,6 +1197,26 @@ mod tests {
         assert_eq!(summary, [(1, [1, 10]), (2, [2, 20]), (-1, [4, 40])]);
         assert_eq!(entries[0].items.len(), 1);
         assert_eq!(entries[1].maps[0].map_vnum, 1);
+    }
+
+    #[test]
+    fn fish_slots_outside_the_client_tables_are_reported() {
+        let src = concat!(
+            "VNUM 1\nITEM -1 9\nITEMT 2\nITEM 63 5\nITEM 61 4\nITEM 0 2100\n",
+            "MAP 2 7\nMAP 3 8\nMAP x 9\n",
+        );
+        let parsed = decode_fish(src).unwrap();
+        let rows: Vec<_> = parsed.warnings.iter().map(|w| w.row).collect();
+        assert_eq!(rows, [2, 4, 8, 9, 9]);
+        let messages: Vec<_> = parsed.warnings.iter().map(|w| &*w.message).collect();
+        assert!(messages[0].starts_with("fish ITEM slot outside 0-61"));
+        assert!(messages[2].starts_with("fish MAP slot outside 0-2"));
+        assert_eq!(messages[3], "invalid fish value normalized to -1");
+        let fish = &parsed.document.entries[0];
+        let item_slots: Vec<_> = fish.items.iter().map(|i| i.slot).collect();
+        assert_eq!(item_slots, [-1, 63, 61, 0]);
+        let map_slots: Vec<_> = fish.maps.iter().map(|m| m.slot).collect();
+        assert_eq!(map_slots, [2, 3, -1]);
     }
 
     #[test]

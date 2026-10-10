@@ -447,11 +447,18 @@ sequences in JSON. Packing writes those sequences unchanged, including empty,
 shorter, longer, and partially grouped rows.
 
 Map ID, map point, and fish rows instead follow the client's reader. A missing
-or non-numeric value becomes `-1` with a warning, and map and point names keep
-the rest of their row, including spaces. Fish `ITEM` and `BASIC` weights are
-optional, and `weight` is omitted from JSON when a row has none. Other tokens
-after a fish row's values are dropped with a warning unless they start a `//`
-comment.
+or non-numeric value becomes `-1` with a warning in map ID and map point rows
+and in the fish values the client reads, although a `DATA` row without values
+stays empty. Map and point names keep the rest of their row, including spaces.
+Fish `ITEM` and `BASIC` weights are optional, and `weight` is omitted from JSON
+when a row has none. Other tokens after the values of a fish `VNUM`, `LEVEL`,
+`MAPT`, `MAP`, `ITEMT`, or `ITEM` row are dropped with a warning unless they
+start a `//` comment. Fish `POST`, `POS`, `BASICT`, and `BASIC` rows, which the
+client ignores, are kept only with exactly their integer fields, the `BASIC`
+weight being optional; other such rows are dropped with a warning. Fish `ITEM`
+slots outside 0-61 and `MAP` slots outside 0-2 are kept with a warning, because
+the client stores them in other fields and packing does not keep their row
+order.
 
 Decorative `END`, `end`, `E`, and `~` rows are not exposed as JSON framing.
 Reader-visible exceptions are normalized semantically: tutorial `~` becomes a

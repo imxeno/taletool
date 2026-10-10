@@ -387,8 +387,9 @@ DATA <i32> ...
 
 The reader trims each row and splits off its first token at the first tab, or at
 the first space when the row has no tab; later fields are split from the
-remainder the same way. Blank rows and rows whose first token starts with `#`
-are ignored.
+remainder the same way. An integer field may start with spaces and a sign and is
+decimal, or hexadecimal after a `$`, `x`, or `0x` prefix. Blank rows and rows
+whose first token starts with `#` are ignored.
 
 Every other row whose first character is not `D` starts a map-range entry. The
 reader takes four integers from it and keeps the rest of the row, after the
@@ -492,10 +493,12 @@ including the trailing `~`, is ignored.
 `VNUM` always starts an entry, whatever its value tokens hold, and the next
 `VNUM` closes it. Rows before the first `VNUM` are discarded. `MAP` stores a map
 in slot 0 to 2 and `ITEM` stores an item in slot 0 to 61; a later row for the
-same slot replaces it, and slots outside those ranges write outside the reader's
-fixed tables. `MAPT` and `ITEMT` set how many map and item slots the fish
-information window lists, so a zero or negative count lists none. If `LEVEL` or
-a count row is absent, the reader uses zero values.
+same slot replaces it. The reader does not check the slot, so a slot outside
+those ranges overwrites another field of the entry, such as the item count for
+item slot -1 or the map count for item slot 62, or memory outside it. `MAPT` and
+`ITEMT` set how many map and item slots the fish information window lists, so a
+zero or negative count lists none. If `LEVEL` or a count row is absent, the
+reader uses zero values.
 
 The `ITEM` weight and the `POST`, `POS`, `BASICT`, and `BASIC` rows are source
 data that the client never reads. In the source layout, `POST` gives a map slot
