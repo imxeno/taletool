@@ -338,7 +338,7 @@ pub fn decode_gtd_document(
                     )
                 }
                 GtdFileKind::BasicCard => {
-                    let parsed = decode_basic_card(&text)?;
+                    let parsed = decode_basic_card(&text, encoding)?;
                     (GtdDocumentData::BasicCard(parsed.document), parsed.warnings)
                 }
                 GtdFileKind::Card => {
@@ -654,7 +654,7 @@ mod tests {
                 panic!("expected Card document")
             };
             assert_eq!(
-                card.entries[0].style.len(),
+                card.entries[0].style.as_ref().map_or(0, Vec::len),
                 style.split_whitespace().count()
             );
 

@@ -436,15 +436,34 @@ string array.
 NSgtdData JSON retains source order, duplicate entries, repeated fields, signed
 values, opaque ZTS keys, and independently declared counts. Each document has a
 `schema_version` and a filename-selected `kind`. Item documents keep
-`line_desc_count` independent from their optional singular `description`,
-including historical rows whose physical description exists with a non-positive
-declaration. Abuse documents distinguish a zero-byte payload from a counted
-empty list; undecodable legacy text uses a reversible `bytes_base64` entry
-instead.
+`line_desc_count` independent from their description. `description` holds the
+rows read after a positive count; with a non-positive count, the client reads
+only the text after the count on the `LINEDESC` row, stored as
+`inline_description`. Packing rejects a non-empty `description` with a
+non-positive count. Likewise, Skill `description.lines` holds the rows read
+after a positive count, and the text after a non-positive count on the `Z_DESC`
+row is stored as `inline_text`; packing rejects lines with text under a
+non-positive count. BCard, Card, Item, monster, and Skill entries omit numeric
+rows that their source entry lacks, and Card entries keep an `ICON` row as
+`icon`. BCard entries hold the client's five text slots, whatever their `DESC`
+count: `subject_slots` holds `SUBJ0` through `SUBJ4`, and `list_slots` holds
+`LIST1-1` through `LIST5-2`. Other numbered `SUBJ` and `LIST` rows, which the
+client ignores, are kept in `ignored_rows`. When a row is repeated in one BCard,
+Card, Item, monster, or Skill entry, or a Card `KIT` or `Z_ETC` row is repeated
+for one slot, only what the client loads is kept, with a warning when a later
+row replaces different values or text; Skill `BASIC` rows are all kept. Abuse
+documents distinguish a zero-byte payload from a counted empty list; undecodable
+legacy text uses a reversible `bytes_base64` entry instead.
 
 Rows whose field counts vary between data revisions retain their complete token
 sequences in JSON. Packing writes those sequences unchanged, including empty,
-shorter, longer, and partially grouped rows.
+shorter, longer, and partially grouped rows. In BCard, Card, Item, monster, and
+Skill rows, each token is stored as the number the client reads, so `$10`
+becomes 16. A token the client cannot read as a number becomes, with a warning,
+the client's default for its position, or -1 where the client ignores the value.
+Monster `ETC` booleans keep a decimal integer, and other tokens become 1 or 0 as
+the client reads them, with a warning for text other than a number, `True`, or
+`False`.
 
 Map ID, map point, and fish rows instead follow the client's reader. A missing
 or non-numeric value becomes `-1` with a warning in map ID and map point rows
@@ -472,9 +491,10 @@ description scan, as a tagged row.
 
 Decorative `END`, `end`, `E`, and `~` rows are not exposed as JSON framing.
 Reader-visible exceptions are normalized semantically: tutorial `~` becomes a
-step `-1` command, shop-type `~` becomes a vnum `-1` row, and Skill output adds
-the leading-`#` boundary required to keep a positive description from consuming
-the following skill.
+step `-1` command, shop-type `~` becomes a vnum `-1` row, Skill `END` outside a
+description becomes an empty `effect` row, and Skill output adds the leading-`#`
+boundary required to keep a positive description from consuming the following
+skill.
 
 The recognized core filenames are `act_desc.dat`, `BCard.dat`, `Card.dat`,
 `Item.dat`, `monster.dat`, `npctalk.dat`, `Skill.dat`, `quest.dat`,
