@@ -2,7 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{ParsedGtd, fields, is_ignored_line, push_text, push_values, values, warning};
+use super::row_tokens::{client_int, leading_values, split_token, tokens, trim};
+use super::{
+    GtdWarning, ParsedGtd, fields, is_ignored_line, push_text, push_values, values, warning,
+};
 use crate::{Result, TextError};
 
 fn invalid(message: impl Into<String>) -> TextError {
@@ -559,30 +562,50 @@ pub fn decode_map_id(text: &str) -> Result<ParsedGtd<MapIdDocument>> {
     let mut entries: Vec<MapIdEntry> = Vec::new();
     let mut warnings = Vec::new();
     for (index, line) in text.lines().enumerate() {
-        if is_ignored_line(line) {
+        let row = index + 1;
+        let (tag, rest) = split_token(line);
+        if tag.is_empty() || tag.starts_with('#') {
             continue;
         }
-        let f = fields(line);
-        if f.first() == Some(&"DATA") {
-            match (entries.last_mut(), values(&f[1..])) {
-                (Some(e), Some(v)) => e.data_rows.push(v),
-                _ => warnings.push(warning(index + 1, "invalid map DATA row")),
+        // Every other row whose first character is not `D` starts an entry.
+        if !tag.starts_with('D') {
+            let ([min_map_vnum, max_map_vnum, map_point_vnum, point_kind], normalized, name) =
+                leading_values(line);
+            if normalized {
+                warnings.push(warning(row, "invalid map id value normalized to -1"));
             }
-        } else if f.len() == 5 {
-            match values(&f[..4]) {
-                Some(v) => entries.push(MapIdEntry {
-                    min_map_vnum: v[0],
-                    max_map_vnum: v[1],
-                    map_point_vnum: v[2],
-                    point_kind: v[3],
-                    name: f[4].into(),
-                    data_rows: Vec::new(),
-                }),
-                None => warnings.push(warning(index + 1, "invalid map id row")),
-            }
-        } else {
-            warnings.push(warning(index + 1, "invalid map id row"))
+            entries.push(MapIdEntry {
+                min_map_vnum,
+                max_map_vnum,
+                map_point_vnum,
+                point_kind,
+                name: name.into(),
+                data_rows: Vec::new(),
+            });
+            continue;
         }
+        let Some(entry) = entries.last_mut() else {
+            warnings.push(warning(row, "map DATA row before the first map entry"));
+            continue;
+        };
+        if tag.contains(' ') {
+            warnings.push(warning(row, "text in the map DATA tag dropped"));
+        }
+        // The client reads only the first value; the rest stay as source.
+        let mut normalized = false;
+        let values = tokens(rest)
+            .into_iter()
+            .map(|token| {
+                client_int(token).unwrap_or_else(|| {
+                    normalized = true;
+                    -1
+                })
+            })
+            .collect();
+        if normalized {
+            warnings.push(warning(row, "invalid map DATA value normalized to -1"));
+        }
+        entry.data_rows.push(values);
     }
     Ok(ParsedGtd {
         document: MapIdDocument { entries },
@@ -592,17 +615,37 @@ pub fn decode_map_id(text: &str) -> Result<ParsedGtd<MapIdDocument>> {
 pub fn encode_map_id(doc: &MapIdDocument) -> Result<String> {
     let mut out = String::new();
     for e in &doc.entries {
-        clean_text(&e.name, "map name")?;
+        remainder_text(&e.name, "map name")?;
         out.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\n",
-            e.min_map_vnum, e.max_map_vnum, e.map_point_vnum, e.point_kind, e.name
+            "{}\t{}\t{}\t{}",
+            e.min_map_vnum, e.max_map_vnum, e.map_point_vnum, e.point_kind
         ));
+        push_remainder_text(&mut out, &e.name);
         for d in &e.data_rows {
             push_values(&mut out, "DATA", d)
         }
         out.push('\n')
     }
     Ok(out)
+}
+
+/// The client keeps everything after a row's numeric fields as text, but trims
+/// the row first, so text cannot end in whitespace.
+fn remainder_text(value: &str, field: &str) -> Result<()> {
+    clean_text(value, field)?;
+    if value.ends_with(|c: char| c <= ' ') {
+        return Err(invalid(format!("{field} ends with whitespace")));
+    }
+    Ok(())
+}
+
+/// Ends a row after its numeric fields, separating any text with a tab.
+fn push_remainder_text(out: &mut String, text: &str) {
+    if !text.is_empty() {
+        out.push('\t');
+        out.push_str(text);
+    }
+    out.push('\n');
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -625,32 +668,47 @@ pub struct MapPoint {
     pub name: String,
 }
 pub fn decode_map_point(text: &str) -> Result<ParsedGtd<MapPointDocument>> {
-    let mut sections = Vec::new();
+    let mut sections: Vec<MapPointSection> = Vec::new();
     let mut warnings = Vec::new();
     for (index, line) in text.lines().enumerate() {
+        let row = index + 1;
         if line.trim() == "~" || is_ignored_line(line) || line.trim() == "E" {
             continue;
         }
-        let f = fields(line);
-        match f.first().copied() {
-            Some("S") if f.len() == 2 => match f[1].parse() {
-                Ok(vnum) => sections.push(MapPointSection {
-                    vnum,
-                    points: Vec::new(),
-                }),
-                _ => warnings.push(warning(index + 1, "invalid map section")),
-            },
-            Some("D") if f.len() == 5 => match (values(&f[1..4]), sections.last_mut()) {
-                (Some(v), Some(s)) => s.points.push(MapPoint {
-                    kind: v[0],
-                    x: v[1],
-                    y: v[2],
-                    name: f[4].into(),
-                }),
-                _ => warnings.push(warning(index + 1, "invalid map point")),
-            },
-            _ => warnings.push(warning(index + 1, "invalid map point row")),
+        let (tag, rest) = split_token(line);
+        if !tag.starts_with(['S', 'D']) {
+            warnings.push(warning(row, "invalid map point row"));
+            continue;
         }
+        if tag.contains(' ') {
+            warnings.push(warning(row, "text in the map point tag dropped"));
+        }
+        if tag.starts_with('S') {
+            // The client parses the whole remainder as the section number.
+            let vnum = client_int(rest).unwrap_or_else(|| {
+                warnings.push(warning(row, "invalid map section normalized to -1"));
+                -1
+            });
+            sections.push(MapPointSection {
+                vnum,
+                points: Vec::new(),
+            });
+            continue;
+        }
+        let Some(section) = sections.last_mut() else {
+            warnings.push(warning(row, "map point before the first section"));
+            continue;
+        };
+        let ([kind, x, y], normalized, name) = leading_values(rest);
+        if normalized {
+            warnings.push(warning(row, "invalid map point value normalized to -1"));
+        }
+        section.points.push(MapPoint {
+            kind,
+            x,
+            y,
+            name: name.into(),
+        });
     }
     Ok(ParsedGtd {
         document: MapPointDocument { sections },
@@ -662,8 +720,9 @@ pub fn encode_map_point(doc: &MapPointDocument) -> Result<String> {
     for s in &doc.sections {
         push_values(&mut out, "S", &[s.vnum]);
         for p in &s.points {
-            clean_text(&p.name, "map point name")?;
-            out.push_str(&format!("D\t{}\t{}\t{}\t{}\n", p.kind, p.x, p.y, p.name))
+            remainder_text(&p.name, "map point name")?;
+            out.push_str(&format!("D\t{}\t{}\t{}", p.kind, p.x, p.y));
+            push_remainder_text(&mut out, &p.name);
         }
     }
     out.push_str("E\n");
@@ -871,7 +930,8 @@ pub struct FishPosition {
 pub struct FishItem {
     pub slot: i32,
     pub vnum: i32,
-    pub weight: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<i32>,
 }
 pub fn decode_fish(text: &str) -> Result<ParsedGtd<FishDocument>> {
     let mut entries = Vec::new();
@@ -883,11 +943,13 @@ pub fn decode_fish(text: &str) -> Result<ParsedGtd<FishDocument>> {
         if line.trim() == "~" || is_ignored_line(line) {
             continue;
         }
-        if let Some([vnum]) = ints(line, "VNUM") {
-            if let Some(e) = cur.take() {
-                entries.push(e)
-            }
-            cur = Some(FishEntry {
+        let (tag, rest) = split_token(line);
+        let tag = trim(tag).to_ascii_uppercase();
+        if tag == "VNUM" {
+            // The client starts a fish at every VNUM row, whatever follows it.
+            let ([vnum], unread) = fish_values(rest, row, &mut warnings);
+            unread_fish_text(unread, row, &mut warnings);
+            let next = FishEntry {
                 vnum,
                 level: [0; 2],
                 declared_map_count: 0,
@@ -896,62 +958,93 @@ pub fn decode_fish(text: &str) -> Result<ParsedGtd<FishDocument>> {
                 items: Vec::new(),
                 declared_basic_count: 0,
                 basics: Vec::new(),
-            });
-            map_index = None
-        } else if let Some(e) = cur.as_mut() {
-            if let Some(v) = ints(line, "LEVEL") {
-                e.level = v
-            } else if let Some([v]) = ints(line, "MAPT") {
-                e.declared_map_count = v
-            } else if let Some([slot, map_vnum]) = ints(line, "MAP") {
+            };
+            if let Some(e) = cur.replace(next) {
+                entries.push(e)
+            }
+            map_index = None;
+            continue;
+        }
+        let Some(e) = cur.as_mut() else {
+            warnings.push(warning(row, "fish row before VNUM"));
+            continue;
+        };
+        let unread = match tag.as_str() {
+            "LEVEL" => {
+                let (level, unread) = fish_values(rest, row, &mut warnings);
+                e.level = level;
+                unread
+            }
+            "MAPT" => {
+                let ([count], unread) = fish_values(rest, row, &mut warnings);
+                e.declared_map_count = count;
+                unread
+            }
+            "MAP" => {
+                let ([slot, map_vnum], unread) = fish_values(rest, row, &mut warnings);
                 e.maps.push(FishMap {
                     slot,
                     map_vnum,
                     declared_position_count: 0,
                     positions: Vec::new(),
                 });
-                map_index = Some(e.maps.len() - 1)
-            } else if let Some([slot, count]) = ints(line, "POST") {
-                map_index = e.maps.iter().rposition(|m| m.slot == slot);
-                if let Some(i) = map_index {
-                    e.maps[i].declared_position_count = count
-                } else {
-                    warnings.push(warning(row, "POST without MAP"))
-                }
-            } else if let Some(v) = ints::<5>(line, "POS") {
-                if let Some(i) = map_index {
-                    e.maps[i].positions.push(FishPosition {
-                        map_slot: v[0],
-                        slot: v[1],
-                        x: v[2],
-                        y: v[3],
-                        direction: v[4],
+                map_index = Some(e.maps.len() - 1);
+                unread
+            }
+            "ITEMT" => {
+                let ([count], unread) = fish_values(rest, row, &mut warnings);
+                e.declared_item_count = count;
+                unread
+            }
+            "ITEM" => {
+                let ([slot, vnum], unread) = fish_values(rest, row, &mut warnings);
+                let (token, after) = split_token(unread);
+                let weight = client_int(token);
+                e.items.push(FishItem { slot, vnum, weight });
+                if weight.is_some() { after } else { unread }
+            }
+            // The client never reads POST, POS, BASICT or BASIC rows.
+            _ => {
+                if let Some([slot, count]) = ints(line, "POST") {
+                    map_index = e.maps.iter().rposition(|m| m.slot == slot);
+                    if let Some(i) = map_index {
+                        e.maps[i].declared_position_count = count
+                    } else {
+                        warnings.push(warning(row, "POST without MAP"))
+                    }
+                } else if let Some(v) = ints::<5>(line, "POS") {
+                    if let Some(i) = map_index {
+                        e.maps[i].positions.push(FishPosition {
+                            map_slot: v[0],
+                            slot: v[1],
+                            x: v[2],
+                            y: v[3],
+                            direction: v[4],
+                        })
+                    } else {
+                        warnings.push(warning(row, "POS without MAP"))
+                    }
+                } else if let Some([v]) = ints(line, "BASICT") {
+                    e.declared_basic_count = v
+                } else if let Some([slot, vnum, weight]) = ints(line, "BASIC") {
+                    e.basics.push(FishItem {
+                        slot,
+                        vnum,
+                        weight: Some(weight),
+                    })
+                } else if let Some([slot, vnum]) = ints(line, "BASIC") {
+                    e.basics.push(FishItem {
+                        slot,
+                        vnum,
+                        weight: None,
                     })
                 } else {
-                    warnings.push(warning(row, "POS without MAP"))
+                    warnings.push(warning(row, "invalid fish row"))
                 }
-            } else if let Some([v]) = ints(line, "ITEMT") {
-                e.declared_item_count = v
-            } else if let Some(v) = ints::<3>(line, "ITEM") {
-                e.items.push(FishItem {
-                    slot: v[0],
-                    vnum: v[1],
-                    weight: v[2],
-                })
-            } else if let Some([v]) = ints(line, "BASICT") {
-                e.declared_basic_count = v
-            } else if let Some(v) = ints::<3>(line, "BASIC") {
-                e.basics.push(FishItem {
-                    slot: v[0],
-                    vnum: v[1],
-                    weight: v[2],
-                })
-            } else {
-                warnings.push(warning(row, "invalid fish row"))
+                continue;
             }
-        } else {
-            warnings.push(warning(row, "fish row before VNUM"))
-        }
+        };
+        unread_fish_text(unread, row, &mut warnings);
     }
     if let Some(e) = cur {
         entries.push(e)
@@ -961,16 +1054,33 @@ pub fn decode_fish(text: &str) -> Result<ParsedGtd<FishDocument>> {
         warnings,
     })
 }
+
+/// Reads the `N` values the client takes from a fish row, reporting values
+/// that fall back to -1, and returns the unread remainder.
+fn fish_values<'a, const N: usize>(
+    rest: &'a str,
+    row: usize,
+    warnings: &mut Vec<GtdWarning>,
+) -> ([i32; N], &'a str) {
+    let (values, normalized, unread) = leading_values(rest);
+    if normalized {
+        warnings.push(warning(row, "invalid fish value normalized to -1"));
+    }
+    (values, unread)
+}
+
+/// Reports tokens the client ignores after a fish row's values. A trailing
+/// `//` comment is not reported.
+fn unread_fish_text(unread: &str, row: usize, warnings: &mut Vec<GtdWarning>) {
+    let (token, _) = split_token(unread);
+    if !token.is_empty() && !token.starts_with("//") {
+        warnings.push(warning(row, "extra fish values dropped"));
+    }
+}
+
 pub fn encode_fish(doc: &FishDocument) -> Result<String> {
     let mut out = String::new();
     for e in &doc.entries {
-        if e.declared_map_count < 0
-            || e.declared_item_count < 0
-            || e.declared_basic_count < 0
-            || e.maps.iter().any(|map| map.declared_position_count < 0)
-        {
-            return Err(invalid("fish declared counts must be non-negative"));
-        }
         push_values(&mut out, "VNUM", &[e.vnum]);
         push_values(&mut out, "LEVEL", &e.level);
         push_values(&mut out, "MAPT", &[e.declared_map_count]);
@@ -987,15 +1097,22 @@ pub fn encode_fish(doc: &FishDocument) -> Result<String> {
         }
         push_values(&mut out, "ITEMT", &[e.declared_item_count]);
         for i in &e.items {
-            push_values(&mut out, "ITEM", &[i.slot, i.vnum, i.weight])
+            push_fish_item(&mut out, "ITEM", i)
         }
         push_values(&mut out, "BASICT", &[e.declared_basic_count]);
         for i in &e.basics {
-            push_values(&mut out, "BASIC", &[i.slot, i.vnum, i.weight])
+            push_fish_item(&mut out, "BASIC", i)
         }
     }
     out.push_str("~\n");
     Ok(out)
+}
+
+fn push_fish_item(out: &mut String, tag: &str, item: &FishItem) {
+    match item.weight {
+        Some(weight) => push_values(out, tag, &[item.slot, item.vnum, weight]),
+        None => push_values(out, tag, &[item.slot, item.vnum]),
+    }
 }
 
 #[cfg(test)]
@@ -1009,6 +1126,99 @@ mod tests {
         assert_eq!(p.document.entries[0].maps[0].declared_position_count, 2);
         let again = decode_fish(&encode_fish(&p.document).unwrap()).unwrap();
         assert_eq!(again.document, p.document)
+    }
+
+    #[test]
+    fn fish_rows_keep_the_values_the_client_reads() {
+        let src = "VNUM 1 // first\nLEVEL 5 6 7\nMAPT\nMAP 0 5 9\nITEM 0 2100\nITEM 1 2200 300\n";
+        let parsed = decode_fish(src).unwrap();
+        let rows: Vec<_> = parsed.warnings.iter().map(|w| w.row).collect();
+        assert_eq!(rows, [2, 3, 4]);
+        let fish = &parsed.document.entries[0];
+        assert_eq!(fish.level, [5, 6]);
+        assert_eq!(fish.declared_map_count, -1);
+        assert_eq!((fish.maps[0].slot, fish.maps[0].map_vnum), (0, 5));
+        assert_eq!(
+            fish.items,
+            [
+                FishItem {
+                    slot: 0,
+                    vnum: 2100,
+                    weight: None,
+                },
+                FishItem {
+                    slot: 1,
+                    vnum: 2200,
+                    weight: Some(300),
+                },
+            ]
+        );
+
+        let native = encode_fish(&parsed.document).unwrap();
+        assert!(native.contains("MAPT\t-1\n"));
+        assert!(native.contains("ITEM\t0\t2100\nITEM\t1\t2200\t300\n"));
+        let again = decode_fish(&native).unwrap();
+        assert!(again.warnings.is_empty());
+        assert_eq!(again.document, parsed.document);
+    }
+
+    #[test]
+    fn fish_vnum_rows_always_start_an_entry() {
+        let src = concat!(
+            "VNUM 1\nLEVEL 1 10\nMAP 0 5\nITEM 1 2200 100\n",
+            "VNUM 2 99\nLEVEL 2 20\nMAP 0 1\nITEM 0 2300 100\n",
+            "VNUM fish\nLEVEL 3 30\n",
+            "VNUM 4\t99\nLEVEL 4 40\n",
+        );
+        let parsed = decode_fish(src).unwrap();
+        let rows: Vec<_> = parsed.warnings.iter().map(|w| w.row).collect();
+        assert_eq!(rows, [5, 9, 11]);
+        let entries = &parsed.document.entries;
+        let summary: Vec<_> = entries.iter().map(|e| (e.vnum, e.level)).collect();
+        // The client reads `VNUM 4<TAB>99` as one unknown tag and ignores it.
+        assert_eq!(summary, [(1, [1, 10]), (2, [2, 20]), (-1, [4, 40])]);
+        assert_eq!(entries[0].items.len(), 1);
+        assert_eq!(entries[1].maps[0].map_vnum, 1);
+    }
+
+    #[test]
+    fn fish_rows_before_the_first_vnum_are_reported() {
+        let parsed = decode_fish("# comment\nLEVEL 1 2\nBASIC 0 1\nVNUM 1\n~\n").unwrap();
+        let rows: Vec<_> = parsed.warnings.iter().map(|w| w.row).collect();
+        assert_eq!(rows, [2, 3]);
+        assert_eq!(parsed.document.entries[0].level, [0, 0]);
+    }
+
+    #[test]
+    fn fish_basic_rows_stay_source_rows_with_an_optional_weight() {
+        let src = "VNUM 1\nBASICT 2\nBASIC 0 9198\nBASIC 1 9208 500\nPOST 0 3\nBASIC x\n";
+        let parsed = decode_fish(src).unwrap();
+        let rows: Vec<_> = parsed.warnings.iter().map(|w| w.row).collect();
+        assert_eq!(rows, [5, 6]);
+        let fish = &parsed.document.entries[0];
+        assert_eq!(fish.basics[0].weight, None);
+        assert_eq!(fish.basics[1].weight, Some(500));
+        assert_eq!(
+            decode_fish(&encode_fish(&parsed.document).unwrap())
+                .unwrap()
+                .document,
+            parsed.document
+        );
+    }
+
+    #[test]
+    fn fish_item_weight_is_an_optional_json_field() {
+        let item = FishItem {
+            slot: 0,
+            vnum: 2100,
+            weight: None,
+        };
+        let json = serde_json::to_value(&item).unwrap();
+        assert!(json.get("weight").is_none());
+        assert_eq!(serde_json::from_value::<FishItem>(json).unwrap(), item);
+        let weighted: FishItem =
+            serde_json::from_str(r#"{"slot":1,"vnum":2200,"weight":300}"#).unwrap();
+        assert_eq!(weighted.weight, Some(300));
     }
     #[test]
     fn npc_commands_keep_order() {
@@ -1070,6 +1280,133 @@ mod tests {
         };
         let s = encode_map_point(&d).unwrap();
         assert_eq!(s.lines().filter(|l| *l == "E").count(), 1)
+    }
+
+    fn map_id_entry(name: &str, data_rows: Vec<Vec<i32>>) -> MapIdEntry {
+        MapIdEntry {
+            min_map_vnum: 20,
+            max_map_vnum: 30,
+            map_point_vnum: 6,
+            point_kind: 2,
+            name: name.into(),
+            data_rows,
+        }
+    }
+
+    #[test]
+    fn map_id_names_keep_the_row_remainder() {
+        let src = "1\t10\t5\t1\tFirst\nDATA 7\n20 30 6 2 Two Words\nDATA 9\n40 50 7 3\nDATA 11\n";
+        let parsed = decode_map_id(src).unwrap();
+        assert!(parsed.warnings.is_empty());
+        let names: Vec<_> = parsed.document.entries.iter().map(|e| &e.name).collect();
+        assert_eq!(names, ["First", "Two Words", ""]);
+        assert_eq!(parsed.document.entries[2].data_rows, [[11]]);
+
+        let native = encode_map_id(&parsed.document).unwrap();
+        assert!(native.contains("20\t30\t6\t2\tTwo Words\n"));
+        assert!(native.contains("40\t50\t7\t3\nDATA\t11\n"));
+        assert_eq!(decode_map_id(&native).unwrap().document, parsed.document);
+    }
+
+    #[test]
+    fn map_id_rows_after_an_invalid_header_stay_with_it() {
+        let src = "1 10 5 1 First\nDATA 7\nmap 30 6 2 Bad\nDATA 9\n~\nDATA 1\n";
+        let parsed = decode_map_id(src).unwrap();
+        let rows: Vec<_> = parsed.warnings.iter().map(|w| w.row).collect();
+        assert_eq!(rows, [3, 5]);
+        let entries = &parsed.document.entries;
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].data_rows, [[7]]);
+        assert_eq!(
+            (
+                entries[1].min_map_vnum,
+                &*entries[1].name,
+                &entries[1].data_rows
+            ),
+            (-1, "Bad", &vec![vec![9]])
+        );
+        assert_eq!(entries[2], {
+            let mut entry = map_id_entry("", vec![vec![1]]);
+            (entry.min_map_vnum, entry.max_map_vnum) = (-1, -1);
+            (entry.map_point_vnum, entry.point_kind) = (-1, -1);
+            entry
+        });
+    }
+
+    #[test]
+    fn map_id_data_rows_are_rows_starting_with_d() {
+        let src = "DATA 3\n1 1 1 4 zts1e\nD 5\nDESC 6 7\ndata 8\n";
+        let parsed = decode_map_id(src).unwrap();
+        assert_eq!(parsed.warnings[0].row, 1);
+        let entries = &parsed.document.entries;
+        assert_eq!(entries[0].data_rows, [vec![5], vec![6, 7]]);
+        assert_eq!(entries[1].min_map_vnum, -1);
+        assert_eq!(entries[1].max_map_vnum, 8);
+    }
+
+    #[test]
+    fn map_id_json_names_with_spaces_or_no_text_read_back() {
+        let document = MapIdDocument {
+            entries: vec![
+                map_id_entry("Two Words", vec![vec![1]]),
+                map_id_entry("", vec![]),
+                map_id_entry("  indented\tname", vec![vec![], vec![2, 3]]),
+            ],
+        };
+        let parsed = decode_map_id(&encode_map_id(&document).unwrap()).unwrap();
+        assert!(parsed.warnings.is_empty());
+        assert_eq!(parsed.document, document);
+
+        for name in ["trailing ", "tab\t", " "] {
+            let document = MapIdDocument {
+                entries: vec![map_id_entry(name, vec![])],
+            };
+            assert!(encode_map_id(&document).is_err(), "{name:?}");
+        }
+    }
+
+    #[test]
+    fn map_point_text_keeps_the_row_remainder() {
+        let src = "S 1\nD 2 30 40 Two Words\nD\t3\t50\t60\nE\n";
+        let parsed = decode_map_point(src).unwrap();
+        assert!(parsed.warnings.is_empty());
+        let points = &parsed.document.sections[0].points;
+        assert_eq!(
+            points[0],
+            MapPoint {
+                kind: 2,
+                x: 30,
+                y: 40,
+                name: "Two Words".into(),
+            }
+        );
+        assert_eq!(points[1].name, "");
+
+        let native = encode_map_point(&parsed.document).unwrap();
+        assert!(native.contains("D\t3\t50\t60\n"));
+        assert_eq!(decode_map_point(&native).unwrap().document, parsed.document);
+        let mut document = parsed.document;
+        document.sections[0].points[0].name = "name ".into();
+        assert!(encode_map_point(&document).is_err());
+    }
+
+    #[test]
+    fn map_point_section_reads_its_whole_remainder() {
+        let src = "D 1 2 3 Early\nS\t1\nD 1 2 3 One\nS\t2 // comment\nD 4 5 6 Four\nS  3\n";
+        let parsed = decode_map_point(src).unwrap();
+        let rows: Vec<_> = parsed.warnings.iter().map(|w| w.row).collect();
+        assert_eq!(rows, [1, 4]);
+        let sections = &parsed.document.sections;
+        let vnums: Vec<_> = sections.iter().map(|s| s.vnum).collect();
+        assert_eq!(vnums, [1, -1, 3]);
+        assert_eq!(sections[0].points.len(), 1);
+        assert_eq!(sections[1].points[0].name, "Four");
+        assert_eq!(
+            decode_map_point(&encode_map_point(&parsed.document).unwrap())
+                .unwrap()
+                .document,
+            parsed.document
+        );
     }
     #[test]
     fn quest_repeated_data_round_trips() {

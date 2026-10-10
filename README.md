@@ -446,6 +446,13 @@ Rows whose field counts vary between data revisions retain their complete token
 sequences in JSON. Packing writes those sequences unchanged, including empty,
 shorter, longer, and partially grouped rows.
 
+Map ID, map point, and fish rows instead follow the client's reader. A missing
+or non-numeric value becomes `-1` with a warning, and map and point names keep
+the rest of their row, including spaces. Fish `ITEM` and `BASIC` weights are
+optional, and `weight` is omitted from JSON when a row has none. Other tokens
+after a fish row's values are dropped with a warning unless they start a `//`
+comment.
+
 Decorative `END`, `end`, `E`, and `~` rows are not exposed as JSON framing.
 Reader-visible exceptions are normalized semantically: tutorial `~` becomes a
 step `-1` command, shop-type `~` becomes a vnum `-1` row, and Skill output adds
