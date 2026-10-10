@@ -37,15 +37,25 @@ The grammar examples below use these placeholders:
 
 | Placeholder | Meaning                                              |
 | ----------- | ---------------------------------------------------- |
-| `<i32>`     | Signed decimal 32-bit integer                        |
+| `<i32>`     | Signed 32-bit integer                                |
 | `<text>`    | Text extending to the end of the physical source row |
 | `...`       | A repeated row or field sequence                     |
 
 Square brackets mark optional fields or rows; they are not literal source
 characters.
 
-Spaces and tabs separate numeric fields. Numeric tokens use signed decimal
-representation, and fields which permit negative values frequently use them as
+Most readers split rows the same way. They trim each row, removing spaces and
+control characters from both ends, then split off its first token at the first
+tab, or at the first space when the row has no tab. Later tokens are split from
+the trimmed rest of the row the same way, so a space before a tab stays inside a
+token. Sections note readers that split rows differently.
+
+An integer token may start with spaces and a sign, followed by a decimal number
+or by a hexadecimal number after a `$`, `x`/`X`, or `0x`/`0X` prefix, so `-$1F`
+reads as `-31`. A decimal number must fit in a signed 32-bit integer, while a
+hexadecimal number may use all 32 bits. A missing or non-numeric token reads as
+a default value, usually `-1`. Observed records write integers in signed
+decimal, and fields which permit negative values frequently use them as
 sentinels. Formats which constrain declared counts say so explicitly. Text such
 as `zts1e` is an opaque key; its apparent structure does not change how it is
 stored.
@@ -385,22 +395,17 @@ DATA <i32> ...
 ...
 ```
 
-The reader trims each row and splits off its first token at the first tab, or at
-the first space when the row has no tab; later fields are split from the
-remainder the same way. An integer field may start with spaces and a sign and is
-decimal, or hexadecimal after a `$`, `x`, or `0x` prefix. Blank rows and rows
-whose first token starts with `#` are ignored.
-
-Every other row whose first character is not `D` starts a map-range entry. The
-reader takes four integers from it and keeps the rest of the row, after the
-delimiter that follows the fourth field, as the name. The name may contain
-spaces or be empty; it keeps any further leading whitespace, but cannot end in
-whitespace because the row is trimmed. A missing or non-numeric field reads as
--1, so rows such as `~` or `data 5` also start entries.
+Every nonblank, non-comment row whose first character is not `D` starts a
+map-range entry. The reader takes four integers from it and keeps the rest of
+the row, after the delimiter that follows the fourth field, as the name. The
+name may contain spaces or be empty; it keeps any further leading whitespace,
+but cannot end in whitespace because the row is trimmed. A missing or
+non-numeric field reads as `-1`, so rows such as `~` or `data 5` also start
+entries.
 
 Any row whose first character is `D`, conventionally `DATA`, stores its first
 integer in a single value of the most recent entry, and a later `D` row replaces
-it. The reader ignores the remaining integers, uses -1 for a missing or
+it. The reader ignores the remaining integers, uses `-1` for a missing or
 non-numeric value, and discards a `D` row before the first entry. On entering a
 map, the client checks this value for 1, 2, or 3 to choose a quest or NPC marker
 mode. Every 2008 entry has no `DATA` row, while every current entry has one with
@@ -418,14 +423,14 @@ S <vnum>
 E
 ```
 
-The reader splits rows like `MapIDData.dat` and dispatches on the first
-character of each row's first token. `S` starts a section and parses the whole
-rest of the row as its number, so `S 2 // comment` reads as section -1. Each `D`
-appends a point to the most recent section: the reader takes three integers and
-keeps the rest of the row as the point name, which may contain spaces or be
-empty. A missing or non-numeric value reads as -1. A `D` row before the first
-`S` row is invalid, because the reader has no section to store it in. Rows
-starting with any other character are ignored.
+The reader dispatches on the first character of each trimmed row. `S` starts a
+section and parses the whole rest of the row as its number, so `S 2 // comment`
+reads as section `-1`. Each `D` appends a point to the most recent section: the
+reader takes three integers and keeps the rest of the row as the point name,
+which may contain spaces or be empty. A missing or non-numeric value reads as
+`-1`. A section holds at most 200 points, and the reader ignores later `D` rows
+in it. A `D` row before the first `S` row is invalid, because the reader has no
+section to store it in. Rows starting with any other character are ignored.
 
 The current record has one global trailing `E`, not one per section; the 2008
 record has no `E`. The reader ignores `E` rather than stopping, so later `S` and
@@ -483,11 +488,11 @@ BASIC <slot> <vnum> [<weight>]
 ~
 ```
 
-The reader splits the tag off each row like `MapIDData.dat` and compares it
-case-insensitively. It reads only `VNUM`, `LEVEL`, `MAPT`, `MAP`, `ITEMT`, and
-`ITEM`. Each of these takes a fixed number of integers, two for `LEVEL`, `MAP`,
-and `ITEM` and one for the others, and ignores any further tokens, such as a
-`//` comment. A missing or non-numeric value reads as -1. Every other row,
+The reader trims each row's first token and compares it with its tags in any
+letter case. It reads only `VNUM`, `LEVEL`, `MAPT`, `MAP`, `ITEMT`, and `ITEM`.
+Each of these takes a fixed number of integers, two for `LEVEL`, `MAP`, and
+`ITEM` and one for the others, and ignores any further tokens, such as a `//`
+comment. A missing or non-numeric value reads as `-1`. Every other row,
 including the trailing `~`, is ignored.
 
 `VNUM` always starts an entry, whatever its value tokens hold, and the next
@@ -495,18 +500,17 @@ including the trailing `~`, is ignored.
 in slot 0 to 2 and `ITEM` stores an item in slot 0 to 61; a later row for the
 same slot replaces it. The reader does not check the slot, so a slot outside
 those ranges overwrites another field of the entry, such as the item count for
-item slot -1 or the map count for item slot 62, or memory outside it. `MAPT` and
-`ITEMT` set how many map and item slots the fish information window lists, so a
-zero or negative count lists none. If `LEVEL` or a count row is absent, the
+item slot `-1` or the map count for item slot 62, or memory outside it. `MAPT`
+and `ITEMT` set how many map and item slots the fish information window lists,
+so a zero or negative count lists none. If `LEVEL` or a count row is absent, the
 reader uses zero values.
 
 The `ITEM` weight and the `POST`, `POS`, `BASICT`, and `BASIC` rows are source
 data that the client never reads. In the source layout, `POST` gives a map slot
 and its declared position count, and the `POS` rows that follow list that map's
 positions. `BASICT` and `BASIC` list a second item table. `MAPT`, each `POST`
-count, `ITEMT`, and `BASICT` are independently stored values, not derived from
-the number of following rows, so a mismatch is meaningful and must survive
-rewriting.
+count, `ITEMT`, and `BASICT` are stored independently of the number of rows that
+follow them, so a count may differ from its row count.
 
 ## `<locale>_nosmall.dat`
 

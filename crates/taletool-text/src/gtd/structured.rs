@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::row_tokens::{client_int, leading_values, split_token, tokens, trim};
+use super::row_tokens::{all_values, client_int, leading_values, split_token, trim};
 use super::{
     GtdWarning, ParsedGtd, fields, is_ignored_line, push_text, push_values, values, warning,
 };
@@ -570,7 +570,7 @@ pub fn decode_map_id(text: &str) -> Result<ParsedGtd<MapIdDocument>> {
         // Every other row whose first character is not `D` starts an entry.
         if !tag.starts_with('D') {
             let ([min_map_vnum, max_map_vnum, map_point_vnum, point_kind], normalized, name) =
-                leading_values(line);
+                leading_values(line, [-1; 4]);
             if normalized {
                 warnings.push(warning(row, "invalid map id value normalized to -1"));
             }
@@ -588,20 +588,11 @@ pub fn decode_map_id(text: &str) -> Result<ParsedGtd<MapIdDocument>> {
             warnings.push(warning(row, "map DATA row before the first map entry"));
             continue;
         };
-        if tag.contains(' ') {
+        if trim(tag).contains(' ') {
             warnings.push(warning(row, "text in the map DATA tag dropped"));
         }
         // The client reads only the first value; the rest stay as source.
-        let mut normalized = false;
-        let values = tokens(rest)
-            .into_iter()
-            .map(|token| {
-                client_int(token).unwrap_or_else(|| {
-                    normalized = true;
-                    -1
-                })
-            })
-            .collect();
+        let (values, normalized) = all_values(rest, -1);
         if normalized {
             warnings.push(warning(row, "invalid map DATA value normalized to -1"));
         }
@@ -616,11 +607,11 @@ pub fn encode_map_id(doc: &MapIdDocument) -> Result<String> {
     let mut out = String::new();
     for e in &doc.entries {
         remainder_text(&e.name, "map name")?;
-        out.push_str(&format!(
+        let values = format!(
             "{}\t{}\t{}\t{}",
             e.min_map_vnum, e.max_map_vnum, e.map_point_vnum, e.point_kind
-        ));
-        push_remainder_text(&mut out, &e.name);
+        );
+        push_text(&mut out, &values, &e.name);
         for d in &e.data_rows {
             push_values(&mut out, "DATA", d)
         }
@@ -629,23 +620,17 @@ pub fn encode_map_id(doc: &MapIdDocument) -> Result<String> {
     Ok(out)
 }
 
-/// The client keeps everything after a row's numeric fields as text, but trims
-/// the row first, so text cannot end in whitespace.
+/// Checks text that the client keeps after a row's numeric fields. A packed
+/// row ends only at its terminator, so the text may hold a carriage return,
+/// but the client trims the row, so the text cannot end in whitespace.
 fn remainder_text(value: &str, field: &str) -> Result<()> {
-    clean_text(value, field)?;
+    if value.contains('\n') {
+        return Err(invalid(format!("{field} contains a line break")));
+    }
     if value.ends_with(|c: char| c <= ' ') {
         return Err(invalid(format!("{field} ends with whitespace")));
     }
     Ok(())
-}
-
-/// Ends a row after its numeric fields, separating any text with a tab.
-fn push_remainder_text(out: &mut String, text: &str) {
-    if !text.is_empty() {
-        out.push('\t');
-        out.push_str(text);
-    }
-    out.push('\n');
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -680,7 +665,7 @@ pub fn decode_map_point(text: &str) -> Result<ParsedGtd<MapPointDocument>> {
             warnings.push(warning(row, "invalid map point row"));
             continue;
         }
-        if tag.contains(' ') {
+        if trim(tag).contains(' ') {
             warnings.push(warning(row, "text in the map point tag dropped"));
         }
         if tag.starts_with('S') {
@@ -699,7 +684,7 @@ pub fn decode_map_point(text: &str) -> Result<ParsedGtd<MapPointDocument>> {
             warnings.push(warning(row, "map point before the first section"));
             continue;
         };
-        let ([kind, x, y], normalized, name) = leading_values(rest);
+        let ([kind, x, y], normalized, name) = leading_values(rest, [-1; 3]);
         if normalized {
             warnings.push(warning(row, "invalid map point value normalized to -1"));
         }
@@ -721,8 +706,8 @@ pub fn encode_map_point(doc: &MapPointDocument) -> Result<String> {
         push_values(&mut out, "S", &[s.vnum]);
         for p in &s.points {
             remainder_text(&p.name, "map point name")?;
-            out.push_str(&format!("D\t{}\t{}\t{}", p.kind, p.x, p.y));
-            push_remainder_text(&mut out, &p.name);
+            let values = format!("D\t{}\t{}\t{}", p.kind, p.x, p.y);
+            push_text(&mut out, &values, &p.name);
         }
     }
     out.push_str("E\n");
@@ -938,6 +923,7 @@ pub fn decode_fish(text: &str) -> Result<ParsedGtd<FishDocument>> {
     let mut warnings = Vec::new();
     let mut cur: Option<FishEntry> = None;
     let mut map_index = None;
+    let mut assigned = Vec::new();
     for (index, line) in text.lines().enumerate() {
         let row = index + 1;
         if line.trim() == "~" || is_ignored_line(line) {
@@ -963,6 +949,7 @@ pub fn decode_fish(text: &str) -> Result<ParsedGtd<FishDocument>> {
                 entries.push(e)
             }
             map_index = None;
+            assigned.clear();
             continue;
         }
         let Some(e) = cur.as_mut() else {
@@ -972,17 +959,24 @@ pub fn decode_fish(text: &str) -> Result<ParsedGtd<FishDocument>> {
         let unread = match tag.as_str() {
             "LEVEL" => {
                 let (level, unread) = fish_values(rest, row, &mut warnings);
+                replaced_fish_value(&mut assigned, ("LEVEL", 0), row, &mut warnings);
                 e.level = level;
                 unread
             }
             "MAPT" => {
                 let ([count], unread) = fish_values(rest, row, &mut warnings);
+                replaced_fish_value(&mut assigned, ("MAPT", 0), row, &mut warnings);
                 e.declared_map_count = count;
                 unread
             }
             "MAP" => {
                 let ([slot, map_vnum], unread) = fish_values(rest, row, &mut warnings);
-                fish_slot("MAP", slot, FISH_MAP_SLOTS, row, &mut warnings);
+                if let Some(message) = fish_slot_error("MAP", slot, FISH_MAP_SLOTS) {
+                    warnings.push(warning(row, format!("{message}; row dropped")));
+                    // Following POS rows must not move to an earlier map.
+                    map_index = None;
+                    continue;
+                }
                 e.maps.push(FishMap {
                     slot,
                     map_vnum,
@@ -994,12 +988,16 @@ pub fn decode_fish(text: &str) -> Result<ParsedGtd<FishDocument>> {
             }
             "ITEMT" => {
                 let ([count], unread) = fish_values(rest, row, &mut warnings);
+                replaced_fish_value(&mut assigned, ("ITEMT", 0), row, &mut warnings);
                 e.declared_item_count = count;
                 unread
             }
             "ITEM" => {
                 let ([slot, vnum], unread) = fish_values(rest, row, &mut warnings);
-                fish_slot("ITEM", slot, FISH_ITEM_SLOTS, row, &mut warnings);
+                if let Some(message) = fish_slot_error("ITEM", slot, FISH_ITEM_SLOTS) {
+                    warnings.push(warning(row, format!("{message}; row dropped")));
+                    continue;
+                }
                 let (token, after) = split_token(unread);
                 let weight = client_int(token);
                 e.items.push(FishItem { slot, vnum, weight });
@@ -1010,6 +1008,7 @@ pub fn decode_fish(text: &str) -> Result<ParsedGtd<FishDocument>> {
                 if let Some([slot, count]) = ints(line, "POST") {
                     map_index = e.maps.iter().rposition(|m| m.slot == slot);
                     if let Some(i) = map_index {
+                        replaced_fish_value(&mut assigned, ("POST", i), row, &mut warnings);
                         e.maps[i].declared_position_count = count
                     } else {
                         warnings.push(warning(row, "POST without MAP"))
@@ -1027,6 +1026,7 @@ pub fn decode_fish(text: &str) -> Result<ParsedGtd<FishDocument>> {
                         warnings.push(warning(row, "POS without MAP"))
                     }
                 } else if let Some([v]) = ints(line, "BASICT") {
+                    replaced_fish_value(&mut assigned, ("BASICT", 0), row, &mut warnings);
                     e.declared_basic_count = v
                 } else if let Some([slot, vnum, weight]) = ints(line, "BASIC") {
                     e.basics.push(FishItem {
@@ -1064,27 +1064,38 @@ fn fish_values<'a, const N: usize>(
     row: usize,
     warnings: &mut Vec<GtdWarning>,
 ) -> ([i32; N], &'a str) {
-    let (values, normalized, unread) = leading_values(rest);
+    let (values, normalized, unread) = leading_values(rest, [-1; N]);
     if normalized {
         warnings.push(warning(row, "invalid fish value normalized to -1"));
     }
     (values, unread)
 }
 
+/// Reports a fish row that replaces a value stored by an earlier row of the
+/// same fish. `key` names the value: its tag and, for `POST`, the map index.
+fn replaced_fish_value(
+    assigned: &mut Vec<(&'static str, usize)>,
+    key: (&'static str, usize),
+    row: usize,
+    warnings: &mut Vec<GtdWarning>,
+) {
+    if assigned.contains(&key) {
+        let message = format!("repeated fish {} row replaces the earlier one", key.0);
+        warnings.push(warning(row, message));
+    } else {
+        assigned.push(key);
+    }
+}
+
 const FISH_MAP_SLOTS: i32 = 3;
 const FISH_ITEM_SLOTS: i32 = 62;
 
-/// Reports a slot outside the client's fixed table. The client does not check
-/// the slot and writes the value into another field of the fish, so the result
-/// depends on row order, which packing does not keep.
-fn fish_slot(tag: &str, slot: i32, slots: i32, row: usize, warnings: &mut Vec<GtdWarning>) {
-    if !(0..slots).contains(&slot) {
-        let message = format!(
-            "fish {tag} slot outside 0-{} overwrites another field; row order not kept",
-            slots - 1
-        );
-        warnings.push(warning(row, message));
-    }
+/// Describes a slot outside the client's fixed table of `slots` entries. The
+/// client does not check the slot, so such a row writes its value into another
+/// field of the fish, such as a count, or past the end of the fish.
+fn fish_slot_error(tag: &str, slot: i32, slots: i32) -> Option<String> {
+    (!(0..slots).contains(&slot))
+        .then(|| format!("fish {tag} slot {slot} is outside 0-{}", slots - 1))
 }
 
 /// Reports tokens the client ignores after a fish row's values. A trailing
@@ -1103,6 +1114,9 @@ pub fn encode_fish(doc: &FishDocument) -> Result<String> {
         push_values(&mut out, "LEVEL", &e.level);
         push_values(&mut out, "MAPT", &[e.declared_map_count]);
         for m in &e.maps {
+            if let Some(message) = fish_slot_error("MAP", m.slot, FISH_MAP_SLOTS) {
+                return Err(invalid(message));
+            }
             push_values(&mut out, "MAP", &[m.slot, m.map_vnum]);
             push_values(&mut out, "POST", &[m.slot, m.declared_position_count]);
             for p in &m.positions {
@@ -1115,6 +1129,9 @@ pub fn encode_fish(doc: &FishDocument) -> Result<String> {
         }
         push_values(&mut out, "ITEMT", &[e.declared_item_count]);
         for i in &e.items {
+            if let Some(message) = fish_slot_error("ITEM", i.slot, FISH_ITEM_SLOTS) {
+                return Err(invalid(message));
+            }
             push_fish_item(&mut out, "ITEM", i)
         }
         push_values(&mut out, "BASICT", &[e.declared_basic_count]);
@@ -1190,33 +1207,91 @@ mod tests {
         );
         let parsed = decode_fish(src).unwrap();
         let rows: Vec<_> = parsed.warnings.iter().map(|w| w.row).collect();
-        assert_eq!(rows, [5, 9, 11]);
+        assert_eq!(rows, [5, 9, 11, 12]);
         let entries = &parsed.document.entries;
         let summary: Vec<_> = entries.iter().map(|e| (e.vnum, e.level)).collect();
-        // The client reads `VNUM 4<TAB>99` as one unknown tag and ignores it.
+        // The client reads `VNUM 4<TAB>99` as one unknown tag and ignores it,
+        // so the next `LEVEL` replaces the third fish's level.
         assert_eq!(summary, [(1, [1, 10]), (2, [2, 20]), (-1, [4, 40])]);
         assert_eq!(entries[0].items.len(), 1);
         assert_eq!(entries[1].maps[0].map_vnum, 1);
     }
 
     #[test]
-    fn fish_slots_outside_the_client_tables_are_reported() {
+    fn fish_slots_outside_the_client_tables_are_dropped() {
         let src = concat!(
             "VNUM 1\nITEM -1 9\nITEMT 2\nITEM 63 5\nITEM 61 4\nITEM 0 2100\n",
-            "MAP 2 7\nMAP 3 8\nMAP x 9\n",
+            "MAP 2 7\nPOST 2 1\nMAP 3 8\nPOS 3 0 1 1 0\nMAP x 9\n",
+        );
+        let parsed = decode_fish(src).unwrap();
+        let warnings: Vec<_> = parsed
+            .warnings
+            .iter()
+            .map(|w| (w.row, &*w.message))
+            .collect();
+        assert_eq!(
+            warnings,
+            [
+                (2, "fish ITEM slot -1 is outside 0-61; row dropped"),
+                (4, "fish ITEM slot 63 is outside 0-61; row dropped"),
+                (9, "fish MAP slot 3 is outside 0-2; row dropped"),
+                (10, "POS without MAP"),
+                (11, "invalid fish value normalized to -1"),
+                (11, "fish MAP slot -1 is outside 0-2; row dropped"),
+            ]
+        );
+        let fish = &parsed.document.entries[0];
+        let item_slots: Vec<_> = fish.items.iter().map(|i| i.slot).collect();
+        assert_eq!(item_slots, [61, 0]);
+        let maps: Vec<_> = fish
+            .maps
+            .iter()
+            .map(|m| (m.slot, m.positions.len()))
+            .collect();
+        assert_eq!(maps, [(2, 0)]);
+        assert!(encode_fish(&parsed.document).is_ok());
+
+        for (items, maps) in [(vec![-1], vec![]), (vec![62], vec![]), (vec![], vec![3])] {
+            let mut document = parsed.document.clone();
+            let fish = &mut document.entries[0];
+            fish.items.extend(items.into_iter().map(|slot| FishItem {
+                slot,
+                vnum: 9,
+                weight: None,
+            }));
+            fish.maps.extend(maps.into_iter().map(|slot| FishMap {
+                slot,
+                map_vnum: 7,
+                declared_position_count: 0,
+                positions: Vec::new(),
+            }));
+            assert!(encode_fish(&document).is_err());
+        }
+    }
+
+    #[test]
+    fn repeated_fish_values_are_reported() {
+        let src = concat!(
+            "VNUM 1\nLEVEL 1 2\nMAPT 1\nMAP 0 5\nPOST 0 3\nITEMT 1\nBASICT 1\n",
+            "LEVEL 3 4\nMAPT 2\nPOST 0 4\nITEMT 2\nBASICT 2\nMAP 0 6\nPOST 0 5\n",
+            "VNUM 2\nLEVEL 5 6\n",
         );
         let parsed = decode_fish(src).unwrap();
         let rows: Vec<_> = parsed.warnings.iter().map(|w| w.row).collect();
-        assert_eq!(rows, [2, 4, 8, 9, 9]);
-        let messages: Vec<_> = parsed.warnings.iter().map(|w| &*w.message).collect();
-        assert!(messages[0].starts_with("fish ITEM slot outside 0-61"));
-        assert!(messages[2].starts_with("fish MAP slot outside 0-2"));
-        assert_eq!(messages[3], "invalid fish value normalized to -1");
+        assert_eq!(rows, [8, 9, 10, 11, 12]);
+        assert_eq!(
+            parsed.warnings[0].message,
+            "repeated fish LEVEL row replaces the earlier one"
+        );
         let fish = &parsed.document.entries[0];
-        let item_slots: Vec<_> = fish.items.iter().map(|i| i.slot).collect();
-        assert_eq!(item_slots, [-1, 63, 61, 0]);
-        let map_slots: Vec<_> = fish.maps.iter().map(|m| m.slot).collect();
-        assert_eq!(map_slots, [2, 3, -1]);
+        assert_eq!(fish.level, [3, 4]);
+        assert_eq!((fish.declared_map_count, fish.declared_item_count), (2, 2));
+        let counts: Vec<_> = fish
+            .maps
+            .iter()
+            .map(|m| m.declared_position_count)
+            .collect();
+        assert_eq!(counts, [4, 5]);
     }
 
     #[test]
@@ -1363,23 +1438,61 @@ mod tests {
             ),
             (-1, "Bad", &vec![vec![9]])
         );
-        assert_eq!(entries[2], {
-            let mut entry = map_id_entry("", vec![vec![1]]);
-            (entry.min_map_vnum, entry.max_map_vnum) = (-1, -1);
-            (entry.map_point_vnum, entry.point_kind) = (-1, -1);
-            entry
-        });
+        assert_eq!(
+            entries[2],
+            MapIdEntry {
+                min_map_vnum: -1,
+                max_map_vnum: -1,
+                map_point_vnum: -1,
+                point_kind: -1,
+                name: String::new(),
+                data_rows: vec![vec![1]],
+            }
+        );
     }
 
     #[test]
     fn map_id_data_rows_are_rows_starting_with_d() {
-        let src = "DATA 3\n1 1 1 4 zts1e\nD 5\nDESC 6 7\ndata 8\n";
+        let src = "DATA 3\n1 1 1 4 zts1e\nD 5\nDESC 6 7\ndata 8\nDATA \t$10\nDATA x\t11\n";
         let parsed = decode_map_id(src).unwrap();
-        assert_eq!(parsed.warnings[0].row, 1);
+        let warnings: Vec<_> = parsed
+            .warnings
+            .iter()
+            .map(|w| (w.row, &*w.message))
+            .collect();
+        assert_eq!(
+            warnings,
+            [
+                (1, "map DATA row before the first map entry"),
+                (5, "invalid map id value normalized to -1"),
+                (7, "text in the map DATA tag dropped"),
+            ]
+        );
         let entries = &parsed.document.entries;
         assert_eq!(entries[0].data_rows, [vec![5], vec![6, 7]]);
         assert_eq!(entries[1].min_map_vnum, -1);
         assert_eq!(entries[1].max_map_vnum, 8);
+        assert_eq!(entries[1].data_rows, [[16], [11]]);
+    }
+
+    #[test]
+    fn map_names_keep_a_carriage_return_inside_a_packed_row() {
+        let src = "1 2 3 4 a\rDATA 5\nDATA 6\n";
+        let parsed = decode_map_id(src).unwrap();
+        assert!(parsed.warnings.is_empty());
+        assert_eq!(parsed.document.entries[0].name, "a\rDATA 5");
+        let native = encode_map_id(&parsed.document).unwrap();
+        assert_eq!(decode_map_id(&native).unwrap().document, parsed.document);
+
+        let src = "S 1\nD 1 2 3 a\rD 4 5 6 b\nE\n";
+        let parsed = decode_map_point(src).unwrap();
+        assert_eq!(parsed.document.sections[0].points[0].name, "a\rD 4 5 6 b");
+        let native = encode_map_point(&parsed.document).unwrap();
+        assert_eq!(decode_map_point(&native).unwrap().document, parsed.document);
+
+        let mut document = parsed.document;
+        document.sections[0].points[0].name = "a\nb".into();
+        assert!(encode_map_point(&document).is_err());
     }
 
     #[test]
@@ -1430,15 +1543,23 @@ mod tests {
 
     #[test]
     fn map_point_section_reads_its_whole_remainder() {
-        let src = "D 1 2 3 Early\nS\t1\nD 1 2 3 One\nS\t2 // comment\nD 4 5 6 Four\nS  3\n";
+        let src = concat!(
+            "D 1 2 3 Early\nS\t1\nD 1 2 3 One\nS\t2 // comment\nD 4 5 6 Four\nS  3\n",
+            "S \t4\nD \t7 8 9 Seven\nS 5\t6\n",
+        );
         let parsed = decode_map_point(src).unwrap();
         let rows: Vec<_> = parsed.warnings.iter().map(|w| w.row).collect();
-        assert_eq!(rows, [1, 4]);
+        assert_eq!(rows, [1, 4, 9]);
+        assert_eq!(
+            parsed.warnings[2].message,
+            "text in the map point tag dropped"
+        );
         let sections = &parsed.document.sections;
         let vnums: Vec<_> = sections.iter().map(|s| s.vnum).collect();
-        assert_eq!(vnums, [1, -1, 3]);
+        assert_eq!(vnums, [1, -1, 3, 4, 6]);
         assert_eq!(sections[0].points.len(), 1);
         assert_eq!(sections[1].points[0].name, "Four");
+        assert_eq!(sections[3].points[0].name, "Seven");
         assert_eq!(
             decode_map_point(&encode_map_point(&parsed.document).unwrap())
                 .unwrap()

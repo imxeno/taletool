@@ -455,10 +455,12 @@ when a row has none. Other tokens after the values of a fish `VNUM`, `LEVEL`,
 `MAPT`, `MAP`, `ITEMT`, or `ITEM` row are dropped with a warning unless they
 start a `//` comment. Fish `POST`, `POS`, `BASICT`, and `BASIC` rows, which the
 client ignores, are kept only with exactly their integer fields, the `BASIC`
-weight being optional; other such rows are dropped with a warning. Fish `ITEM`
-slots outside 0-61 and `MAP` slots outside 0-2 are kept with a warning, because
-the client stores them in other fields and packing does not keep their row
-order.
+weight being optional; other such rows are dropped with a warning. Of repeated
+`LEVEL`, `MAPT`, `ITEMT`, or `BASICT` rows in one fish, or `POST` rows for one
+map, only the last is kept, with a warning. Fish `ITEM` rows with a slot outside
+0-61 and `MAP` rows with a slot outside 0-2 are dropped with a warning, and
+packing rejects such slots, because the client writes them into other fields of
+the fish.
 
 Decorative `END`, `end`, `E`, and `~` rows are not exposed as JSON framing.
 Reader-visible exceptions are normalized semantically: tutorial `~` becomes a
