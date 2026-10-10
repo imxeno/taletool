@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::row_tokens::{client_int, split_token, tokens, trim};
+use super::row_tokens::{client_int, is_trimmed, split_token, tokens, trim};
 use super::{GtdLocale, GtdWarning, ParsedGtd, warning};
 use crate::{
     Result, TextEncoding, TextError, TextPayloadKind, decode_legacy_text, decode_text_rows,
@@ -295,7 +295,7 @@ fn row_text(line: &str) -> &str {
     }
     // The text ends with the trimmed row, so it extends over the row's
     // trailing whitespace.
-    let end = line.trim_end_matches(|c: char| c <= ' ').len();
+    let end = line.trim_end_matches(is_trimmed).len();
     &line[end - text.len()..]
 }
 
@@ -360,7 +360,7 @@ fn unwritable_entry(entry: &NosMallEntry) -> Option<String> {
         }
         // The row trim and the client's title trim drop leading whitespace.
         // Trailing whitespace is accepted because decoding keeps it from rows.
-        if value.starts_with(|c: char| c <= ' ') {
+        if value.starts_with(is_trimmed) {
             return Some(format!(
                 "{field} starts with whitespace that the row's trim would remove"
             ));
