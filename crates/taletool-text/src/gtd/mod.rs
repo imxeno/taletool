@@ -338,7 +338,7 @@ pub fn decode_gtd_document(
                     )
                 }
                 GtdFileKind::BasicCard => {
-                    let parsed = decode_basic_card(&text)?;
+                    let parsed = decode_basic_card(&text, encoding)?;
                     (GtdDocumentData::BasicCard(parsed.document), parsed.warnings)
                 }
                 GtdFileKind::Card => {

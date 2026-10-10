@@ -6,7 +6,7 @@ use super::row_tokens::{all_values, client_int, leading_values, trim};
 use super::{
     ParsedGtd, fields, is_ignored_line, parse_i32, push_text, push_values, values, warning,
 };
-use crate::{Result, TextError};
+use crate::{Result, TextEncoding, TextError, encode_legacy_text};
 
 mod row;
 
@@ -134,26 +134,31 @@ enum BasicCardSlot {
 }
 
 impl BasicCardSlot {
-    /// Reads an ASCII tag beginning with `S` or `L` as the client does. The
-    /// index starts after the fourth character, whatever those characters
-    /// are. Returns `None` for an index outside the client's slots.
-    fn parse(tag: &str) -> Option<Self> {
-        let one_based = |index: &str, count: usize| {
-            client_int(index)?
+    /// Reads a tag beginning with `S` or `L` as the client does, from its
+    /// bytes in the record's encoding. The index starts after the fourth
+    /// byte, whatever those bytes are. Returns `None` for an index outside
+    /// the client's slots.
+    fn parse(tag: &[u8]) -> Option<Self> {
+        let index = |bytes: &[u8]| client_int(std::str::from_utf8(bytes).ok()?);
+        let one_based = |bytes: &[u8], count: usize| {
+            index(bytes)?
                 .checked_sub(1)
                 .and_then(|index| usize::try_from(index).ok())
                 .filter(|index| *index < count)
         };
-        match tag.as_bytes().first()? {
+        match tag.first()? {
             b'S' => {
-                let slot = usize::try_from(client_int(tag.get(4..)?)?).ok()?;
+                let slot = usize::try_from(index(tag.get(4..)?)?).ok()?;
                 (slot < BASIC_CARD_SLOTS).then_some(Self::Subject(slot))
             }
             b'L' => {
-                let dash = tag.find('-').filter(|dash| *dash > 4)?;
+                let dash = tag
+                    .iter()
+                    .position(|byte| *byte == b'-')
+                    .filter(|dash| *dash > 4)?;
                 Some(Self::List(
-                    one_based(tag.get(4..dash)?, BASIC_CARD_SLOTS)?,
-                    one_based(tag.get(dash + 1..)?, 2)?,
+                    one_based(&tag[4..dash], BASIC_CARD_SLOTS)?,
+                    one_based(&tag[dash + 1..], 2)?,
                 ))
             }
             _ => None,
@@ -187,7 +192,12 @@ fn basic_card_row(tag: &str) -> Option<&'static str> {
     })
 }
 
-pub fn decode_basic_card(text: &str) -> Result<ParsedGtd<BasicCardDocument>> {
+/// Decodes BCard text. `encoding` is the record's text encoding, which the
+/// client's `SUBJ` and `LIST` index positions count bytes in.
+pub fn decode_basic_card(
+    text: &str,
+    encoding: TextEncoding,
+) -> Result<ParsedGtd<BasicCardDocument>> {
     let mut rows = RowReader::new("BCard");
     let mut entries = Vec::new();
     let mut current: Option<BasicCardEntry> = None;
@@ -199,7 +209,7 @@ pub fn decode_basic_card(text: &str) -> Result<ParsedGtd<BasicCardDocument>> {
             let Some(entry) = rows.entry(row, &mut current) else {
                 continue;
             };
-            read_basic_card_text(&mut rows, row, tagged, entry);
+            read_basic_card_text(&mut rows, row, tagged, encoding, entry);
             continue;
         }
         let Some((tag, tagged)) = rows.read(row, line, basic_card_row) else {
@@ -217,16 +227,20 @@ pub fn decode_basic_card(text: &str) -> Result<ParsedGtd<BasicCardDocument>> {
             continue;
         };
         match tag {
-            "ICON" => entry.icon = Some(rows.scalar(row, tag, &tagged, -1)),
-            "NAME" => {
-                if !entry.name.is_empty() {
-                    rows.warn(
-                        row,
-                        "repeated BCard NAME row; the client frees the earlier name, so its result is unreliable",
-                    );
-                }
-                set_text(&mut entry.name, tagged.text());
+            "ICON" => {
+                let icon = rows.scalar(row, tag, &tagged, -1);
+                rows.store(row, tag, &mut entry.icon, icon);
             }
+            "NAME" if !entry.name.is_empty() => {
+                rows.warn(
+                    row,
+                    "repeated BCard NAME row; the client frees the earlier name, so its result is unreliable",
+                );
+                if !tagged.text().is_empty() {
+                    entry.name = tagged.text().to_owned();
+                }
+            }
+            "NAME" => entry.name = tagged.text().to_owned(),
             "DESC" => {
                 // The client reads only the first five values, and a
                 // non-numeric value as 0.
@@ -236,6 +250,15 @@ pub fn decode_basic_card(text: &str) -> Result<ParsedGtd<BasicCardDocument>> {
                 }
                 // A repeated row replaces only the values it has.
                 let description = entry.description.get_or_insert_default();
+                let replaced = values.len().min(description.len());
+                if values[..replaced] != description[..replaced] {
+                    rows.warn(
+                        row,
+                        format!(
+                            "repeated BCard DESC row replaces the first {replaced} earlier values"
+                        ),
+                    );
+                }
                 for (index, value) in values.into_iter().enumerate() {
                     match description.get_mut(index) {
                         Some(earlier) => *earlier = value,
@@ -259,22 +282,20 @@ fn read_basic_card_text(
     rows: &mut RowReader,
     row: usize,
     tagged: TaggedRow,
+    encoding: TextEncoding,
     entry: &mut BasicCardEntry,
 ) {
     let text = tagged.text();
-    // The client finds the index by byte position in the encoded tag.
-    match tagged
-        .tag
-        .is_ascii()
-        .then(|| BasicCardSlot::parse(tagged.tag))
-        .flatten()
-    {
+    let slot = encode_legacy_text(tagged.tag, encoding)
+        .ok()
+        .and_then(|tag| BasicCardSlot::parse(&tag));
+    match slot {
         Some(slot) => {
             let tag = slot.tag();
             if tag != tagged.tag {
                 rows.renamed(row, tagged.tag, &tag);
             }
-            set_text(slot.text_mut(entry), text);
+            rows.set_text(row, &tag, slot.text_mut(entry), text);
         }
         None if is_ignored_slot_tag(tagged.tag) => {
             entry.ignored_rows.push(BasicCardIgnoredRow {
@@ -285,7 +306,7 @@ fn read_basic_card_text(
         None => rows.warn(
             row,
             format!(
-                "BCard {} row is dropped because its slot index is not plain decimal",
+                "BCard {} row is dropped because it selects no slot and is not a SUBJn or LISTk-m tag",
                 tagged.tag
             ),
         ),
@@ -293,7 +314,8 @@ fn read_basic_card_text(
 }
 
 /// Whether `tag` is a `SUBJn` or `LISTk-m` tag with decimal indexes that
-/// the client ignores because they select no slot.
+/// the client ignores because they select no slot. Such a tag is ASCII, so
+/// its bytes are the same in every record encoding.
 fn is_ignored_slot_tag(tag: &str) -> bool {
     let digits = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
     let numbered = if let Some(index) = tag.strip_prefix("SUBJ") {
@@ -305,7 +327,7 @@ fn is_ignored_slot_tag(tag: &str) -> bool {
     } else {
         false
     };
-    numbered && BasicCardSlot::parse(tag).is_none()
+    numbered && BasicCardSlot::parse(tag.as_bytes()).is_none()
 }
 
 pub fn encode_basic_card(document: &BasicCardDocument) -> Result<String> {
@@ -430,7 +452,9 @@ pub fn decode_card(text: &str) -> Result<ParsedGtd<CardDocument>> {
                     rows.malformed(row, tag, &[kit, slot]);
                 }
                 if (0..3).contains(&kit) && (0..5).contains(&slot) {
-                    kits[kit as usize][slot as usize] = trim(rest).to_owned();
+                    // A row without text clears the slot.
+                    let text = &mut kits[kit as usize][slot as usize];
+                    rows.replace_text(row, &format!("KIT {kit} {slot}"), text, trim(rest));
                 } else {
                     rows.warn(row, "invalid KIT row");
                 }
@@ -441,7 +465,8 @@ pub fn decode_card(text: &str) -> Result<ParsedGtd<CardDocument>> {
                     rows.malformed(row, tag, &[slot]);
                 }
                 if (0..20).contains(&slot) {
-                    extra_texts[slot as usize] = trim(rest).to_owned();
+                    let text = &mut extra_texts[slot as usize];
+                    rows.replace_text(row, &format!("Z_ETC {slot}"), text, trim(rest));
                 } else {
                     rows.warn(row, "invalid Z_ETC row");
                 }
@@ -458,9 +483,12 @@ pub fn decode_card(text: &str) -> Result<ParsedGtd<CardDocument>> {
                     continue;
                 };
                 match tag {
-                    "NAME" => set_text(&mut entry.name, tagged.text()),
-                    "DESC" => set_text(&mut entry.description, tagged.text()),
-                    "ICON" => entry.icon = Some(rows.scalar(row, tag, &tagged, -1)),
+                    "NAME" => rows.set_text(row, tag, &mut entry.name, tagged.text()),
+                    "DESC" => rows.set_text(row, tag, &mut entry.description, tagged.text()),
+                    "ICON" => {
+                        let icon = rows.scalar(row, tag, &tagged, -1);
+                        rows.store(row, tag, &mut entry.icon, icon);
+                    }
                     _ => {
                         let values = rows.values(row, tag, &tagged, |_, _| Value::Int(-1));
                         let field = match tag {
@@ -469,7 +497,13 @@ pub fn decode_card(text: &str) -> Result<ParsedGtd<CardDocument>> {
                             "EFFECT" => {
                                 // EFFECT's second value replaces the icon set
                                 // by an earlier ICON row.
-                                entry.icon = None;
+                                let icon = values.get(1).copied().unwrap_or(-1);
+                                if entry.icon.take().is_some_and(|earlier| earlier != icon) {
+                                    rows.warn(
+                                        row,
+                                        "Card EFFECT row replaces the icon of the earlier ICON row",
+                                    );
+                                }
                                 &mut entry.effect
                             }
                             "TIME" => &mut entry.time,
@@ -478,7 +512,7 @@ pub fn decode_card(text: &str) -> Result<ParsedGtd<CardDocument>> {
                             "LAST" => &mut entry.last,
                             _ => unreachable!(),
                         };
-                        *field = Some(values);
+                        rows.store(row, tag, field, values);
                     }
                 }
             }
@@ -718,6 +752,16 @@ pub fn decode_item(text: &str) -> Result<ParsedGtd<ItemDocument>> {
                     inline_description = Some(rest.to_owned());
                 }
                 if let Some(entry) = rows.entry(row, &mut current) {
+                    let earlier = (
+                        entry.line_desc_count,
+                        &entry.description,
+                        &entry.inline_description,
+                    );
+                    if earlier != (0, &None, &None)
+                        && earlier != (count, &description, &inline_description)
+                    {
+                        rows.repeated(row, tag);
+                    }
                     entry.line_desc_count = count;
                     entry.description = description;
                     entry.inline_description = inline_description;
@@ -731,29 +775,32 @@ pub fn decode_item(text: &str) -> Result<ParsedGtd<ItemDocument>> {
                     if !tagged.text().is_empty() {
                         labels.name(row);
                     }
-                    set_text(&mut entry.name, tagged.text());
+                    rows.set_text(row, tag, &mut entry.name, tagged.text());
                     continue;
                 }
                 let values = rows.values(row, tag, &tagged, item_value);
                 match tag {
                     "INDEX" => {
+                        let lists_type = item_index_lists_type(&values);
                         if listed {
                             rows.warn(
                                 row,
                                 "repeated Item INDEX row; the client adds the item to a type list for each INDEX row, but packing writes only the last one",
                             );
+                            entry.index = Some(values);
+                        } else {
+                            rows.store(row, tag, &mut entry.index, values);
                         }
-                        listed |= item_index_lists_type(&values);
-                        entry.index = Some(values);
+                        listed |= lists_type;
                     }
-                    "TYPE" => entry.item_type = Some(values),
+                    "TYPE" => rows.store(row, tag, &mut entry.item_type, values),
                     "FLAG" => {
                         let signed = values.get(ITEM_SIGNED_FLAG).is_some_and(|flag| *flag != 0);
                         labels.flag(row, signed);
-                        entry.flags = Some(values);
+                        rows.store(row, tag, &mut entry.flags, values);
                     }
-                    "DATA" => entry.data = Some(values),
-                    "BUFF" => entry.buffs = Some(chunks(values, 5)),
+                    "DATA" => rows.store(row, tag, &mut entry.data, values),
+                    "BUFF" => rows.store(row, tag, &mut entry.buffs, chunks(values, 5)),
                     _ => unreachable!(),
                 }
             }
@@ -965,16 +1012,16 @@ pub fn decode_monster(text: &str) -> Result<ParsedGtd<MonsterDocument>> {
             continue;
         };
         if tag == "NAME" {
-            set_text(&mut entry.name, tagged.text());
+            rows.set_text(row, tag, &mut entry.name, tagged.text());
             continue;
         }
         let values = rows.values(row, tag, &tagged, monster_value);
         match tag {
-            "SKILL" => entry.skills = Some(chunks(values, 3)),
-            "BASIC" => entry.basic = Some(chunks(values, 5)),
-            "CARD" => entry.cards = Some(chunks(values, 5)),
-            "ITEM" => entry.items = Some(chunks(values, 3)),
-            _ => *entry.values_mut(tag) = Some(values),
+            "SKILL" => rows.store(row, tag, &mut entry.skills, chunks(values, 3)),
+            "BASIC" => rows.store(row, tag, &mut entry.basic, chunks(values, 5)),
+            "CARD" => rows.store(row, tag, &mut entry.cards, chunks(values, 5)),
+            "ITEM" => rows.store(row, tag, &mut entry.items, chunks(values, 3)),
+            _ => rows.store(row, tag, entry.values_mut(tag), values),
         }
     }
     entries.extend(current);
@@ -1178,7 +1225,7 @@ pub fn decode_skill(text: &str) -> Result<ParsedGtd<SkillDocument>> {
                     continue;
                 };
                 if tag == "NAME" {
-                    set_text(&mut entry.name, tagged.text());
+                    rows.set_text(row, tag, &mut entry.name, tagged.text());
                     continue;
                 }
                 let values = rows.values(row, tag, &tagged, skill_value);
@@ -1197,7 +1244,7 @@ pub fn decode_skill(text: &str) -> Result<ParsedGtd<SkillDocument>> {
                     "CELL" => &mut entry.cell,
                     _ => unreachable!(),
                 };
-                *field = Some(values);
+                rows.store(row, tag, field, values);
             }
         }
     }
@@ -1244,11 +1291,22 @@ fn set_skill_description(
     description: SkillDescription,
 ) {
     if !description.text().is_empty() || field.text().is_empty() {
+        if *field != SkillDescription::default() && *field != description {
+            rows.repeated(row, "Z_DESC");
+        }
         *field = description;
         return;
     }
     match field.with_count(description.declared_count) {
-        Some(kept) => *field = kept,
+        Some(kept) => {
+            if kept.declared_count != field.declared_count {
+                rows.warn(
+                    row,
+                    "repeated Skill Z_DESC row without text replaces only the earlier count",
+                );
+            }
+            *field = kept;
+        }
         None => {
             rows.warn(
                 row,
@@ -1309,14 +1367,6 @@ fn push_skill_description(out: &mut String, e: &SkillEntry) -> Result<()> {
     push_values(out, "Z_DESC", &[count]);
     push_description_rows(out, lines);
     Ok(())
-}
-
-/// Stores a text row's text. The client keeps the earlier text when a
-/// repeated row has none.
-fn set_text(field: &mut String, text: &str) {
-    if !text.is_empty() {
-        *field = text.to_owned();
-    }
 }
 
 /// Writes the rows after a positive description count. A later row
@@ -1402,7 +1452,7 @@ mod tests {
             "SUBJ0 first\nSUBJ1 second\nSUBJ5 fifth\n",
             "LIST1-1 a\nLIST1-2 b\nLIST3-1 c\nLIST6-1 sixth\nLIST1-3 third\nEND\n~\n",
         );
-        let parsed = decode_basic_card(source).unwrap();
+        let parsed = decode_basic_card(source, TextEncoding::EucKr).unwrap();
 
         assert!(parsed.warnings.is_empty());
         let entry = &parsed.document.entries[0];
@@ -1431,7 +1481,9 @@ mod tests {
             )
         );
         assert_eq!(
-            decode_basic_card(&encoded).unwrap().document,
+            decode_basic_card(&encoded, TextEncoding::EucKr)
+                .unwrap()
+                .document,
             parsed.document
         );
     }
@@ -1453,7 +1505,7 @@ mod tests {
             ),
             lists("\t")
         );
-        let parsed = decode_basic_card(&source).unwrap();
+        let parsed = decode_basic_card(&source, TextEncoding::EucKr).unwrap();
 
         assert!(parsed.warnings.is_empty());
         let entry = &parsed.document.entries[0];
@@ -1477,7 +1529,7 @@ mod tests {
 
     #[test]
     fn basic_card_entries_need_no_rows_after_vnum() {
-        let parsed = decode_basic_card("VNUM 1\nNAME\nVNUM 2\nEND\n").unwrap();
+        let parsed = decode_basic_card("VNUM 1\nNAME\nVNUM 2\nEND\n", TextEncoding::EucKr).unwrap();
 
         assert!(parsed.warnings.is_empty());
         let [first, second] = parsed.document.entries.as_slice() else {
@@ -1494,7 +1546,7 @@ mod tests {
 
         let encoded = encode_basic_card(&parsed.document).unwrap();
         assert_eq!(encoded, "VNUM\t1\nNAME\nEND\nVNUM\t2\nNAME\nEND\n");
-        let reparsed = decode_basic_card(&encoded).unwrap();
+        let reparsed = decode_basic_card(&encoded, TextEncoding::EucKr).unwrap();
         assert!(reparsed.warnings.is_empty());
         assert_eq!(reparsed.document, parsed.document);
     }
@@ -1506,7 +1558,7 @@ mod tests {
             "SUBJ01 one\nSXYZ2 two\nL0003-2 negative\nSUBJ\nLIST-1 bad\nFOO bar\n",
             "SUBJ 0\tspaced\n",
         );
-        let parsed = decode_basic_card(source).unwrap();
+        let parsed = decode_basic_card(source, TextEncoding::EucKr).unwrap();
 
         assert_eq!(
             parsed.warnings,
@@ -1523,11 +1575,11 @@ mod tests {
                 warning(8, "BCard tag L0003-2 is read as LIST3-2"),
                 warning(
                     9,
-                    "BCard SUBJ row is dropped because its slot index is not plain decimal"
+                    "BCard SUBJ row is dropped because it selects no slot and is not a SUBJn or LISTk-m tag"
                 ),
                 warning(
                     10,
-                    "BCard LIST-1 row is dropped because its slot index is not plain decimal"
+                    "BCard LIST-1 row is dropped because it selects no slot and is not a SUBJn or LISTk-m tag"
                 ),
                 warning(11, "unrecognized BCard row"),
                 warning(12, "BCard tag SUBJ 0 is read as SUBJ0"),
@@ -1547,19 +1599,29 @@ mod tests {
     #[test]
     fn basic_card_repeated_rows_follow_the_client() {
         let source = concat!(
-            "VNUM 1\nNAME first\nDESC 1 2 3 4 5 6\n",
-            "LIST1-1 keep\nLIST1-2 b\nLIST1-1\nSUBJ2 old\nSUBJ2 new\n",
-            "DESC 7 8\nNAME second\nNAME\n",
+            "VNUM 1\nICON 3\nNAME first\nDESC 1 2 3 4 5 6\n",
+            "LIST1-1 keep\nLIST1-2 b\nLIST1-1\nSUBJ2 old\nSUBJ2 new\nSUBJ02 new\n",
+            "DESC 7 8\nDESC 7\nICON 4\nNAME second\nNAME\n",
         );
-        let parsed = decode_basic_card(source).unwrap();
+        let parsed = decode_basic_card(source, TextEncoding::EucKr).unwrap();
 
-        let repeated = "repeated BCard NAME row; the client frees the earlier name, so its result is unreliable";
+        let name = "repeated BCard NAME row; the client frees the earlier name, so its result is unreliable";
         assert_eq!(
             parsed.warnings,
-            [warning(10, repeated), warning(11, repeated)]
+            [
+                warning(9, "repeated BCard SUBJ2 row replaces the earlier one"),
+                warning(10, "BCard tag SUBJ02 is read as SUBJ2"),
+                warning(
+                    11,
+                    "repeated BCard DESC row replaces the first 2 earlier values"
+                ),
+                warning(13, "repeated BCard ICON row replaces the earlier one"),
+                warning(14, name),
+                warning(15, name),
+            ]
         );
         let entry = &parsed.document.entries[0];
-        assert_eq!(entry.name, "second");
+        assert_eq!((entry.icon, entry.name.as_str()), (Some(4), "second"));
         assert_eq!(entry.description, Some(vec![7, 8, 3, 4, 5, 6]));
         assert_eq!(entry.list_slots[0], ["keep", "b"]);
         assert_eq!(entry.subject_slots[2], "new");
@@ -1567,7 +1629,9 @@ mod tests {
 
     #[test]
     fn basic_card_writer_rejects_rows_the_client_reads_differently() {
-        let source = decode_basic_card("VNUM 1\nNAME n\n").unwrap().document;
+        let source = decode_basic_card("VNUM 1\nNAME n\n", TextEncoding::EucKr)
+            .unwrap()
+            .document;
         let encode = |edit: &dyn Fn(&mut BasicCardEntry)| {
             let mut document = source.clone();
             edit(&mut document.entries[0]);
@@ -1590,8 +1654,11 @@ mod tests {
 
     #[test]
     fn basic_card_json_names_the_client_slots() {
-        let parsed =
-            decode_basic_card("VNUM 1\nNAME n\nDESC 2\nSUBJ0 s\nSUBJ7 t\nLIST2-2 l\n").unwrap();
+        let parsed = decode_basic_card(
+            "VNUM 1\nNAME n\nDESC 2\nSUBJ0 s\nSUBJ7 t\nLIST2-2 l\n",
+            TextEncoding::EucKr,
+        )
+        .unwrap();
         assert_eq!(
             serde_json::to_value(&parsed.document).unwrap(),
             serde_json::json!({ "entries": [{
@@ -1861,7 +1928,13 @@ mod tests {
         let source = format!("{}NAME override\nEND\n", item_record(1, 0));
         let parsed = decode_item(&source).unwrap();
 
-        assert!(parsed.warnings.is_empty());
+        assert_eq!(
+            parsed.warnings,
+            [warning(
+                9,
+                "repeated Item NAME row replaces the earlier one"
+            )]
+        );
         let entry = &parsed.document.entries[0];
         assert_eq!(entry.name, "override");
         assert_eq!(entry.description, None);
@@ -2026,12 +2099,16 @@ mod tests {
         .concat();
         let parsed = decode_item(&source).unwrap();
 
+        let flag = "repeated Item FLAG row replaces the earlier one";
         assert_eq!(
             parsed.warnings,
             [
+                warning(4, "repeated Item NAME row replaces the earlier one"),
                 warning(4, labels(0, 1)),
                 warning(8, labels(2, 1)),
+                warning(12, flag),
                 warning(12, labels(1, 0)),
+                warning(16, flag),
             ]
         );
         let names = parsed
@@ -2052,10 +2129,17 @@ mod tests {
         );
         let parsed = decode_item(source).unwrap();
 
-        let repeated = "repeated Item INDEX row; the client adds the item to a type list for each INDEX row, but packing writes only the last one";
+        let listed = "repeated Item INDEX row; the client adds the item to a type list for each INDEX row, but packing writes only the last one";
+        let replaced = "repeated Item INDEX row replaces the earlier one";
         assert_eq!(
             parsed.warnings,
-            [warning(3, repeated), warning(9, repeated)]
+            [
+                warning(3, listed),
+                warning(6, replaced),
+                warning(9, listed),
+                warning(12, replaced),
+                warning(13, replaced),
+            ]
         );
         assert_eq!(parsed.document.entries[3].index, Some(vec![65536]));
     }
@@ -2078,7 +2162,142 @@ mod tests {
         let skill = decode_skill("VNUM 7\nNAME seven\nNAME\nNAME eight\n").unwrap();
         assert_eq!(skill.document.entries[0].name, "eight");
         assert!(item.warnings.is_empty() && monster.warnings.is_empty());
-        assert!(skill.warnings.is_empty());
+        assert_eq!(
+            skill.warnings,
+            [warning(
+                4,
+                "repeated Skill NAME row replaces the earlier one"
+            )]
+        );
+    }
+
+    #[test]
+    fn repeated_rows_report_the_values_they_replace() {
+        let repeated = |record: &str, row: usize, tag: &str| {
+            warning(
+                row,
+                format!("repeated {record} {tag} row replaces the earlier one"),
+            )
+        };
+
+        let monster = decode_monster(concat!(
+            "VNUM 1\nNAME a\nLEVEL 5\nLEVEL 9\nETC 1 2 1 1 1 1\nETC 3 4\nNAME b\n",
+            "RACE 1 2\nRACE 1 2\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            monster.warnings,
+            [
+                repeated("monster", 4, "LEVEL"),
+                repeated("monster", 6, "ETC"),
+                repeated("monster", 7, "NAME"),
+            ]
+        );
+        let entry = &monster.document.entries[0];
+        assert_eq!(
+            (
+                entry.name.as_str(),
+                entry.level.as_deref(),
+                entry.etc.as_deref()
+            ),
+            ("b", Some(&[9][..]), Some(&[3, 4][..]))
+        );
+
+        let card = decode_card(concat!(
+            "KIT 0 0 kit\nZ_ETC 19 extra\n",
+            "VNUM 1\nICON 5\nEFFECT 1 2 3\nGROUP 1 2\nGROUP 3 4\nDESC x\nDESC y\n",
+            "VNUM 2\nICON 7\nEFFECT 1 7\nICON 8\n",
+            "KIT 0 0\nZ_ETC 19 extra\nKIT 0 0 later\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            card.warnings,
+            [
+                warning(
+                    5,
+                    "Card EFFECT row replaces the icon of the earlier ICON row"
+                ),
+                repeated("Card", 7, "GROUP"),
+                repeated("Card", 9, "DESC"),
+                repeated("Card", 14, "KIT 0 0"),
+            ]
+        );
+        assert_eq!(card.document.kits[0][0], "later");
+        let [first, second] = card.document.entries.as_slice() else {
+            panic!("expected two Card entries");
+        };
+        assert_eq!(
+            (first.icon, first.group.as_deref()),
+            (None, Some(&[3, 4][..]))
+        );
+        assert_eq!(first.description, "y");
+        assert_eq!(
+            (second.icon, second.effect.as_deref()),
+            (Some(8), Some(&[1, 7][..]))
+        );
+
+        let skill = decode_skill(concat!(
+            "VNUM 1\nTYPE 1 2 3 4 5 6\nTYPE 9\nZ_DESC 0 first\nZ_DESC 0 second\n",
+            "Z_DESC 1\nthird\n#\nBASIC 0 1\nBASIC 0 1\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            skill.warnings,
+            [
+                repeated("Skill", 3, "TYPE"),
+                repeated("Skill", 5, "Z_DESC"),
+                repeated("Skill", 6, "Z_DESC"),
+            ]
+        );
+        let entry = &skill.document.entries[0];
+        assert_eq!(entry.skill_type, Some(vec![9]));
+        assert_eq!(entry.description.lines, ["third"]);
+        assert_eq!(entry.basic.len(), 2);
+
+        let item = decode_item(concat!(
+            "VNUM 1 0\nLINEDESC 0 first\nLINEDESC 1\nsecond\nEND\nLINEDESC 0\n",
+            "VNUM 2 0\nLINEDESC 0\nLINEDESC 0\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            item.warnings,
+            [
+                repeated("Item", 3, "LINEDESC"),
+                repeated("Item", 6, "LINEDESC"),
+            ]
+        );
+        assert_eq!(
+            item.document.entries[0],
+            ItemEntry {
+                vnum: 1,
+                ..ItemEntry::default()
+            }
+        );
+    }
+
+    #[test]
+    fn basic_card_slot_indexes_count_bytes_in_the_record_encoding() {
+        let source = "VNUM 1\nS가J1\tone\nL가S1-2\ttwo\nS가1\tdropped\n";
+        let parsed = decode_basic_card(source, TextEncoding::EucKr).unwrap();
+
+        assert_eq!(
+            parsed.warnings,
+            [
+                warning(2, "BCard tag S가J1 is read as SUBJ1"),
+                warning(3, "BCard tag L가S1-2 is read as LIST1-2"),
+                warning(
+                    4,
+                    "BCard S가1 row is dropped because it selects no slot and is not a SUBJn or LISTk-m tag"
+                ),
+            ]
+        );
+        let entry = &parsed.document.entries[0];
+        assert_eq!(entry.subject_slots[1], "one");
+        assert_eq!(entry.list_slots[0], ["", "two"]);
+
+        // Half-width katakana take one byte each in Shift_JIS.
+        let parsed = decode_basic_card("VNUM 1\nSｱｲｳ2\tthree\n", TextEncoding::ShiftJis).unwrap();
+        assert_eq!(parsed.document.entries[0].subject_slots[2], "three");
     }
 
     #[test]
@@ -2100,7 +2319,22 @@ mod tests {
                 ),
             )
         };
-        assert_eq!(parsed.warnings, [dropped(22, 0), dropped(25, 1)]);
+        let count = |row: usize| {
+            warning(
+                row,
+                "repeated Skill Z_DESC row without text replaces only the earlier count",
+            )
+        };
+        assert_eq!(
+            parsed.warnings,
+            [
+                count(3),
+                count(9),
+                count(16),
+                dropped(22, 0),
+                dropped(25, 1)
+            ]
+        );
         let descriptions = parsed
             .document
             .entries
@@ -2219,7 +2453,13 @@ mod tests {
 
         assert_eq!(
             parsed.warnings,
-            [warning(7, "Card tag DESC x is read as DESC")]
+            [
+                warning(7, "Card tag DESC x is read as DESC"),
+                warning(
+                    12,
+                    "Card EFFECT row replaces the icon of the earlier ICON row"
+                ),
+            ]
         );
         assert_eq!(parsed.document.kits[1][2], "kit  text");
         assert_eq!(parsed.document.extra_texts[3], "lead");
@@ -2474,6 +2714,7 @@ mod tests {
                 warning(1, "Skill row before the first VNUM has no entry"),
                 warning(2, "malformed Skill VNUM row stored as VNUM -1"),
                 warning(5, "Skill tag END is read as EFFECT"),
+                warning(5, "repeated Skill EFFECT row replaces the earlier one"),
             ]
         );
         let [bare, two] = parsed.document.entries.as_slice() else {

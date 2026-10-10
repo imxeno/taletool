@@ -448,9 +448,12 @@ rows that their source entry lacks, and Card entries keep an `ICON` row as
 `icon`. BCard entries hold the client's five text slots, whatever their `DESC`
 count: `subject_slots` holds `SUBJ0` through `SUBJ4`, and `list_slots` holds
 `LIST1-1` through `LIST5-2`. Other numbered `SUBJ` and `LIST` rows, which the
-client ignores, are kept in `ignored_rows`. Abuse documents distinguish a
-zero-byte payload from a counted empty list; undecodable legacy text uses a
-reversible `bytes_base64` entry instead.
+client ignores, are kept in `ignored_rows`. When a row is repeated in one BCard,
+Card, Item, monster, or Skill entry, or a Card `KIT` or `Z_ETC` row is repeated
+for one slot, only what the client loads is kept, with a warning when a later
+row replaces different values or text; Skill `BASIC` rows are all kept. Abuse
+documents distinguish a zero-byte payload from a counted empty list; undecodable
+legacy text uses a reversible `bytes_base64` entry instead.
 
 Rows whose field counts vary between data revisions retain their complete token
 sequences in JSON. Packing writes those sequences unchanged, including empty,

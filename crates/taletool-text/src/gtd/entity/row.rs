@@ -138,6 +138,48 @@ impl RowReader {
         );
     }
 
+    /// Reports a row that replaces what an earlier row stored.
+    pub(super) fn repeated(&mut self, row: usize, tag: &str) {
+        self.warn(
+            row,
+            format!(
+                "repeated {} {tag} row replaces the earlier one",
+                self.record
+            ),
+        );
+    }
+
+    /// Stores a row's values, reporting a row that replaces different values
+    /// stored by an earlier row.
+    pub(super) fn store<T: PartialEq>(
+        &mut self,
+        row: usize,
+        tag: &str,
+        field: &mut Option<T>,
+        values: T,
+    ) {
+        if field.as_ref().is_some_and(|earlier| *earlier != values) {
+            self.repeated(row, tag);
+        }
+        *field = Some(values);
+    }
+
+    /// Stores a row's text, reporting a row that replaces different text.
+    pub(super) fn replace_text(&mut self, row: usize, tag: &str, field: &mut String, text: &str) {
+        if !field.is_empty() && field != text {
+            self.repeated(row, tag);
+        }
+        *field = text.to_owned();
+    }
+
+    /// Stores a text row's text like [`Self::replace_text`]. The client keeps
+    /// the earlier text when a repeated row has none.
+    pub(super) fn set_text(&mut self, row: usize, tag: &str, field: &mut String, text: &str) {
+        if !text.is_empty() {
+            self.replace_text(row, tag, field, text);
+        }
+    }
+
     /// Returns the entry a row belongs to. Rows before the first `VNUM` fill
     /// a record the client discards.
     pub(super) fn entry<'e, T>(

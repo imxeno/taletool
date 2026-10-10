@@ -112,12 +112,10 @@ have no effect.
 
 Every row is optional. A new entry's fields are zero unless a section says
 otherwise, and an absent row leaves them unchanged. A present numeric row
-assigns every position the client reads. Its values are integer tokens, so `$10`
-reads as 16 and `-$1F` as -31, while a missing or non-numeric token takes that
-position's default; this includes a number followed by a space before a tab,
-which stays in its token. The default is -1 unless a section says otherwise, and
-the value is truncated to the width of its field. Tokens after the positions the
-client reads are ignored.
+assigns every position the client reads. Its values are integer tokens as
+described above; a missing or non-numeric token takes that position's default.
+The default is -1 unless a section says otherwise, and the value is truncated to
+the width of its field. Tokens after the positions the client reads are ignored.
 
 ## `BCard.dat`
 
@@ -145,14 +143,14 @@ whatever the number of `DESC` values:
 - `LIST<k>-<m>` stores template `m` of slot `k - 1`, for `k` from 1 through 5
   and `m` 1 or 2.
 
-The `SUBJ` index is the part of the tag after its fourth character. The `LIST`
-indexes are the parts between the fourth character and the first `-`, and after
-that `-`. Each index is read as an integer token, so the row `SUBJ 0<TAB>text`,
-whose tag is `SUBJ 0`, fills slot 0. The second through fourth characters are
-not checked, and a row whose index is missing, non-numeric, or outside these
-ranges has no effect. Observed records number subjects `SUBJ1` through `SUBJ5`,
-so slot 0 has no subject and `SUBJ5` has no effect. Observed `DESC` rows have
-one through six values.
+The `SUBJ` index is the part of the tag after its fourth byte. The `LIST`
+indexes are the parts between the fourth byte and the first `-`, and after that
+`-`. Each index is read as an integer token, so the row `SUBJ 0<TAB>text`, whose
+tag is `SUBJ 0`, fills slot 0. The second through fourth bytes are not checked,
+so a tag holding a multibyte character can still select a slot, and a row whose
+index is missing, non-numeric, or outside these ranges has no effect. Observed
+records number subjects `SUBJ1` through `SUBJ5`, so slot 0 has no subject and
+`SUBJ5` has no effect. Observed `DESC` rows have one through six values.
 
 An equipment option of slot `i` is displayed with template 1 of that slot for a
 non-negative option value and template 2 for a negative one. The slot's format
@@ -195,7 +193,8 @@ END
 `KIT` addresses a 3-by-5 table: kit indices are 0 through 2 inclusive and slot
 indices are 0 through 4 inclusive. `Z_ETC` addresses 20 independent text slots
 numbered 0 through 19 inclusive. Their indices default to 0, and a row outside
-the table has no effect. These global rows may appear anywhere in the file.
+the table has no effect. A `KIT` or `Z_ETC` row without text clears its slot.
+These global rows may appear anywhere in the file.
 
 `EFFECT` is the only row that needs its exact tag; every other row is selected
 by its first character. The client reads 2 values of `GROUP`, `TIME`, and
@@ -313,6 +312,9 @@ rows as follows:
 | `CARD`    | `C`         | 20                                              |
 | `MODE`    | `M`         | The 31st value only                             |
 | `ITEM`    | Never read  | None                                            |
+
+A present `ETC` row also sets another field of the monster to 600, and a present
+`AINFO` row sets two armor fields to 1; without these rows those fields stay 0.
 
 An `ETC` boolean is true when its token is a non-zero number or `True`, and
 false when it is zero, `False`, or other text, in any letter case. Such a number
