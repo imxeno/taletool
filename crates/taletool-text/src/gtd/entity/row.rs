@@ -5,7 +5,7 @@
 
 use super::invalid;
 use crate::Result;
-use crate::gtd::row_tokens::{client_int, leading_values, split_token, tokens, trim};
+use crate::gtd::row_tokens::{client_int, is_trimmed, leading_values, split_token, tokens, trim};
 use crate::gtd::{GtdWarning, parse_i32, warning};
 
 /// A row split into its tag token and the untrimmed text after it.
@@ -283,7 +283,7 @@ pub(super) fn check_rest_text(text: &str, field: &str) -> Result<()> {
     if text.contains(['\r', '\n']) {
         return invalid(format!("{field} contains a line break"));
     }
-    if text.trim_end_matches(|c: char| c <= ' ') != text {
+    if text.ends_with(is_trimmed) {
         return invalid(format!(
             "{field} ends with spaces or control characters that the client trims"
         ));
