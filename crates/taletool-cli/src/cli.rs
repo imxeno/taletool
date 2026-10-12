@@ -406,7 +406,7 @@ Text families and converted output per escaped native record stem:
   NScliData[_<locale>]: ordered constant-string JSON
   NSetcData: ordered DAT/LST string-array JSON
 
-A matching recognized filename and fixed header is accepted, as is a renamed archive with a recognized header. Conflicting filename/header identifiers, inconsistent chunks, NStsData, and custom or unknown headers fail before output is published.
+A recognized filename identifies the binary family, as in NosTale. A renamed archive is identified by the family tag at the start of its header, such as NT Data 23; the header's date bytes and the direct-index byte are not compared. A header tag naming a different family than the filename, inconsistent chunks, NStsData, and archives with neither a recognized filename nor a recognized header tag fail before output is published.
 
 The output path must not already exist. Conversion uses a same-parent staging directory and publishes it only after every entry succeeds.
 
@@ -1033,7 +1033,8 @@ mod tests {
             "NScliData[_<locale>]",
             "NSetcData",
             "NStsData",
-            "custom or unknown headers",
+            "family tag at the start of its header",
+            "neither a recognized filename nor a recognized header tag",
             "output path must not already exist",
             "renamed empty archives",
             "case-insensitive output-name collisions",
