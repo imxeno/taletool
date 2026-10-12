@@ -533,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "taletool"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -561,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "taletool-animation"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "taletool-core",
@@ -570,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "taletool-archive"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "flate2",
@@ -583,7 +583,7 @@ dependencies = [
 
 [[package]]
 name = "taletool-audio"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "encoding_rs",
  "serde",
@@ -593,7 +593,7 @@ dependencies = [
 
 [[package]]
 name = "taletool-ccinf"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "taletool-core",
@@ -602,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "taletool-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "thiserror",
@@ -610,7 +610,7 @@ dependencies = [
 
 [[package]]
 name = "taletool-effect"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "taletool-core",
@@ -619,7 +619,7 @@ dependencies = [
 
 [[package]]
 name = "taletool-geometry"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "taletool-core",
@@ -628,7 +628,7 @@ dependencies = [
 
 [[package]]
 name = "taletool-map"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "bitflags",
  "serde",
@@ -638,7 +638,7 @@ dependencies = [
 
 [[package]]
 name = "taletool-map-neighborhood"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "taletool-core",
@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "taletool-patch"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "crc32fast",
@@ -663,7 +663,7 @@ dependencies = [
 
 [[package]]
 name = "taletool-text"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "encoding_rs",
  "serde",
@@ -674,7 +674,7 @@ dependencies = [
 
 [[package]]
 name = "taletool-texture"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "image",
  "serde",
@@ -684,7 +684,7 @@ dependencies = [
 
 [[package]]
 name = "taletool-zlib"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "cc",
