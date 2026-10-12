@@ -27,6 +27,12 @@ Records follow immediately. Each record is `0x7C` bytes:
 | `0x14` | Filename      | Delphi string `[50]` | One length byte and a fixed 50-byte storage area.      |
 | `0x47` | Unknown 47    | 53 bytes             | Always zero in client data.                            |
 
+NosTale loads `sndinfo.lst` at startup when the file exists. After reading the
+records, it always quicksorts its sound-ID index over `0..count - 1`. With a
+record count of zero or less there are no records, the first pivot read faults
+on the empty index, and the client crashes before the game starts. A missing
+file is skipped.
+
 ### Likely Authoring Workflow
 
 Unused bytes in the fixed filename storage are not consistently zero. Some rows
@@ -106,6 +112,12 @@ The pack header is `0x1C` bytes:
 | `0x11..0x13` | Reserved bytes | Unknown. Observed as `f0 fd 7f` in a 2011 pack and `00 00 00` in a 2026 pack. Client loader treats this area as padding and ignores it. |
 | `0x14..0x17` | Version        | Little-endian `i32`; NosTale accepts versions up to `10`.                                                                               |
 | `0x18..0x1B` | Entry count    | Little-endian `i32`.                                                                                                                    |
+
+NosTale loads `snd.pck` at startup when the file exists and its version, read as
+an unsigned value, is at most `10`. It skips a missing pack or one with a higher
+version. Once loaded, it always quicksorts its name and key indexes over
+`0..count - 1`, so an entry count of zero crashes the client before the game
+starts, as an empty `sndinfo.lst` does.
 
 The entry table starts immediately after the header. Each row is `0x4C` bytes:
 

@@ -40,7 +40,9 @@ use crate::text_archive_manifest::{
     read_unpacked_text_archive, text_archive_manifest_exists, unpack_text_archive_dir,
 };
 use crate::text_payload::payload_kind_label;
-use crate::util::{duplicate_id_counts, fnv1a64, warn_duplicate_archive_ids};
+use crate::util::{
+    duplicate_id_counts, fnv1a64, warn_duplicate_archive_ids, warn_empty_sound_table,
+};
 
 /// Dispatch an `archive` subcommand.
 pub(crate) fn run_archive(command: ArchiveCommand) -> anyhow::Result<()> {
@@ -277,6 +279,9 @@ fn inspect_sound_pack(
     json_output: bool,
     checksum: bool,
 ) -> anyhow::Result<()> {
+    if archive.entries().is_empty() {
+        warn_empty_sound_table(archive.path());
+    }
     let key_order_violation = archive.first_key_order_violation();
     let mut entries = Vec::new();
     for entry in archive.entries() {

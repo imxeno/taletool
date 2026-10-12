@@ -47,6 +47,11 @@ pub enum SoundInfoError {
     InvalidFilenamePadding { expected: usize, actual: usize },
     #[error("sndinfo.lst has too many entries to write: {count}")]
     TooManyEntries { count: usize },
+    #[error(
+        "refusing to write {path}: a sndinfo.lst without entries crashes NosTale at startup; \
+         remove the file instead, which the client skips"
+    )]
+    EmptyTable { path: PathBuf },
 }
 
 pub type Result<T> = std::result::Result<T, SoundInfoError>;
@@ -374,8 +379,17 @@ impl SoundInfoTable {
         Ok(out)
     }
 
+    /// Write the table to a file.
+    ///
+    /// A table without entries is refused: NosTale sorts its sound-ID index
+    /// over `0..count - 1` at startup, which crashes when the count is zero.
     pub fn write_to(&self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
+        if self.entries.is_empty() {
+            return Err(SoundInfoError::EmptyTable {
+                path: path.to_path_buf(),
+            });
+        }
         let data = self.to_bytes()?;
         fs::write(path, data).map_err(|source| SoundInfoError::Io {
             path: path.to_path_buf(),
@@ -493,10 +507,18 @@ mod tests {
     }
 
     #[test]
-    fn accepts_an_empty_table() {
+    fn reads_but_does_not_write_an_empty_table() {
         let table = SoundInfoTable::from_bytes(&0_i32.to_le_bytes()).unwrap();
         assert!(table.entries().is_empty());
         assert_eq!(table.to_bytes().unwrap(), 0_i32.to_le_bytes());
+
+        let path =
+            std::env::temp_dir().join(format!("taletool-empty-sndinfo-{}.lst", std::process::id()));
+        assert!(matches!(
+            table.write_to(&path),
+            Err(SoundInfoError::EmptyTable { .. })
+        ));
+        assert!(!path.exists());
     }
 
     #[test]

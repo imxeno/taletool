@@ -53,6 +53,11 @@ pub enum DelDxPackError {
     TooManyEntries { count: usize },
     #[error("DelDX pack entry {index} payload is too large: {size} bytes")]
     EntryTooLarge { index: usize, size: usize },
+    #[error(
+        "refusing to write {path}: a DelDX pack without entries crashes NosTale at startup; \
+         remove the file instead, which the client skips"
+    )]
+    EmptyPack { path: PathBuf },
 }
 
 pub type DelDxPackResult<T> = std::result::Result<T, DelDxPackError>;
@@ -281,8 +286,16 @@ impl DelDxPack {
     }
 
     /// Write the current pack bytes to an explicit path.
+    ///
+    /// A pack without entries is refused: NosTale sorts its row indexes over
+    /// `0..count - 1` at startup, which crashes when the count is zero.
     pub fn write_to(&self, path: impl AsRef<Path>) -> DelDxPackResult<()> {
         let path = path.as_ref();
+        if self.entries.is_empty() {
+            return Err(DelDxPackError::EmptyPack {
+                path: path.to_path_buf(),
+            });
+        }
         fs::write(path, &self.data).map_err(|source| DelDxPackError::Io {
             path: path.to_path_buf(),
             source,
@@ -1039,6 +1052,21 @@ mod tests {
                 .unwrap(),
             parsed.write_entries().unwrap()
         );
+    }
+
+    #[test]
+    fn refuses_to_write_an_empty_pack() {
+        let options = DelDxPackWriteOptions::new(header(0).try_into().unwrap());
+        let archive = DelDxPack::empty(PathBuf::from("snd.pck"), &options).unwrap();
+        assert!(archive.entries().is_empty());
+
+        let path =
+            std::env::temp_dir().join(format!("taletool-empty-snd-{}.pck", std::process::id()));
+        assert!(matches!(
+            archive.write_to(&path),
+            Err(DelDxPackError::EmptyPack { .. })
+        ));
+        assert!(!path.exists());
     }
 
     #[test]

@@ -7,6 +7,7 @@ use taletool_audio::{SoundFileResolver, SoundInfoTable};
 
 use crate::cli::AudioCommand;
 use crate::sound_info::{pack_sound_info, unpack_sound_info};
+use crate::util::warn_empty_sound_table;
 
 pub(crate) fn run_audio(command: AudioCommand) -> anyhow::Result<()> {
     match command {
@@ -16,6 +17,9 @@ pub(crate) fn run_audio(command: AudioCommand) -> anyhow::Result<()> {
             wave_dir,
         } => {
             let table = SoundInfoTable::open(&input)?;
+            if table.entries().is_empty() {
+                warn_empty_sound_table(&input);
+            }
             inspect_sound_info(&table, json, wave_dir.as_deref())
         }
         AudioCommand::Unpack { input, out } => {

@@ -272,6 +272,29 @@ mod tests {
     }
 
     #[test]
+    fn empty_manifest_does_not_pack() {
+        let root = temp_dir("sound-empty");
+        let output = root.join("snd.pck");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join(SOUND_PACK_MANIFEST_FILE),
+            serde_json::json!({
+                "format": SOUND_PACK_FORMAT,
+                "version": SOUND_PACK_MANIFEST_VERSION,
+                "header_hex": hex::encode(header()),
+                "entries": []
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let error = pack_sound_pack_dir(&root, &output).unwrap_err().to_string();
+        assert!(error.contains("crashes NosTale at startup"), "{error}");
+        assert!(!output.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn rows_out_of_ascending_key_order_fail() {
         let root = temp_dir("sound-key-order");
         let output = root.join("snd.pck");
