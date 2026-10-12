@@ -1,6 +1,7 @@
 //! Handlers for `taletool effect` asset commands.
 
 use std::fs;
+use std::path::Path;
 
 use anyhow::{Context, bail};
 use serde_json::json;
@@ -8,7 +9,7 @@ use taletool_effect::{EffectAsset, EffectAssetKind, decode_effect_asset};
 
 use crate::cli::{EffectCommand, EffectKindArg};
 use crate::effect_file::{pack_effect_file, unpack_effect_file};
-use crate::util::fnv1a64;
+use crate::util::{decreasing_key_time_warnings, fnv1a64};
 
 /// Dispatch an `effect` subcommand.
 pub(crate) fn run_effect(command: EffectCommand) -> anyhow::Result<()> {
@@ -21,12 +22,14 @@ pub(crate) fn run_effect(command: EffectCommand) -> anyhow::Result<()> {
         } => {
             let data = fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
             let effect = decode_effect_kind(&data, kind)?;
+            warn_decreasing_key_times(&input, &effect);
             let checksum_value = checksum.then(|| format!("{:016x}", fnv1a64(&data)));
             inspect_effect(&effect, data.len(), checksum_value.as_deref(), json_output)
         }
         EffectCommand::Unpack { input, out, kind } => {
             let data = fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
             let effect = decode_effect_kind(&data, kind)?;
+            warn_decreasing_key_times(&input, &effect);
             unpack_effect_file(&effect, &out)?;
             println!(
                 "unpacked {} effect payload into {}",
@@ -37,6 +40,7 @@ pub(crate) fn run_effect(command: EffectCommand) -> anyhow::Result<()> {
         }
         EffectCommand::Pack { input, out } => {
             let effect = pack_effect_file(&input, &out)?;
+            warn_decreasing_key_times(&input, &effect);
             println!(
                 "packed {} effect payload into {}",
                 kind_name(effect.kind()),
@@ -44,6 +48,12 @@ pub(crate) fn run_effect(command: EffectCommand) -> anyhow::Result<()> {
             );
             Ok(())
         }
+    }
+}
+
+fn warn_decreasing_key_times(source: &Path, effect: &EffectAsset) {
+    for warning in decreasing_key_time_warnings(source, &effect.decreasing_key_times()) {
+        eprintln!("{warning}");
     }
 }
 

@@ -5,6 +5,7 @@
 //! triangle-list index groups, and a recursive transform/render node forest.
 
 use std::collections::BTreeSet;
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use taletool_core::{ByteReadError, ByteReader};
@@ -73,16 +74,6 @@ pub enum GeometryError {
         batch: usize,
         triangle_list_index: u16,
         triangle_list_count: usize,
-    },
-    #[error(
-        "geometry node {node} {channel} keyframes are not strictly ordered at index {index}: {previous} then {current}"
-    )]
-    UnorderedKeyframes {
-        node: usize,
-        channel: &'static str,
-        index: usize,
-        previous: u16,
-        current: u16,
     },
     #[error("geometry node nesting depth {depth} exceeds the supported maximum of {limit}")]
     NodeDepthExceeded { depth: usize, limit: usize },
@@ -219,10 +210,84 @@ impl Geometry {
             .collect()
     }
 
+    /// List every keyframe whose time is lower than the previous keyframe's
+    /// in its channel. NosTale plays such channels as stored, but its binary
+    /// key search can then select keyframes out of order.
+    pub fn decreasing_key_times(&self) -> Vec<DecreasingKeyTime> {
+        let mut found = Vec::new();
+        for (node_index, node) in self.nodes().enumerate() {
+            push_decreasing_key_times(
+                &mut found,
+                node_index,
+                "translation",
+                node.translation_keyframes
+                    .iter()
+                    .map(|keyframe| keyframe.time),
+            );
+            push_decreasing_key_times(
+                &mut found,
+                node_index,
+                "rotation",
+                node.rotation_keyframes.iter().map(|keyframe| keyframe.time),
+            );
+            push_decreasing_key_times(
+                &mut found,
+                node_index,
+                "scale",
+                node.scale_keyframes.iter().map(|keyframe| keyframe.time),
+            );
+        }
+        found
+    }
+
     fn nodes(&self) -> GeometryNodes<'_> {
         GeometryNodes {
             pending: self.root_nodes.iter().rev().collect(),
         }
+    }
+}
+
+/// A keyframe whose time is lower than the time of the keyframe stored before
+/// it. Nodes are numbered in depth-first order, starting with the first root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecreasingKeyTime {
+    pub node: usize,
+    pub channel: &'static str,
+    pub index: usize,
+    pub previous: u16,
+    pub current: u16,
+}
+
+impl fmt::Display for DecreasingKeyTime {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "node {} {} key {} has time {}, lower than the previous key's {}, so NosTale may select keys out of order",
+            self.node, self.channel, self.index, self.current, self.previous
+        )
+    }
+}
+
+fn push_decreasing_key_times(
+    found: &mut Vec<DecreasingKeyTime>,
+    node: usize,
+    channel: &'static str,
+    times: impl IntoIterator<Item = u16>,
+) {
+    let mut previous = None;
+    for (index, current) in times.into_iter().enumerate() {
+        if let Some(previous) = previous
+            && current < previous
+        {
+            found.push(DecreasingKeyTime {
+                node,
+                channel,
+                index,
+                previous,
+                current,
+            });
+        }
+        previous = Some(current);
     }
 }
 
@@ -416,11 +481,8 @@ fn read_node(
     validate_vec3("geometry.node.base_scale", base_scale)?;
 
     let translation_keyframes = read_vector_keyframes(reader)?;
-    validate_vector_keyframes(node_index, "translation", &translation_keyframes)?;
     let rotation_keyframes = read_rotation_keyframes(reader)?;
-    validate_rotation_keyframes(node_index, &rotation_keyframes)?;
     let scale_keyframes = read_vector_keyframes(reader)?;
-    validate_vector_keyframes(node_index, "scale", &scale_keyframes)?;
 
     let batch_count = usize::from(reader.read_u16_le("geometry.node.batch_count")?);
     let mut batches = Vec::with_capacity(batch_count);
@@ -662,9 +724,6 @@ fn validate_node(
     check_count("node batch", node.batches.len(), u16::MAX as usize)?;
     check_count("node child", node.children.len(), u8::MAX as usize)?;
 
-    validate_vector_keyframes(node_index, "translation", &node.translation_keyframes)?;
-    validate_rotation_keyframes(node_index, &node.rotation_keyframes)?;
-    validate_vector_keyframes(node_index, "scale", &node.scale_keyframes)?;
     for keyframe in node
         .translation_keyframes
         .iter()
@@ -684,49 +743,6 @@ fn validate_node(
     }
     for child in &node.children {
         validate_node(child, triangle_list_count, depth + 1, next_node_index)?;
-    }
-    Ok(())
-}
-
-fn validate_vector_keyframes(
-    node: usize,
-    channel: &'static str,
-    keyframes: &[VectorKeyframe],
-) -> GeometryResult<()> {
-    validate_keyframe_order(
-        node,
-        channel,
-        keyframes.iter().map(|keyframe| keyframe.time),
-    )
-}
-
-fn validate_rotation_keyframes(node: usize, keyframes: &[RotationKeyframe]) -> GeometryResult<()> {
-    validate_keyframe_order(
-        node,
-        "rotation",
-        keyframes.iter().map(|keyframe| keyframe.time),
-    )
-}
-
-fn validate_keyframe_order(
-    node: usize,
-    channel: &'static str,
-    times: impl Iterator<Item = u16>,
-) -> GeometryResult<()> {
-    let mut previous = None;
-    for (index, current) in times.enumerate() {
-        if let Some(previous) = previous
-            && previous >= current
-        {
-            return Err(GeometryError::UnorderedKeyframes {
-                node,
-                channel,
-                index,
-                previous,
-                current,
-            });
-        }
-        previous = Some(current);
     }
     Ok(())
 }
@@ -945,14 +961,35 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unordered_keys_and_invalid_header_values() {
+    fn repeated_and_decreasing_key_times_round_trip() {
         let mut geometry = geometry_fixture();
-        geometry.root_nodes[0].translation_keyframes[1].time = 0;
-        assert!(matches!(
-            write_geometry_bytes(&geometry),
-            Err(GeometryError::UnorderedKeyframes { .. })
-        ));
+        let child = &mut geometry.root_nodes[0].children;
+        child.push(node());
+        child[0].translation_keyframes[1].time = 0;
+        child[0].scale_keyframes = [0, 300, 200, 200]
+            .map(|time| VectorKeyframe {
+                time,
+                value: [1.0, 1.0, 1.0],
+            })
+            .to_vec();
+        let encoded = write_geometry_bytes(&geometry).unwrap();
+        let decoded = decode_geometry(&encoded).unwrap();
+        assert_eq!(decoded, geometry);
+        assert_eq!(write_geometry_bytes(&decoded).unwrap(), encoded);
+        assert_eq!(
+            geometry.decreasing_key_times(),
+            [DecreasingKeyTime {
+                node: 1,
+                channel: "scale",
+                index: 2,
+                previous: 300,
+                current: 200,
+            }]
+        );
+    }
 
+    #[test]
+    fn rejects_invalid_header_values() {
         let mut geometry = geometry_fixture();
         geometry.header.bounds.maximum[0] = -2.0;
         assert!(matches!(

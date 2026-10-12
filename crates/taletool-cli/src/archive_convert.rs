@@ -27,6 +27,7 @@ use crate::map_neighborhood_file::unpack_map_neighborhood_file;
 use crate::sprite_file::{unpack_free_size_sprite_png, unpack_sprite_file};
 use crate::sprite_remap_file::unpack_sprite_resource_remap_file;
 use crate::texture_file::unpack_texture_file;
+use crate::util::decreasing_key_time_warnings;
 
 static STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -35,6 +36,7 @@ static STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub(crate) struct ConvertedPayload {
     pub(crate) relative_path: PathBuf,
     pub(crate) description: String,
+    pub(crate) warnings: Vec<String>,
 }
 
 /// Publish a newly generated output directory only after every write succeeds.
@@ -171,7 +173,11 @@ pub(crate) fn convert_binary_payload(
             let geometry = decode_geometry(data).context("decoding geometry payload")?;
             let relative_path = PathBuf::from(format!("{stem}.json"));
             unpack_geometry_file(&geometry, &out.join(&relative_path))?;
-            converted(relative_path, "geometry")
+            let warnings =
+                decreasing_key_time_warnings(&relative_path, &geometry.decreasing_key_times());
+            let mut payload = converted(relative_path, "geometry")?;
+            payload.warnings = warnings;
+            Ok(payload)
         }
         BinaryAssetKind::Texture => {
             let texture = decode_texture(data).context("decoding texture payload")?;
@@ -184,7 +190,11 @@ pub(crate) fn convert_binary_payload(
                 .with_context(|| format!("decoding {effect_kind:?} effect payload"))?;
             let relative_path = PathBuf::from(format!("{stem}.json"));
             unpack_effect_file(&effect, &out.join(&relative_path))?;
-            converted(relative_path, format!("{effect_kind:?} effect"))
+            let warnings =
+                decreasing_key_time_warnings(&relative_path, &effect.decreasing_key_times());
+            let mut payload = converted(relative_path, format!("{effect_kind:?} effect"))?;
+            payload.warnings = warnings;
+            Ok(payload)
         }
         BinaryAssetKind::CellFlag => {
             let grid = decode_map_cell_grid(data).context("decoding map cell-flag payload")?;
@@ -277,6 +287,7 @@ fn converted(
     Ok(ConvertedPayload {
         relative_path,
         description: description.into(),
+        warnings: Vec::new(),
     })
 }
 
@@ -323,5 +334,48 @@ mod tests {
         );
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn effect_conversion_warns_about_decreasing_key_times() {
+        use taletool_effect::{
+            AnimationTiming, EffectAsset, EffectAssetKind, TextureAnimation, TextureKeyframe,
+            write_effect_asset_bytes,
+        };
+
+        let out = temp_dir("conversion-key-order");
+        let animation = EffectAsset::TextureAnimation(TextureAnimation {
+            timing: AnimationTiming {
+                first_frame: 0,
+                last_frame: 100,
+                frame_rate: 30,
+                keyframe_step: 100,
+            },
+            keyframes: [0, 9900, 9500, 10000]
+                .map(|time| TextureKeyframe {
+                    time,
+                    texture_resource_key: 7,
+                })
+                .to_vec(),
+        });
+        let data = write_effect_asset_bytes(&animation).unwrap();
+
+        let converted = convert_binary_payload(
+            &data,
+            BinaryAssetKind::Effect(EffectAssetKind::TextureAnimation),
+            &out,
+            "12.bin",
+        )
+        .unwrap();
+
+        assert_eq!(
+            converted.warnings,
+            [
+                "warning: 12.json: texture animation key 2 has time 9500, lower than the \
+                 previous key's 9900, so NosTale may select keys out of order"
+            ]
+        );
+        assert!(out.join("12.json").is_file());
+        fs::remove_dir_all(out).unwrap();
     }
 }
