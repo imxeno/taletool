@@ -376,6 +376,9 @@ fn unpack_converted_archive_with_options(
                 unpack_converted_binary_archives(&archives, preset, staging)
             })?;
             for entry in &converted {
+                for warning in &entry.payload.warnings {
+                    eprintln!("{warning}");
+                }
                 println!(
                     "converted {:<12} {} ({})",
                     entry.file_id,

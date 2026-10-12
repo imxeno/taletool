@@ -1,6 +1,8 @@
 //! Typed effect assets stored in `NSedData`, `NSeffData`, `NSemData`, and
 //! `NSesData` archives.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 use taletool_core::{ByteReadError, ByteReader};
 use thiserror::Error;
@@ -30,15 +32,6 @@ pub enum EffectError {
         last_frame: i16,
         frame_rate: i16,
         keyframe_step: i16,
-    },
-    #[error(
-        "{track} keyframes are not strictly ordered at index {index}: {previous} then {current}"
-    )]
-    UnorderedKeyframes {
-        track: &'static str,
-        index: usize,
-        previous: u16,
-        current: u16,
     },
     #[error("{field} contains a non-finite floating-point value")]
     NonFiniteFloat { field: &'static str },
@@ -95,6 +88,145 @@ impl EffectAsset {
             Self::Definition(_) => EffectAssetKind::Definition,
             Self::TransformAnimation(_) => EffectAssetKind::TransformAnimation,
             Self::TextureAnimation(_) => EffectAssetKind::TextureAnimation,
+        }
+    }
+
+    /// List every key whose time is lower than the previous key's in its
+    /// track. NosTale plays such tracks as stored, but its binary key search
+    /// can then select keys out of order.
+    pub fn decreasing_key_times(&self) -> Vec<DecreasingKeyTime> {
+        let mut found = Vec::new();
+        match self {
+            Self::ColorAnimation(animation) => {
+                push_decreasing_key_times(
+                    &mut found,
+                    "color animation",
+                    &animation.keyframes,
+                    |key| key.time,
+                );
+            }
+            Self::TextureAnimation(animation) => {
+                push_decreasing_key_times(
+                    &mut found,
+                    "texture animation",
+                    &animation.keyframes,
+                    |key| key.time,
+                );
+            }
+            Self::TransformAnimation(animation) => {
+                push_decreasing_key_times(
+                    &mut found,
+                    "transform translation",
+                    &animation.translation_keyframes,
+                    |key| key.time,
+                );
+                push_decreasing_key_times(
+                    &mut found,
+                    "transform rotation",
+                    &animation.rotation_keyframes,
+                    |key| key.time,
+                );
+                push_decreasing_key_times(
+                    &mut found,
+                    "transform scale",
+                    &animation.scale_keyframes,
+                    |key| key.time,
+                );
+            }
+            Self::Definition(definition) => {
+                for (index, component) in definition.components.iter().enumerate() {
+                    let track = |name: &str| format!("component {index} {name}");
+                    push_decreasing_key_times(
+                        &mut found,
+                        &track("transform rotation"),
+                        &component.transform.rotation.keyframes,
+                        |key| key.time,
+                    );
+                    push_decreasing_key_times(
+                        &mut found,
+                        &track("transform scale"),
+                        &component.transform.scale.keyframes,
+                        |key| key.time,
+                    );
+                    push_decreasing_key_times(
+                        &mut found,
+                        &track("transform translation"),
+                        &component.transform.translation.keyframes,
+                        |key| key.time,
+                    );
+                    push_decreasing_key_times(
+                        &mut found,
+                        &track("color"),
+                        &component.color.keyframes,
+                        |key| key.time,
+                    );
+                    push_decreasing_key_times(
+                        &mut found,
+                        &track("texture"),
+                        &component.texture.keyframes,
+                        |key| key.time,
+                    );
+                    push_decreasing_key_times(
+                        &mut found,
+                        &track("texture rotation"),
+                        &component.texture_transform.rotation.keyframes,
+                        |key| key.time,
+                    );
+                    push_decreasing_key_times(
+                        &mut found,
+                        &track("texture scale"),
+                        &component.texture_transform.scale.keyframes,
+                        |key| key.time,
+                    );
+                    push_decreasing_key_times(
+                        &mut found,
+                        &track("texture translation"),
+                        &component.texture_transform.translation.keyframes,
+                        |key| key.time,
+                    );
+                }
+            }
+        }
+        found
+    }
+}
+
+/// A key whose time is lower than the time of the key stored before it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecreasingKeyTime {
+    /// Track name, prefixed with the component index in effect definitions.
+    pub track: String,
+    pub index: usize,
+    pub previous: u16,
+    pub current: u16,
+}
+
+impl fmt::Display for DecreasingKeyTime {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{} key {} has time {}, lower than the previous key's {}, so NosTale may select keys out of order",
+            self.track, self.index, self.current, self.previous
+        )
+    }
+}
+
+fn push_decreasing_key_times<T>(
+    found: &mut Vec<DecreasingKeyTime>,
+    track: &str,
+    keyframes: &[T],
+    time: impl Fn(&T) -> u16,
+) {
+    for (index, pair) in keyframes.windows(2).enumerate() {
+        let previous = time(&pair[0]);
+        let current = time(&pair[1]);
+        if current < previous {
+            found.push(DecreasingKeyTime {
+                track: track.to_owned(),
+                index: index + 1,
+                previous,
+                current,
+            });
         }
     }
 }
@@ -483,7 +615,6 @@ pub fn decode_color_animation(data: &[u8]) -> EffectResult<ColorAnimation> {
         });
     }
     finish(&reader, "color animation")?;
-    validate_key_order("color animation", &keyframes, |key| key.time)?;
     Ok(ColorAnimation { timing, keyframes })
 }
 
@@ -494,7 +625,6 @@ pub fn write_color_animation_bytes(animation: &ColorAnimation) -> EffectResult<V
         animation.keyframes.len(),
         u16::MAX as usize,
     )?;
-    validate_key_order("color animation", &animation.keyframes, |key| key.time)?;
     let mut output = Vec::with_capacity(VALUE_ANIMATION_HEADER_LEN + animation.keyframes.len() * 6);
     write_timing(&mut output, animation.timing);
     push_u16(&mut output, animation.keyframes.len() as u16);
@@ -524,7 +654,6 @@ pub fn decode_texture_animation(data: &[u8]) -> EffectResult<TextureAnimation> {
         });
     }
     finish(&reader, "texture animation")?;
-    validate_key_order("texture animation", &keyframes, |key| key.time)?;
     Ok(TextureAnimation { timing, keyframes })
 }
 
@@ -535,7 +664,6 @@ pub fn write_texture_animation_bytes(animation: &TextureAnimation) -> EffectResu
         animation.keyframes.len(),
         u16::MAX as usize,
     )?;
-    validate_key_order("texture animation", &animation.keyframes, |key| key.time)?;
     let mut output = Vec::with_capacity(VALUE_ANIMATION_HEADER_LEN + animation.keyframes.len() * 6);
     write_timing(&mut output, animation.timing);
     push_u16(&mut output, animation.keyframes.len() as u16);
@@ -557,11 +685,6 @@ pub fn decode_transform_animation(data: &[u8]) -> EffectResult<TransformAnimatio
     let translation_keyframes = read_vector2_table(data, translation_offset)?;
     let rotation_keyframes = read_packed_rotation_table(data, rotation_offset)?;
     let scale_keyframes = read_vector3_table(data, scale_offset, "transform_animation.scale")?;
-    validate_key_order("transform translation", &translation_keyframes, |key| {
-        key.time
-    })?;
-    validate_key_order("transform rotation", &rotation_keyframes, |key| key.time)?;
-    validate_key_order("transform scale", &scale_keyframes, |key| key.time)?;
     validate_vec2_keys(&translation_keyframes, "transform translation")?;
     validate_vec3_keys(&scale_keyframes, "transform scale")?;
     Ok(TransformAnimation {
@@ -1198,36 +1321,28 @@ fn validate_effect_definition(definition: &EffectDefinition) -> EffectResult<()>
         validate_track(
             "effect transform rotation",
             &component.transform.rotation.keyframes,
-            |key| key.time,
         )?;
         validate_track(
             "effect transform scale",
             &component.transform.scale.keyframes,
-            |key| key.time,
         )?;
         validate_track(
             "effect transform translation",
             &component.transform.translation.keyframes,
-            |key| key.time,
         )?;
-        validate_track("effect color", &component.color.keyframes, |key| key.time)?;
-        validate_track("effect texture", &component.texture.keyframes, |key| {
-            key.time
-        })?;
+        validate_track("effect color", &component.color.keyframes)?;
+        validate_track("effect texture", &component.texture.keyframes)?;
         validate_track(
             "effect texture rotation",
             &component.texture_transform.rotation.keyframes,
-            |key| key.time,
         )?;
         validate_track(
             "effect texture scale",
             &component.texture_transform.scale.keyframes,
-            |key| key.time,
         )?;
         validate_track(
             "effect texture translation",
             &component.texture_transform.translation.keyframes,
-            |key| key.time,
         )?;
         validate_quaternion_keys(
             &component.transform.rotation.keyframes,
@@ -1312,13 +1427,8 @@ fn validate_property_data_length(
     }
 }
 
-fn validate_track<T>(
-    name: &'static str,
-    keyframes: &[T],
-    time: impl Fn(&T) -> u16,
-) -> EffectResult<()> {
-    validate_count(name, keyframes.len(), u8::MAX as usize)?;
-    validate_key_order(name, keyframes, time)
+fn validate_track<T>(name: &'static str, keyframes: &[T]) -> EffectResult<()> {
+    validate_count(name, keyframes.len(), u8::MAX as usize)
 }
 
 fn validate_transform_animation(animation: &TransformAnimation) -> EffectResult<()> {
@@ -1338,17 +1448,6 @@ fn validate_transform_animation(animation: &TransformAnimation) -> EffectResult<
         animation.scale_keyframes.len(),
         u16::MAX as usize,
     )?;
-    validate_key_order(
-        "transform translation",
-        &animation.translation_keyframes,
-        |key| key.time,
-    )?;
-    validate_key_order("transform rotation", &animation.rotation_keyframes, |key| {
-        key.time
-    })?;
-    validate_key_order("transform scale", &animation.scale_keyframes, |key| {
-        key.time
-    })?;
     validate_vec2_keys(&animation.translation_keyframes, "transform translation")?;
     validate_vec3_keys(&animation.scale_keyframes, "transform scale")
 }
@@ -1365,26 +1464,6 @@ fn validate_timing(timing: AnimationTiming) -> EffectResult<()> {
             frame_rate: timing.frame_rate,
             keyframe_step: timing.keyframe_step,
         });
-    }
-    Ok(())
-}
-
-fn validate_key_order<T>(
-    track: &'static str,
-    keyframes: &[T],
-    time: impl Fn(&T) -> u16,
-) -> EffectResult<()> {
-    for (index, pair) in keyframes.windows(2).enumerate() {
-        let previous = time(&pair[0]);
-        let current = time(&pair[1]);
-        if previous >= current {
-            return Err(EffectError::UnorderedKeyframes {
-                track,
-                index: index + 1,
-                previous,
-                current,
-            });
-        }
     }
     Ok(())
 }
@@ -2151,7 +2230,7 @@ mod tests {
     }
 
     #[test]
-    fn unordered_keys_and_invalid_timing_are_rejected() {
+    fn invalid_timing_is_rejected() {
         let animation = TextureAnimation {
             timing: AnimationTiming {
                 frame_rate: 0,
@@ -2163,33 +2242,96 @@ mod tests {
             write_texture_animation_bytes(&animation),
             Err(EffectError::InvalidTiming { .. })
         ));
+    }
 
-        let animation = ColorAnimation {
-            timing: timing(),
-            keyframes: vec![
-                ColorKeyframe {
-                    time: 4,
-                    color: RgbaColor {
-                        red: 0,
-                        green: 0,
-                        blue: 0,
-                        alpha: 0,
-                    },
-                },
-                ColorKeyframe {
-                    time: 4,
-                    color: RgbaColor {
-                        red: 1,
-                        green: 1,
-                        blue: 1,
-                        alpha: 1,
-                    },
-                },
-            ],
+    #[test]
+    fn repeated_and_decreasing_key_times_round_trip() {
+        let texture_key = |time| TextureKeyframe {
+            time,
+            texture_resource_key: i32::from(time),
         };
-        assert!(matches!(
-            write_color_animation_bytes(&animation),
-            Err(EffectError::UnorderedKeyframes { .. })
-        ));
+        for times in [vec![270, 280, 280], vec![0, 9900, 9500, 10000]] {
+            let animation = EffectAsset::TextureAnimation(TextureAnimation {
+                timing: timing(),
+                keyframes: times.iter().copied().map(texture_key).collect(),
+            });
+            let bytes = write_effect_asset_bytes(&animation).unwrap();
+            let decoded = decode_effect_asset(EffectAssetKind::TextureAnimation, &bytes).unwrap();
+            assert_eq!(decoded, animation);
+            assert_eq!(write_effect_asset_bytes(&decoded).unwrap(), bytes);
+        }
+        let animation = EffectAsset::TextureAnimation(TextureAnimation {
+            timing: timing(),
+            keyframes: [0, 9900, 9500, 10000].map(texture_key).to_vec(),
+        });
+        assert_eq!(
+            animation.decreasing_key_times(),
+            [DecreasingKeyTime {
+                track: "texture animation".to_owned(),
+                index: 2,
+                previous: 9900,
+                current: 9500,
+            }]
+        );
+
+        let color_key = |time| ColorKeyframe {
+            time,
+            color: RgbaColor {
+                red: 1,
+                green: 2,
+                blue: 3,
+                alpha: 4,
+            },
+        };
+        let scale_key = |time| Vector3Keyframe {
+            time,
+            value: [1.0, 1.0, 1.0],
+        };
+        let mut transform = empty_transform(0);
+        transform.scale.keyframes = vec![scale_key(0), scale_key(0)];
+        let definition = EffectAsset::Definition(EffectDefinition {
+            resource_key: 1,
+            loader_workspace: EffectDefinitionLoaderWorkspace::default(),
+            components: vec![EffectComponent {
+                properties: component_properties(EffectComponentVariant::Positioned(
+                    PositionedEffectProperties {
+                        placement_mode: 0,
+                        source_height_scale: 1.0,
+                        update_source_height: 0,
+                        use_target_height: 0,
+                        target_height_scale: 1.0,
+                        reserved_23_47: vec![0; 0x25],
+                    },
+                )),
+                transform,
+                color: ColorTrack {
+                    loader_workspace: workspace(3),
+                    keyframes: vec![color_key(0), color_key(8000), color_key(1100)],
+                },
+                texture: TextureTrack {
+                    loader_workspace: workspace(4),
+                    keyframes: Vec::new(),
+                },
+                texture_transform: empty_transform(5),
+            }],
+        });
+        let bytes = write_effect_asset_bytes(&definition).unwrap();
+        let decoded = decode_effect_asset(EffectAssetKind::Definition, &bytes).unwrap();
+        assert_eq!(decoded, definition);
+        assert_eq!(write_effect_asset_bytes(&decoded).unwrap(), bytes);
+        assert_eq!(
+            definition.decreasing_key_times(),
+            [DecreasingKeyTime {
+                track: "component 0 color".to_owned(),
+                index: 2,
+                previous: 8000,
+                current: 1100,
+            }]
+        );
+        assert_eq!(
+            definition.decreasing_key_times()[0].to_string(),
+            "component 0 color key 2 has time 1100, lower than the previous key's 8000, \
+             so NosTale may select keys out of order"
+        );
     }
 }

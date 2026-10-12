@@ -365,6 +365,11 @@ taletool effect pack <INPUT.json> --out <OUTPUT>
 (`NSesData`). Automatic detection requires exactly one semantic format to match.
 Packing reads the kind from the JSON document.
 
+Effect and geometry key times may repeat or decrease within a track, as they do
+in shipped effects. `inspect`, `unpack`, `pack`, and `archive unpack --convert`
+keep them as stored and warn about each key whose time is lower than the one
+before it, because NosTale's key search can then return keys out of order.
+
 ### Sprites
 
 ```text

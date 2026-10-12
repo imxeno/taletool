@@ -218,7 +218,21 @@ At runtime, elapsed milliseconds are converted to a scaled `u16` key:
   + first_frame * keyframe_step
 ```
 
-Key times within each track are strictly increasing.
+## Key Lookup
+
+The client never checks key order, in definition tracks or in standalone
+animations. To find the active key, it binary-searches the track's key times for
+the current animation key. The search returns the key with that time, otherwise
+the last key with a lower time, or the first key when every time is higher.
+Color, rotation, scale, and translation tracks interpolate from the returned key
+toward the next one. Texture resource keys are used as returned.
+
+The search finds keys reliably only when their times never decrease. After a
+time lower than the one before it, the search can return keys out of order or
+never reach some of them. Shipped definitions and texture animations also repeat
+times, which makes the value jump at that time. When the search stops on a
+repeated time other than its last copy, the zero-length span gives a NaN
+interpolation factor for that frame.
 
 ## Color Animation
 
@@ -237,8 +251,8 @@ neighboring keys. The final key is used directly when there is no following key.
 
 An `NSesData` payload has the same ten-byte header as a color animation. Each
 six-byte key contains a `u16` time followed by an `i32` texture resource key.
-The active resource is the value at the greatest key time not exceeding the
-current animation key.
+The active resource is the value of the key returned by the
+[key lookup](#key-lookup), without interpolation.
 
 Color and texture animations have identical structural layouts.
 

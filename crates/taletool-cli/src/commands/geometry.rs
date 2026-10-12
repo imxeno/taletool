@@ -1,14 +1,15 @@
 //! Handlers for `taletool geometry` asset commands.
 
 use std::fs;
+use std::path::Path;
 
 use anyhow::Context;
 use serde_json::json;
-use taletool_geometry::decode_geometry;
+use taletool_geometry::{Geometry, decode_geometry};
 
 use crate::cli::GeometryCommand;
 use crate::geometry_file::{pack_geometry_file, unpack_geometry_file};
-use crate::util::fnv1a64;
+use crate::util::{decreasing_key_time_warnings, fnv1a64};
 
 /// Dispatch a `geometry` subcommand.
 pub(crate) fn run_geometry(command: GeometryCommand) -> anyhow::Result<()> {
@@ -20,6 +21,7 @@ pub(crate) fn run_geometry(command: GeometryCommand) -> anyhow::Result<()> {
         } => {
             let data = fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
             let geometry = decode_geometry(&data).context("decoding geometry payload")?;
+            warn_decreasing_key_times(&input, &geometry);
             let checksum_value = checksum.then(|| format!("{:016x}", fnv1a64(&data)));
 
             if json_output {
@@ -96,6 +98,7 @@ pub(crate) fn run_geometry(command: GeometryCommand) -> anyhow::Result<()> {
         GeometryCommand::Unpack { input, out } => {
             let data = fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
             let geometry = decode_geometry(&data).context("decoding geometry payload")?;
+            warn_decreasing_key_times(&input, &geometry);
             unpack_geometry_file(&geometry, &out)?;
             println!(
                 "unpacked {} vertices and {} nodes into {}",
@@ -107,6 +110,7 @@ pub(crate) fn run_geometry(command: GeometryCommand) -> anyhow::Result<()> {
         }
         GeometryCommand::Pack { input, out } => {
             let geometry = pack_geometry_file(&input, &out)?;
+            warn_decreasing_key_times(&input, &geometry);
             println!(
                 "packed {} vertices and {} nodes into {}",
                 geometry.vertices.len(),
@@ -115,5 +119,11 @@ pub(crate) fn run_geometry(command: GeometryCommand) -> anyhow::Result<()> {
             );
             Ok(())
         }
+    }
+}
+
+fn warn_decreasing_key_times(source: &Path, geometry: &Geometry) {
+    for warning in decreasing_key_time_warnings(source, &geometry.decreasing_key_times()) {
+        eprintln!("{warning}");
     }
 }

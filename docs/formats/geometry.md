@@ -88,7 +88,9 @@ keyframe is a `u16` key time followed by `vec4<i16>`. The packed quaternion
 components are ordered X, Y, Z, W. The client converts each component to float
 by multiplying it by `1 / 32768`.
 
-Keyframe times are strictly ascending within each channel.
+The client never checks keyframe order. It finds and interpolates keyframes the
+same way as standalone [effect animations](effects.md#key-lookup), including
+when times repeat or decrease.
 
 ## Render Batches
 

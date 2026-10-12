@@ -1,6 +1,8 @@
 //! Small shared helpers for CLI presentation and encoding.
 
 use std::collections::BTreeMap;
+use std::fmt::Display;
+use std::path::Path;
 
 /// Return duplicate ID counts sorted by ID.
 pub(crate) fn duplicate_id_counts(ids: impl IntoIterator<Item = i32>) -> Vec<(i32, usize)> {
@@ -41,6 +43,13 @@ fn duplicate_id_summary(duplicates: &[(i32, usize)]) -> String {
         parts.push(format!("{} more", duplicates.len() - MAX_DUPLICATE_IDS));
     }
     parts.join(", ")
+}
+
+/// Format one warning per key whose time is lower than the previous key's.
+pub(crate) fn decreasing_key_time_warnings(source: &Path, keys: &[impl Display]) -> Vec<String> {
+    keys.iter()
+        .map(|key| format!("warning: {}: {key}", source.display()))
+        .collect()
 }
 
 /// Compute the FNV-1a 64-bit checksum used by `archive inspect --checksum`.
