@@ -245,6 +245,21 @@ mod tests {
     }
 
     #[test]
+    fn empty_manifest_does_not_pack() {
+        let root = temp_dir("manifest-empty");
+        fs::create_dir_all(&root).unwrap();
+        let json = root.join("sndinfo.json");
+        let output = root.join("sndinfo.lst");
+        unpack_sound_info(&SoundInfoTable::new(Vec::new()), &json).unwrap();
+
+        let error = pack_sound_info(&json, &output).unwrap_err().to_string();
+        assert!(error.contains("crashes NosTale at startup"), "{error}");
+        assert!(!output.exists());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn manifest_rejects_unknown_fields_and_invalid_storage_lengths() {
         let unknown_field = br#"{
             "format":"sndinfo","version":1,"trailing_hex":"","entries":[],"extra":1

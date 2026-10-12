@@ -52,6 +52,15 @@ pub(crate) fn decreasing_key_time_warnings(source: &Path, keys: &[impl Display])
         .collect()
 }
 
+/// Warn that a sound table without entries crashes NosTale at startup.
+pub(crate) fn warn_empty_sound_table(path: &Path) {
+    eprintln!(
+        "warning: {} has no entries, which crashes NosTale at startup; \
+         remove the file instead, which the client skips",
+        path.display()
+    );
+}
+
 /// Compute the FNV-1a 64-bit checksum used by `archive inspect --checksum`.
 pub(crate) fn fnv1a64(data: &[u8]) -> u64 {
     let mut hash = 0xcbf29ce484222325_u64;
