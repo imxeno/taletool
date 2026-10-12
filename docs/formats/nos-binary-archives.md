@@ -38,12 +38,20 @@ observed binary archive families.
 
 All integer fields are little-endian.
 
-| Offset | Field                                                                            |
-| ------ | -------------------------------------------------------------------------------- |
-| `0x00` | 16-byte archive header bytes. Known archive families use different fixed values. |
-| `0x10` | `i32` entry count.                                                               |
-| `0x14` | `u8` direct index byte.                                                          |
-| `0x15` | Entry table starts. Each row is `i32 file_id`, `i32 data_offset`.                |
+| Offset | Field                                                             |
+| ------ | ----------------------------------------------------------------- |
+| `0x00` | 16-byte archive header.                                           |
+| `0x10` | `i32` entry count.                                                |
+| `0x14` | `u8` direct index byte.                                           |
+| `0x15` | Entry table starts. Each row is `i32 file_id`, `i32 data_offset`. |
+
+In known archives, the first 12 header bytes name the family: the header tag
+from the table above, followed by `00 00` in `NT Data` archives or `1A 00` in
+`32GBS V1.0` archives. Three date-shaped bytes follow, such as `15 07 04` or
+`04 11 05`, and a space ends the header. The date bytes vary between families
+and installations. NosTale opens each family by its hard-coded filename and
+copies the header without checking it. The direct-index byte matters only for
+[entry lookup](#entry-lookup).
 
 The table `file_id` is not necessarily a unique archive key. The table can
 contain multiple entries with the same `file_id`, and same-id entries can appear

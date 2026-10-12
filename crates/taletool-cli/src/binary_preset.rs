@@ -387,27 +387,22 @@ pub(crate) fn resolve_binary_nos_preset_for_archives(
     Ok(expected)
 }
 
-/// Require a binary archive name and header to identify one consistent family.
+/// Identify a binary archive's family by filename, as NosTale does, or by the
+/// family tag in the header of a renamed archive. A header tag that names a
+/// different family than the filename is rejected.
 fn resolve_binary_nos_preset_for_archive_strict(
     archive: &BinaryNosArchive,
 ) -> anyhow::Result<BinaryPreset> {
     let by_name = resolve_binary_preset(&archive.path().to_string_lossy(), "auto");
-    let by_header = binary_preset_for_header(archive.header(), archive.direct_index());
+    let by_header = binary_preset_for_header(archive.header());
     match (by_name, by_header) {
-        (Some(named), Some(header)) if named.name == header.name => Ok(named),
-        (Some(named), Some(header)) => anyhow::bail!(
+        (Some(named), Some(header)) if named.name != header.name => anyhow::bail!(
             "archive {} filename identifies family {}, but its header identifies {}",
             archive.path().display(),
             named.name,
             header.name,
         ),
-        (Some(named), None) => anyhow::bail!(
-            "archive {} filename identifies family {}, but header {} with direct index {} does not match it",
-            archive.path().display(),
-            named.name,
-            hex::encode(archive.header()),
-            archive.direct_index(),
-        ),
+        (Some(named), _) => Ok(named),
         (None, Some(header)) => Ok(header),
         (None, None) => anyhow::bail!(
             "archive {} has no recognized binary family; --convert requires a supported family",
@@ -416,10 +411,15 @@ fn resolve_binary_nos_preset_for_archive_strict(
     }
 }
 
-fn binary_preset_for_header(header: [u8; 16], direct_index: u8) -> Option<BinaryPreset> {
+/// Number of leading header bytes that name the family, such as
+/// `NT Data 23\0\0`. The date bytes and the space after them vary between
+/// releases.
+const FAMILY_TAG_LEN: usize = 12;
+
+fn binary_preset_for_header(header: [u8; 16]) -> Option<BinaryPreset> {
     BINARY_PRESETS
         .iter()
-        .find(|preset| preset.header == header && preset.direct_index == direct_index)
+        .find(|preset| preset.header[..FAMILY_TAG_LEN] == header[..FAMILY_TAG_LEN])
         .copied()
 }
 
@@ -428,7 +428,7 @@ fn resolve_binary_nos_preset_for_archive_lenient(
     archive: &BinaryNosArchive,
 ) -> Option<BinaryPreset> {
     resolve_binary_preset(&archive.path().to_string_lossy(), "auto")
-        .or_else(|| binary_preset_for_header(archive.header(), archive.direct_index()))
+        .or_else(|| binary_preset_for_header(archive.header()))
 }
 
 /// Pick a default compression for unknown archives from observed entries.
@@ -655,24 +655,40 @@ mod tests {
     }
 
     #[test]
+    fn strict_conversion_resolver_ignores_header_dates_and_direct_index() {
+        let nseff = resolve_binary_preset("NSeffData.NOS", "auto").unwrap();
+        let shipped = *b"NT Data 23\0\0\x04\x11\x05 ";
+        for path in ["NSeffData.NOS", "renamed.NOS"] {
+            for direct_index in [0, 1, 255] {
+                let archive = empty_binary_nos_archive(path, shipped, direct_index);
+                assert_eq!(
+                    resolve_binary_nos_preset_for_archives(&[archive])
+                        .unwrap()
+                        .name,
+                    nseff.name,
+                    "{path} with direct index {direct_index}"
+                );
+            }
+        }
+
+        let custom = empty_binary_nos_archive("NSeffData.NOS", *b"Unknown NOS fmt!", 0);
+        assert_eq!(
+            resolve_binary_nos_preset_for_archives(&[custom])
+                .unwrap()
+                .name,
+            nseff.name
+        );
+    }
+
+    #[test]
     fn strict_conversion_resolver_rejects_conflicts_and_unknown_families() {
         let nstg = resolve_binary_preset("NStgData.NOS", "auto").unwrap();
-        let nstp = resolve_binary_preset("NStpData.NOS", "auto").unwrap();
         let conflicting = empty_binary_nos_archive("NStpData.NOS", nstg.header, nstg.direct_index);
         let error = resolve_binary_nos_preset_for_archives(&[conflicting])
             .unwrap_err()
             .to_string();
         assert!(error.contains("filename identifies family NStpData"));
         assert!(error.contains("header identifies NStgData"));
-
-        let wrong_header =
-            empty_binary_nos_archive("NStpData.NOS", *b"Unknown NOS fmt!", nstp.direct_index);
-        assert!(
-            resolve_binary_nos_preset_for_archives(&[wrong_header])
-                .unwrap_err()
-                .to_string()
-                .contains("does not match it")
-        );
 
         for (path, header) in [
             ("NStsData.NOS", *b"NT Data 09\0\0\x15\x07\x04 "),
