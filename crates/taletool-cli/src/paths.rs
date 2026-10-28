@@ -76,13 +76,17 @@ fn wildcard_match(pattern: &str, text: &str) -> bool {
     inner(pattern.as_bytes(), text.as_bytes())
 }
 
-/// Return a binary archive family stem with a trailing chunk suffix removed.
+/// Remove a two-hex-digit chunk suffix, retaining a standalone locale suffix.
 pub(crate) fn binary_family_stem(path: &Path) -> Option<String> {
     let stem = path.file_stem()?.to_str()?;
+    let locale_only = stem.rsplit_once('_').is_some_and(|(_, suffix)| {
+        suffix.len() == 2 && suffix.bytes().all(|byte| byte.is_ascii_alphabetic())
+    });
     let trimmed = if stem.len() > 2
-        && stem[stem.len() - 2..]
-            .chars()
-            .all(|c| c.is_ascii_hexdigit())
+        && !locale_only
+        && stem.as_bytes()[stem.len() - 2..]
+            .iter()
+            .all(u8::is_ascii_hexdigit)
     {
         &stem[..stem.len() - 2]
     } else {

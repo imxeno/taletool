@@ -3,6 +3,7 @@
 mod animation_file;
 mod archive_convert;
 mod archive_detect;
+mod archive_extract;
 mod binary_payloads;
 mod binary_preset;
 mod ccinf_file;
