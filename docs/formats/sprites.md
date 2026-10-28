@@ -1,7 +1,7 @@
 # Sprite Payloads
 
-NosTale uses two sprite payload families. Map-object sprites contain one or more
-descriptor-based `A4R4G4B4` frames. Free-size sprites contain one
+NosTale uses two sprite payload families. Map-object sprites contain zero or
+more descriptor-based `A4R4G4B4` frames. Free-size sprites contain one
 block-interlaced `A8R8G8B8` image. Neither format has a magic value or embedded
 resource id; the containing binary `.NOS` archive supplies the id.
 
@@ -35,6 +35,13 @@ The source coordinates place the frame relative to its logical origin. They are
 not crop coordinates. Known payloads place pixel blocks contiguously in frame
 order immediately after the descriptor table, but readers must use each
 descriptor's absolute offset.
+
+NosTale accepts empty frames and frame dimensions above 512 pixels. Width and
+height occupy the full unsigned 16-bit fields. A frame with either dimension
+equal to zero has no pixels, and the client does not read its pixel-data offset.
+The descriptor still carries its dimensions and source coordinates, and the
+frame retains its position in the frame list. A frame count of zero represents
+an empty sprite.
 
 A frame contains `width * height` row-major `A4R4G4B4` pixels. One little-endian
 word stores four 4-bit channels:

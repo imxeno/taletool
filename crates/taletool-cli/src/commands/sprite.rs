@@ -5,19 +5,21 @@ use std::path::Path;
 
 use anyhow::{Context, bail};
 use serde_json::json;
-use taletool_texture::sprite::free_size::{FreeSizeSprite, decode_free_size_sprite};
-use taletool_texture::sprite::{DecodedSprite, decode_sprite};
+use taletool_texture::sprite::free_size::{
+    FreeSizeSpriteInfo, decode_free_size_sprite, inspect_free_size_sprite,
+};
+use taletool_texture::sprite::{SpritePayload, parse_sprite};
 
 use crate::cli::{SpriteCommand, SpriteKindArg};
 use crate::sprite_file::{
-    pack_free_size_sprite_png, pack_sprite_dir, unpack_free_size_sprite_png, unpack_sprite_file,
-    unpack_sprite_png,
+    SpriteImageFormat, pack_free_size_sprite_image, pack_sprite_dir, unpack_free_size_sprite_file,
+    unpack_sprite_file, unpack_sprite_png,
 };
 use crate::util::fnv1a64;
 
-enum DecodedSpriteKind {
-    MapObject(DecodedSprite),
-    FreeSize(FreeSizeSprite),
+enum ParsedSpriteKind<'a> {
+    MapObject(SpritePayload<'a>),
+    FreeSize(FreeSizeSpriteInfo),
 }
 
 /// Dispatch a `sprite` subcommand.
@@ -30,23 +32,23 @@ pub(crate) fn run_sprite(command: SpriteCommand) -> anyhow::Result<()> {
             checksum,
         } => {
             let data = fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
-            let decoded = decode_sprite_kind(&data, kind)?;
+            let parsed = parse_sprite_kind(&data, kind)?;
             let checksum_value = checksum.then(|| format!("{:016x}", fnv1a64(&data)));
 
-            match decoded {
-                DecodedSpriteKind::MapObject(sprite) => {
+            match parsed {
+                ParsedSpriteKind::MapObject(sprite) => {
                     let frames = sprite
                         .frames
                         .iter()
                         .enumerate()
-                        .map(|(index, decoded)| {
+                        .map(|(index, frame)| {
                             json!({
                                 "index": index,
-                                "width": decoded.width(),
-                                "height": decoded.height(),
-                                "source_x": decoded.frame.source_x,
-                                "source_y": decoded.frame.source_y,
-                                "data_offset": decoded.data_offset,
+                                "width": frame.width(),
+                                "height": frame.height(),
+                                "source_x": frame.source_x,
+                                "source_y": frame.source_y,
+                                "data_offset": frame.data_offset,
                             })
                         })
                         .collect::<Vec<_>>();
@@ -86,7 +88,7 @@ pub(crate) fn run_sprite(command: SpriteCommand) -> anyhow::Result<()> {
                         }
                     }
                 }
-                DecodedSpriteKind::FreeSize(sprite) => {
+                ParsedSpriteKind::FreeSize(sprite) => {
                     if json {
                         println!(
                             "{}",
@@ -95,8 +97,8 @@ pub(crate) fn run_sprite(command: SpriteCommand) -> anyhow::Result<()> {
                                 "kind": "free-size",
                                 "pixel_format": "a8r8g8b8",
                                 "encoded_size": data.len(),
-                                "width": sprite.width(),
-                                "height": sprite.height(),
+                                "width": sprite.width,
+                                "height": sprite.height,
                                 "block_columns": sprite.block_columns(),
                                 "block_rows": sprite.block_rows(),
                                 "checksum_fnv1a64": checksum_value,
@@ -107,7 +109,7 @@ pub(crate) fn run_sprite(command: SpriteCommand) -> anyhow::Result<()> {
                         println!("kind: free-size");
                         println!("pixel_format: a8r8g8b8");
                         println!("encoded_size: {}", data.len());
-                        println!("size: {}x{}", sprite.width(), sprite.height());
+                        println!("size: {}x{}", sprite.width, sprite.height);
                         println!("blocks: {}x{}", sprite.block_columns(), sprite.block_rows());
                         if let Some(checksum_value) = checksum_value {
                             println!("checksum_fnv1a64: {checksum_value}");
@@ -121,24 +123,31 @@ pub(crate) fn run_sprite(command: SpriteCommand) -> anyhow::Result<()> {
             input,
             out,
             kind,
+            format,
             png_only,
         } => {
+            if png_only && format == SpriteImageFormat::Bmp {
+                bail!(
+                    "--png-only cannot be combined with --format bmp; use sprite directory output"
+                );
+            }
             let data = fs::read(&input).with_context(|| format!("reading {}", input.display()))?;
-            match decode_sprite_kind(&data, kind)? {
-                DecodedSpriteKind::MapObject(sprite) if png_only => {
+            match parse_sprite_kind(&data, kind)? {
+                ParsedSpriteKind::MapObject(sprite) if png_only => {
                     unpack_sprite_png(&sprite, &out)?;
                     println!("unpacked map-object sprite PNG into {}", out.display());
                 }
-                DecodedSpriteKind::MapObject(sprite) => {
-                    let count = unpack_sprite_file(&sprite, &out)?;
+                ParsedSpriteKind::MapObject(sprite) => {
+                    let count = unpack_sprite_file(&sprite, &out, format)?;
                     println!(
                         "unpacked {count} map-object sprite frames into {}",
                         out.display()
                     );
                 }
-                DecodedSpriteKind::FreeSize(sprite) => {
-                    unpack_free_size_sprite_png(&sprite, &out)?;
-                    println!("unpacked free-size sprite PNG into {}", out.display());
+                ParsedSpriteKind::FreeSize(_) => {
+                    let sprite = decode_free_size_sprite(&data)?;
+                    unpack_free_size_sprite_file(&sprite, &out, format)?;
+                    println!("unpacked free-size sprite {format} into {}", out.display());
                 }
             }
             Ok(())
@@ -153,7 +162,7 @@ pub(crate) fn run_sprite(command: SpriteCommand) -> anyhow::Result<()> {
                     );
                 }
                 SpriteKindArg::FreeSize => {
-                    let (width, height) = pack_free_size_sprite_png(&input, &out)?;
+                    let (width, height) = pack_free_size_sprite_image(&input, &out)?;
                     println!(
                         "packed {width}x{height} free-size sprite into {}",
                         out.display()
@@ -166,23 +175,23 @@ pub(crate) fn run_sprite(command: SpriteCommand) -> anyhow::Result<()> {
     }
 }
 
-fn decode_sprite_kind(data: &[u8], kind: SpriteKindArg) -> anyhow::Result<DecodedSpriteKind> {
+fn parse_sprite_kind(data: &[u8], kind: SpriteKindArg) -> anyhow::Result<ParsedSpriteKind<'_>> {
     match kind {
-        SpriteKindArg::MapObject => decode_sprite(data)
-            .map(DecodedSpriteKind::MapObject)
+        SpriteKindArg::MapObject => parse_sprite(data)
+            .map(ParsedSpriteKind::MapObject)
             .context("decoding map-object sprite"),
-        SpriteKindArg::FreeSize => decode_free_size_sprite(data)
-            .map(DecodedSpriteKind::FreeSize)
+        SpriteKindArg::FreeSize => inspect_free_size_sprite(data)
+            .map(ParsedSpriteKind::FreeSize)
             .context("decoding free-size sprite"),
         SpriteKindArg::Auto => {
-            let map_object = decode_sprite(data);
-            let free_size = decode_free_size_sprite(data);
+            let map_object = parse_sprite(data);
+            let free_size = inspect_free_size_sprite(data);
             match (map_object, free_size) {
                 (Ok(_), Ok(_)) => bail!(
                     "sprite payload matches both map-object and free-size formats; select --kind map-object or --kind free-size"
                 ),
-                (Ok(sprite), Err(_)) => Ok(DecodedSpriteKind::MapObject(sprite)),
-                (Err(_), Ok(sprite)) => Ok(DecodedSpriteKind::FreeSize(sprite)),
+                (Ok(sprite), Err(_)) => Ok(ParsedSpriteKind::MapObject(sprite)),
+                (Err(_), Ok(sprite)) => Ok(ParsedSpriteKind::FreeSize(sprite)),
                 (Err(map_object_error), Err(free_size_error)) => bail!(
                     "sprite payload matches neither supported format; map-object: {map_object_error}; free-size: {free_size_error}"
                 ),
@@ -194,11 +203,11 @@ fn decode_sprite_kind(data: &[u8], kind: SpriteKindArg) -> anyhow::Result<Decode
 fn resolve_pack_kind(input: &Path, kind: SpriteKindArg) -> anyhow::Result<SpriteKindArg> {
     let resolved = match kind {
         SpriteKindArg::Auto if input.is_dir() => SpriteKindArg::MapObject,
-        SpriteKindArg::Auto if input.is_file() && has_png_extension(input) => {
+        SpriteKindArg::Auto if input.is_file() && has_sprite_image_extension(input) => {
             SpriteKindArg::FreeSize
         }
         SpriteKindArg::Auto => bail!(
-            "cannot infer sprite kind from {}; provide a map-object sprite directory or free-size sprite PNG, or select --kind",
+            "cannot infer sprite kind from {}; provide a map-object sprite directory or free-size sprite PNG/BMP, or select --kind",
             input.display()
         ),
         concrete => concrete,
@@ -211,22 +220,24 @@ fn resolve_pack_kind(input: &Path, kind: SpriteKindArg) -> anyhow::Result<Sprite
         ),
         SpriteKindArg::FreeSize if !input.is_file() => {
             bail!(
-                "free-size sprite input must be a PNG file: {}",
+                "free-size sprite input must be a PNG or BMP file: {}",
                 input.display()
             )
         }
-        SpriteKindArg::FreeSize if !has_png_extension(input) => bail!(
-            "free-size sprite input must use a .png extension: {}",
+        SpriteKindArg::FreeSize if !has_sprite_image_extension(input) => bail!(
+            "free-size sprite input must use a .png or .bmp extension: {}",
             input.display()
         ),
         _ => Ok(resolved),
     }
 }
 
-fn has_png_extension(path: &Path) -> bool {
+fn has_sprite_image_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("png") || extension.eq_ignore_ascii_case("bmp")
+        })
 }
 
 #[cfg(test)]
@@ -253,19 +264,19 @@ mod tests {
         let map_object =
             write_sprite_bytes(&[SpriteFrame::new(0, 0, RgbaImage::new(1, 1))]).unwrap();
         assert!(matches!(
-            decode_sprite_kind(&map_object, SpriteKindArg::Auto).unwrap(),
-            DecodedSpriteKind::MapObject(_)
+            parse_sprite_kind(&map_object, SpriteKindArg::Auto).unwrap(),
+            ParsedSpriteKind::MapObject(_)
         ));
 
         let free_size = write_free_size_sprite_bytes(&RgbaImage::new(1024, 1)).unwrap();
         assert!(matches!(
-            decode_sprite_kind(&free_size, SpriteKindArg::Auto).unwrap(),
-            DecodedSpriteKind::FreeSize(_)
+            parse_sprite_kind(&free_size, SpriteKindArg::Auto).unwrap(),
+            ParsedSpriteKind::FreeSize(_)
         ));
 
-        assert!(decode_sprite_kind(&map_object, SpriteKindArg::FreeSize).is_err());
-        assert!(decode_sprite_kind(&free_size, SpriteKindArg::MapObject).is_err());
-        assert!(decode_sprite_kind(&[], SpriteKindArg::Auto).is_err());
+        assert!(parse_sprite_kind(&map_object, SpriteKindArg::FreeSize).is_err());
+        assert!(parse_sprite_kind(&free_size, SpriteKindArg::MapObject).is_err());
+        assert!(parse_sprite_kind(&[], SpriteKindArg::Auto).is_err());
     }
 
     #[test]
@@ -274,9 +285,9 @@ mod tests {
         image.put_pixel(1, 0, Rgba([0, 13, 0, 0]));
         let bytes = write_free_size_sprite_bytes(&image).unwrap();
 
-        assert!(decode_sprite(&bytes).is_ok());
+        assert!(parse_sprite(&bytes).is_ok());
         assert!(decode_free_size_sprite(&bytes).is_ok());
-        let error = decode_sprite_kind(&bytes, SpriteKindArg::Auto)
+        let error = parse_sprite_kind(&bytes, SpriteKindArg::Auto)
             .err()
             .unwrap()
             .to_string();
@@ -288,9 +299,11 @@ mod tests {
         let root = temp_path("sprite-pack-kind");
         let directory = root.join("map_object");
         let png = root.join("free_size.PNG");
+        let bmp = root.join("free_size.BMP");
         let other = root.join("free_size.bin");
         fs::create_dir_all(&directory).unwrap();
         fs::write(&png, b"placeholder").unwrap();
+        fs::write(&bmp, b"placeholder").unwrap();
         fs::write(&other, b"placeholder").unwrap();
 
         assert_eq!(
@@ -301,10 +314,70 @@ mod tests {
             resolve_pack_kind(&png, SpriteKindArg::Auto).unwrap(),
             SpriteKindArg::FreeSize
         );
+        assert_eq!(
+            resolve_pack_kind(&bmp, SpriteKindArg::Auto).unwrap(),
+            SpriteKindArg::FreeSize
+        );
         assert!(resolve_pack_kind(&png, SpriteKindArg::MapObject).is_err());
         assert!(resolve_pack_kind(&directory, SpriteKindArg::FreeSize).is_err());
         assert!(resolve_pack_kind(&other, SpriteKindArg::Auto).is_err());
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unpack_rejects_bmp_with_png_only_before_creating_output() {
+        let root = temp_path("sprite-format-conflict");
+        let error = run_sprite(SpriteCommand::Unpack {
+            input: root.join("input.bin"),
+            out: root.join("output"),
+            kind: SpriteKindArg::Auto,
+            format: SpriteImageFormat::Bmp,
+            png_only: true,
+        })
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("--png-only cannot be combined with --format bmp")
+        );
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn command_round_trips_bmp_directory_with_empty_and_oversized_frames() {
+        let root = temp_path("sprite-bmp-command");
+        fs::create_dir_all(&root).unwrap();
+        let input = root.join("input.bin");
+        let out = root.join("frames");
+        let rebuilt = root.join("rebuilt.bin");
+        let bytes = write_sprite_bytes(&[
+            SpriteFrame::new(-7, 12, RgbaImage::new(0, 17)),
+            SpriteFrame::new(
+                4,
+                -3,
+                RgbaImage::from_pixel(513, 2, Rgba([17, 34, 51, 136])),
+            ),
+        ])
+        .unwrap();
+        fs::write(&input, &bytes).unwrap();
+        run_sprite(SpriteCommand::Unpack {
+            input,
+            out: out.clone(),
+            kind: SpriteKindArg::Auto,
+            format: SpriteImageFormat::Bmp,
+            png_only: false,
+        })
+        .unwrap();
+        assert!(out.join("frame-001.bmp").is_file());
+        assert!(!out.join("frame-000.bmp").exists());
+        run_sprite(SpriteCommand::Pack {
+            input: out,
+            out: rebuilt.clone(),
+            kind: SpriteKindArg::Auto,
+        })
+        .unwrap();
+        assert_eq!(fs::read(rebuilt).unwrap(), bytes);
         fs::remove_dir_all(root).unwrap();
     }
 }

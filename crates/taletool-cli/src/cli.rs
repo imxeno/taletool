@@ -9,6 +9,8 @@ use std::str::FromStr;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
+use crate::sprite_file::SpriteImageFormat;
+
 /// Top-level CLI parser for the `taletool` binary.
 #[derive(Debug, Parser)]
 #[command(name = "taletool")]
@@ -515,18 +517,21 @@ pub(crate) enum SpriteCommand {
         #[arg(long)]
         checksum: bool,
     },
-    /// Decode a sprite payload into PNG frames and `sprite.json`.
+    /// Decode a sprite payload into PNG or BMP images, retaining frame metadata.
     Unpack {
         input: PathBuf,
         #[arg(long)]
         out: PathBuf,
         #[arg(long, value_enum, default_value_t = SpriteKindArg::Auto)]
         kind: SpriteKindArg,
+        /// Image encoding; BMP preserves alpha and writes top-down rows without compression.
+        #[arg(long, value_enum, default_value_t = SpriteImageFormat::Png)]
+        format: SpriteImageFormat,
         /// Write a single-frame sprite directly to the output PNG without metadata.
         #[arg(long)]
         png_only: bool,
     },
-    /// Encode a map-object sprite directory or free-size sprite PNG.
+    /// Encode a map-object sprite directory or free-size sprite PNG/BMP.
     Pack {
         input: PathBuf,
         #[arg(long)]
@@ -1323,6 +1328,55 @@ mod tests {
                 command: SpriteCommand::Unpack { png_only: true, .. }
             }
         ));
+
+        for (arguments, expected) in [
+            (
+                vec![
+                    "taletool",
+                    "sprite",
+                    "unpack",
+                    "sprite.bin",
+                    "--out",
+                    "frames",
+                ],
+                SpriteImageFormat::Png,
+            ),
+            (
+                vec![
+                    "taletool",
+                    "sprite",
+                    "unpack",
+                    "sprite.bin",
+                    "--out",
+                    "frames",
+                    "--format",
+                    "bmp",
+                ],
+                SpriteImageFormat::Bmp,
+            ),
+        ] {
+            let cli = Cli::try_parse_from(arguments).unwrap();
+            let Command::Sprite {
+                command: SpriteCommand::Unpack { format, .. },
+            } = cli.command
+            else {
+                panic!("expected sprite unpack");
+            };
+            assert_eq!(format, expected);
+        }
+        assert!(
+            Cli::try_parse_from([
+                "taletool",
+                "sprite",
+                "unpack",
+                "sprite.bin",
+                "--out",
+                "frames",
+                "--format",
+                "rgba"
+            ])
+            .is_err()
+        );
 
         let pack = Cli::try_parse_from([
             "taletool",
