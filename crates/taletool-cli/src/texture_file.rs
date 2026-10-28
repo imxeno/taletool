@@ -11,7 +11,7 @@ use taletool_texture::{DecodedTexture, TextureFormat, TextureHeader, write_textu
 
 pub(crate) const TEXTURE_MANIFEST_FILE: &str = "texture.json";
 const TEXTURE_DOCUMENT_FORMAT: &str = "texture";
-const TEXTURE_DOCUMENT_VERSION: u32 = 1;
+const TEXTURE_DOCUMENT_VERSION: u32 = 2;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -22,7 +22,26 @@ struct TextureDocument {
     filter_flag: u8,
     unknown_06: u8,
     mip_level_count: u8,
-    mip_levels: Vec<String>,
+    mip_levels: Vec<TextureMipLevelDocument>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+enum TextureMipLevelDocument {
+    Image {
+        image: String,
+        width: u32,
+        height: u32,
+    },
+    LegacyImage(String),
+}
+
+impl TextureMipLevelDocument {
+    fn image(&self) -> &str {
+        match self {
+            Self::Image { image, .. } | Self::LegacyImage(image) => image,
+        }
+    }
 }
 
 /// Write a decoded texture as ordered PNG levels plus `texture.json`.
@@ -35,7 +54,11 @@ pub(crate) fn unpack_texture_file(texture: &DecodedTexture, out: &Path) -> anyho
         image
             .save_with_format(&path, ImageFormat::Png)
             .with_context(|| format!("writing {}", path.display()))?;
-        mip_levels.push(name);
+        mip_levels.push(TextureMipLevelDocument::Image {
+            image: name,
+            width: image.width(),
+            height: image.height(),
+        });
     }
 
     let document = TextureDocument {
@@ -79,7 +102,8 @@ pub(crate) fn pack_texture_dir(dir: &Path, out: &Path) -> anyhow::Result<(Textur
 
     let mut seen_images = HashSet::new();
     let mut mip_levels = Vec::with_capacity(document.mip_levels.len());
-    for (level, image) in document.mip_levels.iter().enumerate() {
+    for (level, mip) in document.mip_levels.iter().enumerate() {
+        let image = mip.image();
         let normalized = image.to_lowercase();
         if !seen_images.insert(normalized) {
             bail!("texture mip level {level} repeats image path {image:?}");
@@ -130,12 +154,27 @@ fn validate_document_header(document: &TextureDocument) -> anyhow::Result<()> {
             TEXTURE_DOCUMENT_FORMAT
         );
     }
-    if document.version != TEXTURE_DOCUMENT_VERSION {
+    if !matches!(document.version, 1 | TEXTURE_DOCUMENT_VERSION) {
         bail!(
-            "texture document has unsupported version {}; expected {}",
+            "texture document has unsupported version {}; expected 1 or {}",
             document.version,
             TEXTURE_DOCUMENT_VERSION
         );
+    }
+    for (level, mip) in document.mip_levels.iter().enumerate() {
+        match (document.version, mip) {
+            (1, TextureMipLevelDocument::LegacyImage(_))
+            | (TEXTURE_DOCUMENT_VERSION, TextureMipLevelDocument::Image { .. }) => {}
+            _ => bail!(
+                "texture document version {} has an invalid mip level {level}; expected {}",
+                document.version,
+                if document.version == 1 {
+                    "an image filename"
+                } else {
+                    "an object with image, width, and height"
+                }
+            ),
+        }
     }
     Ok(())
 }
@@ -227,12 +266,72 @@ mod tests {
         assert_eq!(document["pixel_format"], "l8");
         assert_eq!(document["filter_flag"], 1);
         assert_eq!(document["unknown_06"], 9);
+        assert_eq!(
+            document["mip_levels"],
+            json!([
+                { "image": "mip-000.png", "width": 2, "height": 2 },
+                { "image": "mip-001.png", "width": 1, "height": 1 }
+            ])
+        );
 
         let (header, count) = pack_texture_dir(&unpacked, &output).unwrap();
         assert_eq!(header, texture.header);
         assert_eq!(count, 2);
         assert_eq!(fs::read(&output).unwrap(), source);
         assert_eq!(decode_texture(&source).unwrap(), texture);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn packs_legacy_filename_only_manifests() {
+        let root = temp_dir("texture-legacy-manifest");
+        let unpacked = root.join("unpacked");
+        let output = root.join("rebuilt.bin");
+        let texture = sample_texture();
+        let source = write_texture_bytes(&texture.header, &texture.mip_levels).unwrap();
+        unpack_texture_file(&texture, &unpacked).unwrap();
+
+        let manifest_path = unpacked.join(TEXTURE_MANIFEST_FILE);
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        document["version"] = json!(1);
+        document["mip_levels"] = json!(["mip-000.png", "mip-001.png"]);
+        fs::write(&manifest_path, serde_json::to_vec(&document).unwrap()).unwrap();
+
+        let (header, count) = pack_texture_dir(&unpacked, &output).unwrap();
+        assert_eq!(header, texture.header);
+        assert_eq!(count, 2);
+        assert_eq!(fs::read(output).unwrap(), source);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn png_dimensions_determine_rebuilt_dimensions() {
+        let root = temp_dir("texture-resized-images");
+        let unpacked = root.join("unpacked");
+        let output = root.join("rebuilt.bin");
+        let mut texture = sample_texture();
+        unpack_texture_file(&texture, &unpacked).unwrap();
+
+        texture.header.width = 4;
+        texture.header.height = 4;
+        texture.mip_levels = vec![RgbaImage::new(4, 4), RgbaImage::new(2, 2)];
+        for (level, image) in texture.mip_levels.iter().enumerate() {
+            image
+                .save_with_format(
+                    unpacked.join(format!("mip-{level:03}.png")),
+                    ImageFormat::Png,
+                )
+                .unwrap();
+        }
+
+        let (header, count) = pack_texture_dir(&unpacked, &output).unwrap();
+        assert_eq!(header, texture.header);
+        assert_eq!(count, 2);
+        assert_eq!(
+            fs::read(output).unwrap(),
+            write_texture_bytes(&texture.header, &texture.mip_levels).unwrap()
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -276,7 +375,7 @@ mod tests {
                 "filter_flag": 0,
                 "unknown_06": 0,
                 "mip_level_count": 1,
-                "mip_levels": ["mip.png"]
+                "mip_levels": [{ "image": "mip.png", "width": 1, "height": 1 }]
             })
         };
 
@@ -291,14 +390,37 @@ mod tests {
         assert!(pack_texture_dir(&root, &output).is_err());
 
         let mut value = valid_header();
-        value["mip_levels"] = json!(["../mip.png"]);
+        value["mip_levels"][0]["image"] = json!("../mip.png");
         write_document(value);
-        assert!(pack_texture_dir(&root, &output).is_err());
+        assert!(
+            pack_texture_dir(&root, &output)
+                .unwrap_err()
+                .to_string()
+                .contains("image path must be a filename")
+        );
 
         let mut value = valid_header();
         value["mip_level_count"] = json!(2);
         write_document(value);
         assert!(pack_texture_dir(&root, &output).is_err());
+
+        for mip in [
+            json!("mip.png"),
+            json!({ "image": "mip.png", "width": 1 }),
+            json!({ "image": "mip.png", "height": 1 }),
+            json!({ "image": "mip.png", "width": 1, "height": 1, "extra": true }),
+        ] {
+            let mut value = valid_header();
+            value["mip_levels"] = json!([mip]);
+            write_document(value);
+            assert!(
+                pack_texture_dir(&root, &output)
+                    .unwrap_err()
+                    .chain()
+                    .any(|error| error.to_string().contains("mip level")
+                        || error.to_string().contains("untagged enum"))
+            );
+        }
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -324,14 +446,31 @@ mod tests {
             .unwrap();
         };
 
-        write_document(json!(["same.png", "SAME.PNG"]), 2);
-        assert!(pack_texture_dir(&root, &output).is_err());
+        RgbaImage::new(2, 2)
+            .save_with_format(root.join("same.png"), ImageFormat::Png)
+            .unwrap();
+        write_document(
+            json!([
+                { "image": "same.png", "width": 2, "height": 2 },
+                { "image": "SAME.PNG", "width": 1, "height": 1 }
+            ]),
+            2,
+        );
+        assert!(
+            pack_texture_dir(&root, &output)
+                .unwrap_err()
+                .to_string()
+                .contains("repeats image path")
+        );
 
-        write_document(json!(["missing.png"]), 1);
+        write_document(
+            json!([{ "image": "missing.png", "width": 1, "height": 1 }]),
+            1,
+        );
         assert!(pack_texture_dir(&root, &output).is_err());
 
         fs::write(root.join("bad.png"), b"not a PNG").unwrap();
-        write_document(json!(["bad.png"]), 1);
+        write_document(json!([{ "image": "bad.png", "width": 1, "height": 1 }]), 1);
         assert!(pack_texture_dir(&root, &output).is_err());
 
         RgbaImage::new(2, 2)
@@ -340,8 +479,19 @@ mod tests {
         RgbaImage::new(2, 2)
             .save_with_format(root.join("mip.png"), ImageFormat::Png)
             .unwrap();
-        write_document(json!(["base.png", "mip.png"]), 2);
-        assert!(pack_texture_dir(&root, &output).is_err());
+        write_document(
+            json!([
+                { "image": "base.png", "width": 2, "height": 2 },
+                { "image": "mip.png", "width": 2, "height": 2 }
+            ]),
+            2,
+        );
+        assert!(
+            pack_texture_dir(&root, &output)
+                .unwrap_err()
+                .to_string()
+                .contains("mip level 1 dimensions must be 1x1, got 2x2")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

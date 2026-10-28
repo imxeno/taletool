@@ -561,9 +561,12 @@ taletool texture pack <DIR> --out <OUTPUT>
 ```
 
 Unpacking creates `texture.json` and ordered `mip-NNN.png` images. Edit the PNG
-files and manifest in place, then pass the directory back to `pack`. The
-manifest preserves the pixel format, filtering fields, and stored mip count; PNG
-dimensions determine the rebuilt dimensions and must form a valid mip chain.
+files and manifest in place, then pass the directory back to `pack`. The version
+2 manifest preserves the pixel format, filtering fields, and stored mip count.
+Each `mip_levels` entry contains the PNG filename in `image` and its exported
+`width` and `height`. PNG dimensions determine the rebuilt dimensions and must
+form a valid mip chain; the manifest dimensions are informational. `pack` also
+accepts version 1 manifests that list only PNG filenames.
 
 ```console
 taletool texture unpack work/nstp/100.bin --out work/texture-100
