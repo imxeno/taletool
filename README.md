@@ -351,6 +351,10 @@ taletool geometry unpack work/nstg/100.bin --out work/geometry-100.json
 taletool geometry pack work/geometry-100.json --out work/nstg/100.bin
 ```
 
+Map documents represent NaN floating-point values as `null`. `map pack` reads
+those nulls back as NaN. JSON round trips preserve NaN values but do not
+preserve their original bit patterns.
+
 Effect payloads use the same pattern, with an additional kind selector on
 `inspect` and `unpack`:
 
