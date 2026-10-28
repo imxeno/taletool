@@ -3,6 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use taletool_archive::{
     BinaryCompression, BinaryNosArchive, BinaryNosArchiveWriteEntry, BinaryNosArchiveWriteOptions,
@@ -13,15 +14,17 @@ struct Fixture(PathBuf);
 
 impl Fixture {
     fn new() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let root = std::env::temp_dir().join(format!(
-            "taletool-extract-cli-{}-{nanos}",
-            std::process::id()
+            "taletool-extract-cli-{}-{nanos}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed),
         ));
-        fs::create_dir_all(&root).unwrap();
+        fs::create_dir(&root).unwrap();
         Self(root)
     }
 
