@@ -13,7 +13,7 @@ use crate::{decode_a4r4g4b4, encode_a4r4g4b4};
 pub mod free_size;
 
 pub const SPRITE_FRAME_DESCRIPTOR_LEN: usize = 12;
-pub const SPRITE_MAX_DIMENSION: u32 = 512;
+pub const SPRITE_MAX_DIMENSION: u32 = u16::MAX as u32;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SpriteError {
@@ -23,13 +23,7 @@ pub enum SpriteError {
     TrailingZeroFrameData { trailing: usize },
     #[error("sprite descriptor table is truncated: need {needed} bytes, got {actual}")]
     TruncatedDescriptorTable { needed: usize, actual: usize },
-    #[error("sprite frame {frame} dimensions must be non-zero, got {width}x{height}")]
-    InvalidDimensions {
-        frame: usize,
-        width: u32,
-        height: u32,
-    },
-    #[error("sprite frame {frame} dimensions exceed the client limit of {limit}: {width}x{height}")]
+    #[error("sprite frame {frame} dimensions exceed the format limit of {limit}: {width}x{height}")]
     DimensionsTooLarge {
         frame: usize,
         width: u32,
@@ -63,6 +57,8 @@ pub enum SpriteError {
     TooManyFrames { count: usize },
     #[error("sprite payload is too large: {size} bytes")]
     PayloadTooLarge { size: usize },
+    #[error("could not allocate {size} bytes for sprite data")]
+    AllocationFailed { size: usize },
 }
 
 pub type SpriteResult<T> = std::result::Result<T, SpriteError>;
@@ -116,8 +112,73 @@ pub struct DecodedSprite {
     pub frames: Vec<DecodedSpriteFrame>,
 }
 
-/// Decode one compact sprite payload into editable RGBA frames.
-pub fn decode_sprite(data: &[u8]) -> SpriteResult<DecodedSprite> {
+/// A validated frame borrowing its encoded pixels from the sprite payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpriteFrameData<'a> {
+    width: u32,
+    height: u32,
+    pub source_x: i16,
+    pub source_y: i16,
+    pub data_offset: usize,
+    frame_index: usize,
+    pixels: &'a [u8],
+}
+
+impl SpriteFrameData<'_> {
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.pixels.is_empty()
+    }
+
+    /// Expand each stored pixel into straight RGBA, without allocating an image.
+    pub fn pixels(&self) -> impl ExactSizeIterator<Item = image::Rgba<u8>> + '_ {
+        self.pixels
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|encoded| decode_a4r4g4b4(u16::from_le_bytes(*encoded)))
+    }
+
+    pub fn decode(&self) -> SpriteResult<DecodedSpriteFrame> {
+        let size = self
+            .pixels
+            .len()
+            .checked_mul(2)
+            .ok_or(SpriteError::PixelSizeOverflow {
+                frame: self.frame_index,
+                width: self.width,
+                height: self.height,
+            })?;
+        let mut rgba = Vec::new();
+        rgba.try_reserve_exact(size)
+            .map_err(|_| SpriteError::AllocationFailed { size })?;
+        for pixel in self.pixels() {
+            rgba.extend_from_slice(&pixel.0);
+        }
+        let image = RgbaImage::from_raw(self.width, self.height, rgba)
+            .expect("decoded pixel buffer matches the validated dimensions");
+        Ok(DecodedSpriteFrame {
+            data_offset: self.data_offset,
+            frame: SpriteFrame::new(self.source_x, self.source_y, image),
+        })
+    }
+}
+
+/// Validated descriptors and borrowed pixels, without decoded frame allocations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpritePayload<'a> {
+    pub frames: Vec<SpriteFrameData<'a>>,
+}
+
+/// Parse all descriptors and validate populated pixel ranges before decoding.
+pub fn parse_sprite(data: &[u8]) -> SpriteResult<SpritePayload<'_>> {
     let Some(&frame_count) = data.first() else {
         return Err(SpriteError::TooShort { len: data.len() });
     };
@@ -136,7 +197,7 @@ pub fn decode_sprite(data: &[u8]) -> SpriteResult<DecodedSprite> {
     }
 
     let mut reader = ByteReader::new_at(data, 1);
-    let mut descriptors = Vec::with_capacity(frame_count);
+    let mut frames = Vec::with_capacity(frame_count);
     for frame in 0..frame_count {
         let width = reader
             .read_u16_le("sprite.frame.width")
@@ -154,49 +215,57 @@ pub fn decode_sprite(data: &[u8]) -> SpriteResult<DecodedSprite> {
             .read_u32_le("sprite.frame.data_offset")
             .expect("sprite descriptor table length was checked")
             as usize;
-        validate_dimensions(frame, u32::from(width), u32::from(height))?;
-        if data_offset < table_end {
-            return Err(SpriteError::DataOffsetInTable {
-                frame,
-                offset: data_offset,
-                table_end,
-            });
-        }
-        descriptors.push((width, height, source_x, source_y, data_offset));
-    }
-
-    let mut frames = Vec::with_capacity(frame_count);
-    for (frame_index, (width, height, source_x, source_y, data_offset)) in
-        descriptors.into_iter().enumerate()
-    {
-        let pixel_byte_count = pixel_byte_count(frame_index, width.into(), height.into())?;
-        let end =
-            data_offset
-                .checked_add(pixel_byte_count)
-                .ok_or(SpriteError::PixelSizeOverflow {
-                    frame: frame_index,
+        let pixel_byte_count = pixel_byte_count(frame, width.into(), height.into())?;
+        let pixels = if pixel_byte_count == 0 {
+            // NosTale does not read pixel data for an empty frame.
+            &[][..]
+        } else {
+            if data_offset < table_end {
+                return Err(SpriteError::DataOffsetInTable {
+                    frame,
+                    offset: data_offset,
+                    table_end,
+                });
+            }
+            let end = data_offset.checked_add(pixel_byte_count).ok_or(
+                SpriteError::PixelSizeOverflow {
+                    frame,
                     width: width.into(),
                     height: height.into(),
-                })?;
-        let Some(pixels) = data.get(data_offset..end) else {
-            return Err(SpriteError::TruncatedPixels {
-                frame: frame_index,
-                offset: data_offset,
-                needed: pixel_byte_count,
-                actual: data.len().saturating_sub(data_offset),
-            });
-        };
+                },
+            )?;
+            let Some(pixels) = data.get(data_offset..end) else {
+                return Err(SpriteError::TruncatedPixels {
+                    frame,
+                    offset: data_offset,
+                    needed: pixel_byte_count,
+                    actual: data.len().saturating_sub(data_offset),
+                });
+            };
 
-        let mut image = RgbaImage::new(width.into(), height.into());
-        for (pixel, encoded) in image.pixels_mut().zip(pixels.as_chunks::<2>().0) {
-            *pixel = decode_a4r4g4b4(u16::from_le_bytes([encoded[0], encoded[1]]));
-        }
-        frames.push(DecodedSpriteFrame {
+            pixels
+        };
+        frames.push(SpriteFrameData {
+            width: width.into(),
+            height: height.into(),
+            source_x,
+            source_y,
             data_offset,
-            frame: SpriteFrame::new(source_x, source_y, image),
+            frame_index: frame,
+            pixels,
         });
     }
 
+    Ok(SpritePayload { frames })
+}
+
+/// Decode one compact sprite payload into editable RGBA frames.
+pub fn decode_sprite(data: &[u8]) -> SpriteResult<DecodedSprite> {
+    let frames = parse_sprite(data)?
+        .frames
+        .iter()
+        .map(SpriteFrameData::decode)
+        .collect::<SpriteResult<_>>()?;
     Ok(DecodedSprite { frames })
 }
 
@@ -221,7 +290,10 @@ pub fn write_sprite_bytes(frames: &[SpriteFrame]) -> SpriteResult<Vec<u8>> {
         return Err(SpriteError::PayloadTooLarge { size: payload_size });
     }
 
-    let mut output = Vec::with_capacity(payload_size);
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(payload_size)
+        .map_err(|_| SpriteError::AllocationFailed { size: payload_size })?;
     output.push(frames.len() as u8);
     let mut data_offset = table_end;
     for (frame_index, frame) in frames.iter().enumerate() {
@@ -256,13 +328,6 @@ pub fn write_sprite_bytes(frames: &[SpriteFrame]) -> SpriteResult<Vec<u8>> {
 }
 
 fn validate_dimensions(frame: usize, width: u32, height: u32) -> SpriteResult<()> {
-    if width == 0 || height == 0 {
-        return Err(SpriteError::InvalidDimensions {
-            frame,
-            width,
-            height,
-        });
-    }
     if width > SPRITE_MAX_DIMENSION || height > SPRITE_MAX_DIMENSION {
         return Err(SpriteError::DimensionsTooLarge {
             frame,
@@ -363,15 +428,9 @@ mod tests {
             })
         );
 
-        let mut zero_width = vec![1, 0, 0, 1, 0, 0, 0, 0, 0, 13, 0, 0, 0];
+        let data_in_table = [1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0];
         assert!(matches!(
-            decode_sprite(&zero_width),
-            Err(SpriteError::InvalidDimensions { frame: 0, .. })
-        ));
-        zero_width[1] = 1;
-        zero_width[9] = 1;
-        assert!(matches!(
-            decode_sprite(&zero_width),
+            decode_sprite(&data_in_table),
             Err(SpriteError::DataOffsetInTable { frame: 0, .. })
         ));
 
@@ -383,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_client_incompatible_dimensions_and_frame_counts() {
+    fn rejects_dimensions_and_counts_that_do_not_fit_the_format() {
         let too_wide = SpriteFrame::new(0, 0, RgbaImage::new(SPRITE_MAX_DIMENSION + 1, 1));
         assert!(matches!(
             write_sprite_bytes(&[too_wide]),
@@ -395,5 +454,61 @@ mod tests {
             write_sprite_bytes(&frames),
             Err(SpriteError::TooManyFrames { count: 256 })
         );
+    }
+
+    #[test]
+    fn round_trips_empty_and_oversized_frames_in_order() {
+        let frames = [
+            (0, 0),
+            (0, 65535),
+            (65535, 0),
+            (513, 2),
+            (2, 513),
+            (65535, 1),
+            (1, 65535),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (width, height))| {
+            SpriteFrame::new(
+                index as i16,
+                -(index as i16),
+                RgbaImage::from_pixel(width, height, Rgba([17, 34, 51, 136])),
+            )
+        })
+        .collect::<Vec<_>>();
+        let bytes = write_sprite_bytes(&frames).unwrap();
+        let decoded = decode_sprite(&bytes).unwrap();
+        let actual = decoded
+            .frames
+            .into_iter()
+            .map(|frame| frame.frame)
+            .collect::<Vec<_>>();
+        assert_eq!(actual, frames);
+        assert_eq!(write_sprite_bytes(&actual).unwrap(), bytes);
+    }
+
+    #[test]
+    fn empty_frames_ignore_offsets_but_populated_frames_require_pixels() {
+        for (width, height) in [(0_u16, 0_u16), (0, 65535), (65535, 0)] {
+            for offset in [0_u32, 1, 13, 14, u32::MAX] {
+                let mut bytes = vec![1];
+                bytes.extend_from_slice(&width.to_le_bytes());
+                bytes.extend_from_slice(&height.to_le_bytes());
+                bytes.extend_from_slice(&(-7_i16).to_le_bytes());
+                bytes.extend_from_slice(&12_i16.to_le_bytes());
+                bytes.extend_from_slice(&offset.to_le_bytes());
+                let decoded = decode_sprite(&bytes).unwrap();
+                assert_eq!(decoded.frames[0].data_offset, offset as usize);
+                assert_eq!(
+                    decoded.frames[0].frame.image.dimensions(),
+                    (width.into(), height.into())
+                );
+                assert!(decoded.frames[0].frame.image.as_raw().is_empty());
+                bytes[1..3].copy_from_slice(&65535_u16.to_le_bytes());
+                bytes[3..5].copy_from_slice(&65535_u16.to_le_bytes());
+                assert!(parse_sprite(&bytes).is_err());
+            }
+        }
     }
 }

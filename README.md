@@ -415,7 +415,8 @@ before it, because NosTale's key search can then return keys out of order.
 
 ```text
 taletool sprite inspect <INPUT> [--kind <KIND>] [--json] [--checksum]
-taletool sprite unpack <INPUT> --out <OUTPUT> [--kind <KIND>] [--png-only]
+taletool sprite unpack <INPUT> --out <OUTPUT> [--kind <KIND>]
+  [--format png|bmp] [--png-only]
 taletool sprite pack <INPUT> --out <OUTPUT> [--kind <KIND>]
 ```
 
@@ -425,20 +426,72 @@ taletool sprite pack <INPUT> --out <OUTPUT> [--kind <KIND>]
   `NSppData`, and `NSipData`. Unpacking normally creates a directory containing
   `sprite.json` and `frame-NNN.png` files. Packing takes that directory.
   `--png-only` writes directly to one `.png` file and therefore requires a
-  single-frame payload.
+  single populated frame. Empty frames and dimensions above 512 pixels are
+  accepted. Empty frames retain their dimensions and source coordinates in the
+  manifest and have no image file.
 - Free-size sprites are single block-interlaced `A8R8G8B8` images used by
-  `NS4BbData`. Unpacking writes directly to the `.png` path supplied by `--out`,
-  and packing takes a PNG file.
+  `NS4BbData`. Unpacking writes directly to the `.png` or `.bmp` path supplied
+  by `--out`, and packing takes a PNG or BMP file.
+
+`--format` defaults to `png`. Select `--format bmp` to avoid PNG compression.
+Map-object output then contains `frame-NNN.bmp` images and `sprite.json`. BMP
+output uses a 108-byte V4 header, 32-bit BGRA pixels, `BI_BITFIELDS`, and
+explicit red, green, blue, and alpha masks (`0x00FF0000`, `0x0000FF00`,
+`0x000000FF`, `0xFF000000`). The signed height is negative, so rows run from top
+to bottom. Alpha is straight; RGB values are preserved even when alpha is zero.
+Each `A4R4G4B4` channel expands by multiplying by 17. BMP size calculations are
+checked against its 32-bit file-size fields. `--png-only` cannot be combined
+with `--format bmp`.
+
+Populated PNG frame sets continue to use version 1 manifests. BMP exports and
+frame sets containing empty frames use version 2. Both versions are accepted by
+`sprite pack`. Version 2 records `width` and `height` for every frame and
+`encoding` (`png` or `bmp`) for each populated frame. Empty frames have
+`"image": null` and no encoding. For example:
+
+```json
+{
+  "format": "sprite",
+  "version": 2,
+  "pixel_format": "a4r4g4b4",
+  "frames": [
+    {
+      "image": null,
+      "source_x": -7,
+      "source_y": 12,
+      "width": 0,
+      "height": 17
+    },
+    {
+      "image": "frame-001.bmp",
+      "source_x": 4,
+      "source_y": -3,
+      "encoding": "bmp",
+      "width": 513,
+      "height": 2
+    }
+  ]
+}
+```
+
+Packing takes populated frame dimensions from the image, allowing resizing;
+empty frame dimensions come from the manifest. Image references must be unique
+filenames within the sprite directory and match their declared encoding.
 
 For packing, `auto` selects map-object for a directory and free-size for a PNG
-file. For inspection and unpacking, `auto` tries both decoders and requires
-exactly one to match.
+or BMP file. For inspection and unpacking, `auto` validates both payload layouts
+and requires exactly one to match, without decoding image buffers. Unpacking
+buffers the encoded input; map-object BMP export expands only one row at a time,
+while PNG export decodes one frame at a time.
 
 ```console
 taletool sprite unpack work/nsip/17.bin --out work/sprite-17
+taletool sprite unpack work/nsmp/42.bin --out work/sprite-42 --format bmp
 taletool sprite pack work/sprite-17 --out work/nsip/17.bin
 taletool sprite unpack work/ns4bb/5.bin --kind free-size --out work/5.png
 taletool sprite pack work/5.png --kind free-size --out work/ns4bb/5.bin
+taletool sprite unpack work/ns4bb/5.bin --out work/5.bmp --format bmp
+taletool sprite pack work/5.bmp --out work/ns4bb/5.bin
 ```
 
 ### Text Payloads

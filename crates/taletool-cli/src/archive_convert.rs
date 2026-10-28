@@ -13,8 +13,8 @@ use taletool_geometry::decode_geometry;
 use taletool_map::{decode_height_grid, decode_map, decode_map_cell_grid};
 use taletool_map_neighborhood::decode_map_neighborhood;
 use taletool_texture::decode_texture;
-use taletool_texture::sprite::decode_sprite;
 use taletool_texture::sprite::free_size::decode_free_size_sprite;
+use taletool_texture::sprite::parse_sprite;
 
 use crate::animation_file::unpack_sprite_animation_file;
 use crate::binary_preset::BinaryAssetKind;
@@ -24,7 +24,7 @@ use crate::geometry_file::unpack_geometry_file;
 use crate::height_grid_file::unpack_height_grid_file;
 use crate::map_file::unpack_map_file;
 use crate::map_neighborhood_file::unpack_map_neighborhood_file;
-use crate::sprite_file::{unpack_free_size_sprite_png, unpack_sprite_file};
+use crate::sprite_file::{SpriteImageFormat, unpack_free_size_sprite_file, unpack_sprite_file};
 use crate::sprite_remap_file::unpack_sprite_resource_remap_file;
 use crate::texture_file::unpack_texture_file;
 use crate::util::decreasing_key_time_warnings;
@@ -205,9 +205,10 @@ pub(crate) fn convert_binary_payload(
             converted(relative_path, "map")
         }
         BinaryAssetKind::MapObjectSprite => {
-            let sprite = decode_sprite(data).context("decoding map-object sprite payload")?;
+            let sprite = parse_sprite(data).context("decoding map-object sprite payload")?;
             let relative_path = PathBuf::from(stem);
-            let count = unpack_sprite_file(&sprite, &out.join(&relative_path))?;
+            let count =
+                unpack_sprite_file(&sprite, &out.join(&relative_path), SpriteImageFormat::Png)?;
             converted(relative_path, format!("map-object sprite, {count} frames"))
         }
         BinaryAssetKind::SpriteAnimation => {
@@ -247,7 +248,11 @@ pub(crate) fn convert_binary_payload(
             let sprite =
                 decode_free_size_sprite(data).context("decoding free-size sprite payload")?;
             let relative_path = PathBuf::from(format!("{stem}.png"));
-            unpack_free_size_sprite_png(&sprite, &out.join(&relative_path))?;
+            unpack_free_size_sprite_file(
+                &sprite,
+                &out.join(&relative_path),
+                SpriteImageFormat::Png,
+            )?;
             converted(
                 relative_path,
                 format!("free-size sprite, {}x{}", sprite.width(), sprite.height()),
@@ -369,6 +374,29 @@ mod tests {
             ]
         );
         assert!(out.join("12.json").is_file());
+        fs::remove_dir_all(out).unwrap();
+    }
+
+    #[test]
+    fn map_object_conversion_preserves_empty_and_oversized_frames() {
+        use image::RgbaImage;
+        use taletool_texture::sprite::{SpriteFrame, write_sprite_bytes};
+
+        let out = temp_dir("conversion-empty-large-sprite");
+        let bytes = write_sprite_bytes(&[
+            SpriteFrame::new(-7, 12, RgbaImage::new(0, 17)),
+            SpriteFrame::new(4, -3, RgbaImage::new(513, 2)),
+        ])
+        .unwrap();
+        convert_binary_payload(&bytes, BinaryAssetKind::MapObjectSprite, &out, "42.bin").unwrap();
+        assert!(!out.join("42/frame-000.png").exists());
+        assert_eq!(
+            image::open(out.join("42/frame-001.png")).unwrap().width(),
+            513
+        );
+        let rebuilt = out.join("rebuilt.bin");
+        crate::sprite_file::pack_sprite_dir(&out.join("42"), &rebuilt).unwrap();
+        assert_eq!(fs::read(rebuilt).unwrap(), bytes);
         fs::remove_dir_all(out).unwrap();
     }
 }

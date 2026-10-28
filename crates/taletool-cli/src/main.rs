@@ -18,6 +18,7 @@ mod map_neighborhood_file;
 mod paths;
 mod sound_info;
 mod sound_pack;
+mod sprite_bmp;
 mod sprite_file;
 mod sprite_remap_file;
 mod structured_text_file;

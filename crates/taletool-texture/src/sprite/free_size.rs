@@ -57,8 +57,25 @@ impl FreeSizeSprite {
     }
 }
 
-/// Decode a block-interlaced free-size sprite into a normal row-major RGBA image.
-pub fn decode_free_size_sprite(data: &[u8]) -> FreeSizeSpriteResult<FreeSizeSprite> {
+/// Validated free-size sprite metadata, without allocating decoded pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FreeSizeSpriteInfo {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl FreeSizeSpriteInfo {
+    pub fn block_columns(&self) -> u32 {
+        block_count(self.width)
+    }
+
+    pub fn block_rows(&self) -> u32 {
+        block_count(self.height)
+    }
+}
+
+/// Validate the header and pixel length without decoding or allocating an image.
+pub fn inspect_free_size_sprite(data: &[u8]) -> FreeSizeSpriteResult<FreeSizeSpriteInfo> {
     if data.len() < FREE_SIZE_SPRITE_HEADER_LEN {
         return Err(FreeSizeSpriteError::TooShort { len: data.len() });
     }
@@ -81,6 +98,14 @@ pub fn decode_free_size_sprite(data: &[u8]) -> FreeSizeSpriteResult<FreeSizeSpri
             trailing: data.len() - expected_len,
         });
     }
+
+    Ok(FreeSizeSpriteInfo { width, height })
+}
+
+/// Decode a block-interlaced free-size sprite into a normal row-major RGBA image.
+pub fn decode_free_size_sprite(data: &[u8]) -> FreeSizeSpriteResult<FreeSizeSprite> {
+    let FreeSizeSpriteInfo { width, height } = inspect_free_size_sprite(data)?;
+    let pixel_bytes = pixel_byte_count(width, height)?;
 
     let mut rgba = Vec::new();
     rgba.try_reserve_exact(pixel_bytes)
@@ -112,7 +137,7 @@ pub fn decode_free_size_sprite(data: &[u8]) -> FreeSizeSpriteResult<FreeSizeSpri
             }
         }
     }
-    debug_assert_eq!(source_offset, expected_len);
+    debug_assert_eq!(source_offset, data.len());
 
     let image = RgbaImage::from_raw(width, height, rgba)
         .expect("decoded pixel buffer length matches the validated dimensions");
