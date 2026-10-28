@@ -78,7 +78,7 @@ mod tests {
 
     use serde_json::json;
     use taletool_map::{
-        BoundingSphere, Bounds3, CameraAngleLimits, MAP_HEADER_UNKNOWN_00_LEN,
+        BoundingSphere, Bounds3, CameraAngleLimits, GeometryNode, MAP_HEADER_UNKNOWN_00_LEN,
         MAP_HEADER_UNKNOWN_79_LEN, MapHeader, MapNode, MapNodeKind, Rgba8, decode_map,
     };
 
@@ -175,6 +175,98 @@ mod tests {
             decode_map(&fs::read(&payload_path).unwrap()).unwrap(),
             expected
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn json_round_trips_nan_values_as_null() {
+        let root = temp_dir("map-json-nan");
+        let json_path = root.join("map.json");
+        let payload_path = root.join("map.bin");
+        let mut expected = map();
+        expected.header.bounds.minimum[0] = f32::NAN;
+        expected.header.bounds.maximum[2] = f32::NAN;
+        expected.header.ground_bounds.minimum[1] = f32::NAN;
+        expected.header.ground_bounds.maximum[1] = f32::NAN;
+        expected.header.ground_bounding_sphere.center[2] = f32::NAN;
+        expected.header.ground_bounding_sphere.radius = f32::NAN;
+        expected.geometry_keys.push(42);
+        let geometry = GeometryNode {
+            geometry_index: 0,
+            color: expected.header.ambient_light,
+            bounds: expected.header.bounds.clone(),
+            bounding_sphere: expected.header.ground_bounding_sphere.clone(),
+            position: [7.0, f32::NAN, 9.0],
+            rotation: [0, 0, 0, i16::MAX],
+        };
+        expected.root_nodes[0].kind = MapNodeKind::Group {
+            bounding_sphere: expected.header.ground_bounding_sphere.clone(),
+        };
+        expected.root_nodes[0].children = vec![
+            MapNodeKind::StaticGeometry {
+                geometry: geometry.clone(),
+            },
+            MapNodeKind::AnimatedGeometry {
+                geometry: geometry.clone(),
+                uniform_scale: f32::NAN,
+                frame_offset: 12,
+            },
+            MapNodeKind::EffectGeometry {
+                geometry,
+                uniform_scale: f32::NAN,
+                frame_offset: 34,
+                color_animation_id: -1,
+                transform_animation_id: -1,
+                texture_animation_id: -1,
+                unknown_66: 0,
+                billboard: false,
+                source_blend: 1,
+                destination_blend: 0,
+            },
+        ]
+        .into_iter()
+        .map(|kind| MapNode {
+            kind,
+            children: Vec::new(),
+        })
+        .collect();
+
+        let bytes = write_map_bytes(&expected).unwrap();
+        let decoded = decode_map(&bytes).unwrap();
+        unpack_map_file(&decoded, &json_path).unwrap();
+        let document: serde_json::Value =
+            serde_json::from_slice(&fs::read(&json_path).unwrap()).unwrap();
+        let header = &document["map"]["header"];
+        assert_eq!(header["bounds"]["minimum"], json!([null, -1.0, -1.0]));
+        assert_eq!(header["bounds"]["maximum"], json!([1.0, 1.0, null]));
+        assert_eq!(
+            header["ground_bounds"]["minimum"],
+            json!([-2.0, null, -2.0])
+        );
+        assert_eq!(header["ground_bounds"]["maximum"], json!([2.0, null, 2.0]));
+        assert_eq!(
+            header["ground_bounding_sphere"],
+            json!({ "center": [0.0, 0.0, null], "radius": null })
+        );
+        let group = &document["map"]["root_nodes"][0];
+        assert_eq!(
+            group["kind"]["bounding_sphere"],
+            header["ground_bounding_sphere"]
+        );
+        for child in group["children"].as_array().unwrap() {
+            let geometry = &child["kind"]["geometry"];
+            assert_eq!(geometry["bounds"], header["bounds"]);
+            assert_eq!(
+                geometry["bounding_sphere"],
+                header["ground_bounding_sphere"]
+            );
+            assert_eq!(geometry["position"], json!([7.0, null, 9.0]));
+        }
+        assert_eq!(group["children"][1]["kind"]["uniform_scale"], json!(null));
+        assert_eq!(group["children"][2]["kind"]["uniform_scale"], json!(null));
+
+        pack_map_file(&json_path, &payload_path).unwrap();
+        assert_eq!(fs::read(&payload_path).unwrap(), bytes);
         fs::remove_dir_all(root).unwrap();
     }
 

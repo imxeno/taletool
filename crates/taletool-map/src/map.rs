@@ -2,10 +2,12 @@
 //!
 //! A payload combines scene-wide environment and camera metadata, a table of
 //! geometry resource keys, and a recursive scene-node forest.
+//! JSON represents NaN floating-point values as `null`, which deserializes back
+//! to NaN without preserving the original NaN bit pattern.
 
 use std::collections::BTreeSet;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use taletool_core::{ByteReadError, ByteReader};
 use thiserror::Error;
 
@@ -68,7 +70,9 @@ pub type MapResult<T> = std::result::Result<T, MapError>;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Bounds3 {
+    #[serde(deserialize_with = "deserialize_vec3")]
     pub minimum: [f32; 3],
+    #[serde(deserialize_with = "deserialize_vec3")]
     pub maximum: [f32; 3],
 }
 
@@ -76,7 +80,9 @@ pub struct Bounds3 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BoundingSphere {
+    #[serde(deserialize_with = "deserialize_vec3")]
     pub center: [f32; 3],
+    #[serde(deserialize_with = "deserialize_float")]
     pub radius: f32,
 }
 
@@ -146,6 +152,7 @@ pub struct GeometryNode {
     pub color: Rgba8,
     pub bounds: Bounds3,
     pub bounding_sphere: BoundingSphere,
+    #[serde(deserialize_with = "deserialize_vec3")]
     pub position: [f32; 3],
     /// Packed quaternion components in X, Y, Z, W order.
     pub rotation: [i16; 4],
@@ -163,6 +170,7 @@ pub enum MapNodeKind {
     AnimatedGeometry {
         geometry: GeometryNode,
         /// Uniform scale applied to the geometry transform basis vectors.
+        #[serde(deserialize_with = "deserialize_float")]
         uniform_scale: f32,
         frame_offset: u16,
     },
@@ -170,6 +178,7 @@ pub enum MapNodeKind {
     EffectGeometry {
         geometry: GeometryNode,
         /// Uniform scale applied to the geometry transform basis vectors.
+        #[serde(deserialize_with = "deserialize_float")]
         uniform_scale: f32,
         frame_offset: u16,
         color_animation_id: i16,
@@ -612,6 +621,14 @@ fn write_angle_limits(output: &mut Vec<u8>, limits: CameraAngleLimits) {
     output.extend_from_slice(&limits.maximum_offset_units.to_le_bytes());
 }
 
+fn deserialize_float<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
+    Ok(Option::<f32>::deserialize(deserializer)?.unwrap_or(f32::NAN))
+}
+
+fn deserialize_vec3<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[f32; 3], D::Error> {
+    Ok(<[Option<f32>; 3]>::deserialize(deserializer)?.map(|value| value.unwrap_or(f32::NAN)))
+}
+
 fn validate_map(map: &Map) -> MapResult<()> {
     check_byte_region(
         "header.unknown_00",
@@ -731,7 +748,7 @@ fn validate_vec3(field: &'static str, value: [f32; 3]) -> MapResult<()> {
 }
 
 fn validate_float(field: &'static str, value: f32) -> MapResult<()> {
-    if !value.is_finite() {
+    if value.is_infinite() {
         return Err(MapError::NonFiniteFloat { field });
     }
     Ok(())
@@ -885,6 +902,26 @@ mod tests {
     }
 
     #[test]
+    fn preserves_nan_bits_in_native_payloads() {
+        let mut bytes = write_map_bytes(&fixture()).unwrap();
+        let float_offsets = (0x1f..0x5f)
+            .step_by(4) // Header bounds and ground sphere.
+            .chain((150..166).step_by(4)) // Group sphere.
+            .chain((175..227).step_by(4)) // Static geometry bounds, sphere, and position.
+            .chain((244..296).step_by(4)) // Animated geometry bounds, sphere, and position.
+            .chain([304]) // Animated geometry scale.
+            .chain((319..371).step_by(4)) // Effect geometry bounds, sphere, and position.
+            .chain([379]); // Effect geometry scale.
+        for offset in float_offsets {
+            bytes[offset..offset + 4].copy_from_slice(&0xffc0_1234_u32.to_le_bytes());
+        }
+
+        let decoded = decode_map(&bytes).unwrap();
+        assert!(decoded.header.bounds.minimum[0].is_nan());
+        assert_eq!(write_map_bytes(&decoded).unwrap(), bytes);
+    }
+
+    #[test]
     fn writes_bgra_colors_and_native_effect_order() {
         let map = fixture();
         let bytes = write_map_bytes(&map).unwrap();
@@ -1034,7 +1071,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_reversed_bounds_negative_radii_and_non_finite_values() {
+    fn rejects_reversed_bounds_negative_radii_and_infinite_values() {
         let mut map = fixture();
         map.header.bounds.minimum[0] = 10.0;
         assert!(matches!(
@@ -1052,17 +1089,26 @@ mod tests {
             Err(MapError::NegativeSphereRadius { .. })
         ));
 
-        let mut map = fixture();
-        let MapNodeKind::AnimatedGeometry { uniform_scale, .. } =
-            &mut map.root_nodes[0].children[1].kind
-        else {
-            panic!("fixture node kind changed");
-        };
-        *uniform_scale = f32::NAN;
-        assert!(matches!(
-            write_map_bytes(&map),
-            Err(MapError::NonFiniteFloat { .. })
-        ));
+        for infinite_value in [f32::INFINITY, f32::NEG_INFINITY] {
+            let mut bytes = write_map_bytes(&fixture()).unwrap();
+            bytes[0x1f..0x23].copy_from_slice(&infinite_value.to_le_bytes());
+            assert!(matches!(
+                decode_map(&bytes),
+                Err(MapError::NonFiniteFloat { .. })
+            ));
+
+            let mut map = fixture();
+            let MapNodeKind::AnimatedGeometry { uniform_scale, .. } =
+                &mut map.root_nodes[0].children[1].kind
+            else {
+                panic!("fixture node kind changed");
+            };
+            *uniform_scale = infinite_value;
+            assert!(matches!(
+                write_map_bytes(&map),
+                Err(MapError::NonFiniteFloat { .. })
+            ));
+        }
     }
 
     #[test]
