@@ -39,7 +39,7 @@ pub(crate) enum Command {
         #[arg(long)]
         no_recursive: bool,
     },
-    /// Inspect, unpack, or pack full archive containers.
+    /// Inspect, extract, unpack, or pack full archive containers.
     Archive {
         #[command(subcommand)]
         command: ArchiveCommand,
@@ -433,6 +433,25 @@ pub(crate) enum ArchiveCommand {
         #[arg(long)]
         checksum: bool,
     },
+    /// Extract selected IDs from binary .NOS archives using NosTale lookup.
+    Extract {
+        #[arg(required = true)]
+        input: Vec<String>,
+        /// IDs as signed decimal, unsigned decimal, or hexadecimal (0x...).
+        #[arg(long, num_args = 1.., allow_negative_numbers = true,
+            required_unless_present = "ids", conflicts_with = "ids",
+            value_parser = parse_archive_id)]
+        id: Vec<i32>,
+        /// Read whitespace-separated IDs from a UTF-8 file; # starts a comment.
+        #[arg(long)]
+        ids: Option<PathBuf>,
+        /// New output directory, published after all requested payloads succeed.
+        #[arg(long)]
+        out: PathBuf,
+        /// Convert selected payloads using the same family decoders as unpack.
+        #[arg(long)]
+        convert: bool,
+    },
     /// Extract archive records or payloads to a directory.
     Unpack {
         #[arg(required = true)]
@@ -475,6 +494,23 @@ pub(crate) enum ArchiveCommand {
         #[arg(long)]
         chunk_format: Option<String>,
     },
+}
+
+/// Parse an archive ID while preserving all unsigned 32-bit bit patterns.
+pub(crate) fn parse_archive_id(input: &str) -> Result<i32, String> {
+    if let Some(hex) = input
+        .strip_prefix("0x")
+        .or_else(|| input.strip_prefix("0X"))
+    {
+        u32::from_str_radix(hex, 16).map(|id| id as i32)
+    } else {
+        input
+            .parse::<i32>()
+            .or_else(|_| input.parse::<u32>().map(|id| id as i32))
+    }
+    .map_err(|_| {
+        format!("invalid archive ID {input:?}; expected a 32-bit decimal or 0x hexadecimal integer")
+    })
 }
 
 /// Operations for CCINF GBFC index files.
@@ -870,6 +906,93 @@ mod tests {
         ])
         .unwrap_err();
         assert!(error.to_string().contains("invalid value 'ccinf'"));
+    }
+
+    #[test]
+    fn parses_archive_extract_id_lists_and_files() {
+        let parsed = Cli::try_parse_from([
+            "taletool",
+            "archive",
+            "extract",
+            "NStgData00.NOS",
+            "NStgData01.NOS",
+            "--id",
+            "42",
+            "-1",
+            "--id",
+            "0x80000000",
+            "4294967295",
+            "--out",
+            "out",
+            "--convert",
+        ])
+        .unwrap();
+        let Command::Archive {
+            command:
+                ArchiveCommand::Extract {
+                    input,
+                    id,
+                    ids,
+                    convert,
+                    ..
+                },
+        } = parsed.command
+        else {
+            panic!("expected archive extract");
+        };
+        assert_eq!(input, ["NStgData00.NOS", "NStgData01.NOS"]);
+        assert_eq!(id, [42, -1, i32::MIN, -1]);
+        assert!(ids.is_none());
+        assert!(convert);
+
+        let parsed = Cli::try_parse_from([
+            "taletool",
+            "archive",
+            "extract",
+            "NStgData.NOS",
+            "--ids",
+            "ids.txt",
+            "--out",
+            "out",
+        ])
+        .unwrap();
+        assert!(matches!(
+            parsed.command,
+            Command::Archive {
+                command: ArchiveCommand::Extract {
+                    ids: Some(_),
+                    convert: false,
+                    ..
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn archive_extract_requires_exactly_one_id_source_and_an_output() {
+        for args in [
+            vec!["NStgData.NOS", "--out", "out"],
+            vec!["NStgData.NOS", "--id", "42"],
+            vec![
+                "NStgData.NOS",
+                "--id",
+                "42",
+                "--ids",
+                "ids.txt",
+                "--out",
+                "out",
+            ],
+            vec!["NStgData.NOS", "--id", "--out", "out"],
+            vec!["NStgData.NOS", "--id", "4294967296", "--out", "out"],
+            vec!["NStgData.NOS", "--id", "-2147483649", "--out", "out"],
+            vec!["NStgData.NOS", "--id", "invalid", "--out", "out"],
+            vec!["--id", "42", "--out", "out"],
+        ] {
+            assert!(
+                Cli::try_parse_from(["taletool", "archive", "extract"].into_iter().chain(args))
+                    .is_err()
+            );
+        }
     }
 
     #[test]

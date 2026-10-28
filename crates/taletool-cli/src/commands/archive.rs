@@ -19,6 +19,7 @@ use crate::archive_convert::{
     ConvertedPayload, convert_binary_payload, write_output_transactionally,
 };
 use crate::archive_detect::{DetectedArchive, detect_archive_paths, has_ccinf_header};
+use crate::archive_extract::{extract_binary_archives, requested_ids};
 use crate::binary_payloads::{
     BinaryPayloadInput, binary_payload_output_name, explicit_indexes_for_binary_ids,
     order_binary_payload_entries, parse_binary_payload_filename, parse_id_filename,
@@ -63,6 +64,23 @@ pub(crate) fn run_archive(command: ArchiveCommand) -> anyhow::Result<()> {
                 DetectedArchive::Text(archive) => inspect_text_archive(&archive, json, checksum),
                 DetectedArchive::Sound(archive) => inspect_sound_pack(&archive, json, checksum),
             }
+        }
+        ArchiveCommand::Extract {
+            input,
+            id,
+            ids,
+            out,
+            convert,
+        } => {
+            let ids = requested_ids(&id, ids.as_deref())?;
+            let paths = resolve_inputs(&input)?;
+            reject_ccinf_inputs(&paths, "extract")?;
+            let DetectedArchive::Binary(archives) =
+                detect_archive_paths(&paths, ArchiveType::Binary)?
+            else {
+                unreachable!("explicit binary detection only returns binary archives");
+            };
+            extract_binary_archives(&archives, &ids, &out, convert)
         }
         ArchiveCommand::Unpack {
             input,
@@ -131,7 +149,7 @@ fn reject_ccinf_inputs(paths: &[PathBuf], operation: &str) -> anyhow::Result<()>
     if let Some(path) = paths.iter().find(|path| has_ccinf_header(path)) {
         let suggestion = match operation {
             "inspect" => format!("taletool ccinf inspect \"{}\"", path.display()),
-            "unpack" => format!(
+            "unpack" | "extract" => format!(
                 "taletool ccinf unpack \"{}\" --out <output.json>",
                 path.display()
             ),

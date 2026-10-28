@@ -126,34 +126,34 @@ Use `taletool --help`, `taletool <COMMAND> --help`, or
   debug diagnostics. `RUST_LOG` overrides this verbosity-derived log filter.
 - Options marked as global, such as `-v`, can appear before or after a
   subcommand.
-- `archive inspect`, `archive unpack`, `patch inspect`, and `patch apply` accept
-  multiple paths. They also expand quoted `*` and `?` filename patterns
-  case-insensitively within one directory. You should quote wildcard inputs,
-  especially in shells that perform their own wildcard expansion:
-  `"NStpData*.NOS"`.
+- `archive inspect`, `archive extract`, `archive unpack`, `patch inspect`, and
+  `patch apply` accept multiple paths. They also expand quoted `*` and `?`
+  filename patterns case-insensitively within one directory. You should quote
+  wildcard inputs, especially in shells that perform their own wildcard
+  expansion: `"NStpData*.NOS"`.
 - `--json` writes machine-readable inspection output to stdout. `--checksum`
   adds a 64-bit FNV-1a checksum where the command supports it.
 
 ### Command Overview
 
-| Command            | Purpose                                                       |
-| ------------------ | ------------------------------------------------------------- |
-| `scan`             | Classify supported files in a client data directory.          |
-| `archive`          | Inspect, unpack, and pack binary, text, and sound containers. |
-| `animation`        | Work with `NSmcData` and `NSpcData` animation payloads.       |
-| `map`              | Work with `NStuData` map payloads.                            |
-| `ccinf`            | Work with `NSmnData` and `NSpnData` GBFC index files.         |
-| `effect`           | Work with definitions and animation payloads for effects.     |
-| `geometry`         | Work with `NStgData` and `NStgeData` geometry payloads.       |
-| `height-grid`      | Work with `NSgrdData` optimized height grids.                 |
-| `map-neighborhood` | Work with `NStkData` map-neighborhood payloads.               |
-| `sprite`           | Convert map-object or free-size sprites to and from PNG.      |
-| `sprite-remap`     | Work with `NSpmData` frame/resource remap payloads.           |
-| `patch`            | Inspect or apply original `.PKG` patch packages.              |
-| `text`             | Decode or encode individual DAT, LST, and raw text payloads.  |
-| `audio`            | Convert `sndinfo.lst` audio metadata to and from JSON.        |
-| `texture`          | Convert texture payloads and mip levels to and from PNG.      |
-| `cell-flag`        | Export an extracted `NStcData` grid as PNG.                   |
+| Command            | Purpose                                                      |
+| ------------------ | ------------------------------------------------------------ |
+| `scan`             | Classify supported files in a client data directory.         |
+| `archive`          | Inspect, extract, unpack, and pack archive containers.       |
+| `animation`        | Work with `NSmcData` and `NSpcData` animation payloads.      |
+| `map`              | Work with `NStuData` map payloads.                           |
+| `ccinf`            | Work with `NSmnData` and `NSpnData` GBFC index files.        |
+| `effect`           | Work with definitions and animation payloads for effects.    |
+| `geometry`         | Work with `NStgData` and `NStgeData` geometry payloads.      |
+| `height-grid`      | Work with `NSgrdData` optimized height grids.                |
+| `map-neighborhood` | Work with `NStkData` map-neighborhood payloads.              |
+| `sprite`           | Convert map-object or free-size sprites to and from PNG.     |
+| `sprite-remap`     | Work with `NSpmData` frame/resource remap payloads.          |
+| `patch`            | Inspect or apply original `.PKG` patch packages.             |
+| `text`             | Decode or encode individual DAT, LST, and raw text payloads. |
+| `audio`            | Convert `sndinfo.lst` audio metadata to and from JSON.       |
+| `texture`          | Convert texture payloads and mip levels to and from PNG.     |
+| `cell-flag`        | Export an extracted `NStcData` grid as PNG.                  |
 
 ### Scanning a Data Directory
 
@@ -183,6 +183,7 @@ and `snd.pck`.
 
 ```text
 taletool archive inspect <INPUT>... [--type <TYPE>] [--json] [--checksum]
+taletool archive extract <INPUT>... (--id <ID>... | --ids <FILE>) --out <DIR> [--convert]
 taletool archive unpack <INPUT>... --out <DIR> [--type <TYPE>] [--convert] [--encoding <ENCODING>] [--plain-text]
 taletool archive pack <DIR> --out <OUT> [OPTIONS]
 ```
@@ -233,6 +234,42 @@ the encoded DAT/LST payloads for a lossless archive-level unpack/pack workflow.
 Add `--convert` to export supported binary archives as JSON, PNGs, or manifests,
 and supported text archives as structured JSON. Use `--plain-text` to unwrap
 text DAT/LST records instead. Sound packs keep their unpacked layout.
+
+#### Extracting Specific IDs
+
+`archive extract` selects numeric IDs from binary `.NOS` archives using
+NosTale's direct-index and unsigned binary-search rules. Supply one archive or
+chunks from one family. Among supplied paths, an unsuffixed archive takes
+precedence; otherwise each ID selects its family's numbered chunk. Missing
+chunks and IDs are reported as missing without searching other chunks. Only the
+supplied paths are considered.
+
+```console
+taletool archive extract "NStgData*.NOS" --id 42 99 --id 100 --out work/selected
+taletool archive extract "NStpData*.NOS" --ids ids.txt --out work/textures --convert
+```
+
+Use either repeated `--id` options or `--ids <FILE>`. The UTF-8 file accepts
+whitespace-separated IDs, blank lines, and `#` comments. IDs accept signed
+32-bit decimal, unsigned decimal, and `0x` hexadecimal values; they are
+normalized to signed decimal in filenames and reports. Repeated IDs are
+extracted once, in first-requested order. Invalid or empty ID lists fail before
+writing output.
+
+Found payloads are decompressed and written as `<id>.bin`. With `--convert`,
+selected payloads use the same family-specific JSON, PNG, or manifest-directory
+output as `archive unpack --convert`, named for the requested ID. The output
+directory must not already exist and is published only after all selected
+payloads are read and converted successfully. Conversion requires a recognized
+binary family and is export-only. Text archives and sound packs are handled by
+`archive unpack`.
+
+Each requested ID gets a `found` or `missing` line. Found lines include the
+decoded payload's byte size and SHA-256, stored row ID and size, source archive,
+and output path. The size and SHA-256 always describe the payload before
+conversion, including when conversion creates multiple files. Missing lines use
+`size=- sha256=-`; the final line gives found and missing counts. Missing IDs do
+not cause a failing exit status.
 
 #### Packing
 

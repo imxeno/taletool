@@ -100,7 +100,7 @@ fn open_binary_archive_set(paths: &[PathBuf]) -> anyhow::Result<Vec<BinaryNosArc
     let mut stems = BTreeSet::new();
     for path in &paths {
         if let Some(stem) = binary_family_stem(path) {
-            stems.insert(stem);
+            stems.insert(stem.to_ascii_lowercase());
         }
     }
     if stems.len() > 1 {
