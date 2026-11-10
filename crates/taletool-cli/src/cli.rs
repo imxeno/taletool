@@ -28,6 +28,11 @@ pub(crate) struct Cli {
 /// Top-level command groups.
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    /// Explicit content-addressed extraction and parsing interfaces.
+    Pipeline {
+        #[command(subcommand)]
+        command: crate::pipeline::PipelineCommand,
+    },
     /// Scan a NosTale data directory and classify supported data files.
     Scan {
         #[arg(long)]

@@ -15,7 +15,9 @@ mod geometry_file;
 mod height_grid_file;
 mod map_file;
 mod map_neighborhood_file;
+mod output;
 mod paths;
+mod pipeline;
 mod sound_info;
 mod sound_pack;
 mod sprite_bmp;
@@ -45,6 +47,7 @@ async fn main() -> anyhow::Result<()> {
     init_tracing(cli.verbose)?;
 
     match cli.command {
+        Command::Pipeline { command } => pipeline::run(command),
         Command::Scan {
             data_dir,
             json,

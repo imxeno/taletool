@@ -8,9 +8,10 @@ use anyhow::Context;
 use sha2::{Digest, Sha256};
 use taletool_archive::{BinaryNosArchive, BinaryNosArchiveEntry, BinaryNosChunkRouting};
 
-use crate::archive_convert::{convert_binary_payload, write_output_transactionally};
+use crate::archive_convert::convert_binary_payload;
 use crate::binary_preset::resolve_binary_nos_preset_for_archives;
 use crate::cli::parse_archive_id;
+use crate::output::write_output_transactionally;
 use crate::paths::binary_family_stem;
 
 /// Read and deduplicate requested IDs, retaining their first-requested order.

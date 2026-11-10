@@ -94,7 +94,8 @@ independent container or asset layer
 `*` groups the observed names for a family. Exact single, split, locale, and
 locale+chunk filename patterns are listed in the format docs.
 
-See [the docs](docs/README.md) for file format notes.
+See [the docs](docs/README.md) for file format notes and
+[pipeline commands](docs/pipeline.md) for cacheable extraction and parsing.
 
 ## Usage
 

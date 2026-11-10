@@ -15,9 +15,7 @@ use taletool_archive::{
     DelDxPack, TextNosArchive, write_text_nos_archive_bytes,
 };
 
-use crate::archive_convert::{
-    ConvertedPayload, convert_binary_payload, write_output_transactionally,
-};
+use crate::archive_convert::{ConvertedPayload, convert_binary_payload};
 use crate::archive_detect::{DetectedArchive, detect_archive_paths, has_ccinf_header};
 use crate::archive_extract::{extract_binary_archives, requested_ids};
 use crate::binary_payloads::{
@@ -30,6 +28,7 @@ use crate::binary_preset::{
     resolve_binary_preset, resolve_zlib_profile,
 };
 use crate::cli::{ArchiveCommand, ArchiveType, ChunkingArg, CompressionArg};
+use crate::output::write_output_transactionally;
 use crate::paths::{immediate_files, resolve_inputs};
 use crate::sound_pack::{
     pack_sound_pack_dir as build_sound_pack_dir, sound_pack_manifest_exists, unpack_sound_pack,

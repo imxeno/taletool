@@ -2,6 +2,9 @@
 
 These pages document NosTale file formats that taletool knows about.
 
+See [pipeline commands](pipeline.md) for the extraction and parsing interface
+used by content-addressed build pipelines.
+
 ## Archive Formats
 
 | Page                                                     | Covers                                                                    |
